@@ -15,7 +15,7 @@ pyro_connectivity_data::pyro_connectivity_data(const json &data) {
 		tetras[tetra_sl].push_back(t["member_spin_idx"]);
 	}
 	for (const auto &h : data["rings"]) {
-		hexagons.push_back(h);
+		hexagons.push_back(h["member_spin_idx"]);
 	}
 }
 

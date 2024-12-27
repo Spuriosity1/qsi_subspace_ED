@@ -21,10 +21,12 @@ else()
     set(CMAKE_CXX_FLAGS "-Wall -Wpedantic -g -O0")
 endif()
     
+include_directories(include)
 
 # the tests
 add_executable(benchmark_uints test/benchmark_uints.cpp)
 
+# main function
 add_executable(main 
     src/gen_spinon_basis_2.cpp
     src/tetra_graph_io.cpp
