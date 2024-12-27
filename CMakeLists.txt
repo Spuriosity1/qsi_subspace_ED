@@ -1,0 +1,32 @@
+cmake_minimum_required(VERSION 3.19)
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+set(CMAKE_CXX_STANDARD 17)
+
+project(
+    subspace_ED
+)
+
+# find_package(xdiag REQUIRED)
+find_package(nlohmann_json 3.11.3 REQUIRED)
+
+
+set(CMAKE\_BUILD\_TYPE Debug)
+if(NOT ${CMAKE\_BUILD\_TYPE} STREQUAL "Debug" OR NOT ${CMAKE\_BUILD\_TYPE} STREQUAL "Release")
+set(CMAKE\_BUILD\_TYPE Debug CACHE STRING "Choose the type of build." FORCE)
+endif()
+
+if(CMAKE_BUILD_TYPE STREQUAL "Release")
+    set(CMAKE_CXX_FLAGS "-DNDEBUG")
+else()
+    set(CMAKE_CXX_FLAGS "-Wall -Wpedantic -g -O0")
+endif()
+    
+
+# the tests
+add_executable(benchmark_uints test/benchmark_uints.cpp)
+
+add_executable(main 
+    src/gen_spinon_basis_2.cpp
+    src/tetra_graph_io.cpp
+)
+target_link_libraries(main PRIVATE nlohmann_json::nlohmann_json)
