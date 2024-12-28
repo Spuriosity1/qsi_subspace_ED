@@ -6,8 +6,6 @@ project(
     subspace_ED
 )
 
-# find_package(xdiag REQUIRED)
-find_package(nlohmann_json 3.11.3 REQUIRED)
 
 
 set(CMAKE\_BUILD\_TYPE Debug)
@@ -21,7 +19,10 @@ else()
     set(CMAKE_CXX_FLAGS "-Wall -Wpedantic -g -O0")
 endif()
     
-include_directories(include)
+include_directories(
+    include
+    vendor/include
+)
 
 # the tests
 # add_executable(benchmark_uints test/benchmark_uints.cpp)
@@ -32,4 +33,3 @@ add_executable(gen_spinon_basis
     src/tetra_graph_io.cpp
     src/pyro_tree.cpp
 )
-target_link_libraries(gen_spinon_basis PRIVATE nlohmann_json::nlohmann_json)
