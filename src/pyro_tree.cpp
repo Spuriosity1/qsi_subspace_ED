@@ -103,13 +103,14 @@ void pyro_tree::build_state_tree(){
 	root->spin_idx=0;
 	root->state_thus_far.uint128=0;
 
-	/*
+#ifndef NDEBUG
+
 	// for aesthetics only
 	this->tree_size.resize(this->spins.size());
 	std::fill(tree_size.begin(), tree_size.end(), 0);
 	this->tree_size[0] = 1;
-	*/
-
+#endif 
+	
 	// start the recursion
 	_build_state_tree(root);
 }
@@ -142,12 +143,12 @@ void pyro_tree::_build_state_tree(node_t* node){
 			if (i == 1){
 				or_bit(n->state_thus_far, node->spin_idx);
 			}
-/*
+#ifndef NDEBUG
 			// for aesthetics only
 			++tree_size[n->spin_idx];
 			counter = (counter+1)%print_frequency;
 			if (counter == 0){ print_tree_state(tree_size);	}
-*/			
+#endif			
 			// recurse
 			_build_state_tree(n);
 		}

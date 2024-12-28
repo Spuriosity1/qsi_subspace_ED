@@ -46,10 +46,10 @@ struct pyro_tree : public lattice {
 	// Repository of ice states for perusal
 	std::vector<Uint128> states_2I2O;
 	node_t* root=nullptr;
-/*
+#ifndef NDEBUG
 	// auxiliary variables to track evaluation
 	std::vector<unsigned> tree_size;
 	const unsigned print_frequency=500; // frequency of printing updates
 	unsigned counter=print_frequency-1;
-	*/
+#endif
 };
