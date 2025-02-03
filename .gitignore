@@ -1,0 +1,7 @@
+build
+__pycache__
+.ipynb_checkpoints
+.cache
+*.db
+lattice_files
+vendor/*

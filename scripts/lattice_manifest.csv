@@ -1,0 +1,11 @@
+filename, repetitions, num_primitive
+../lattice_files/pyro_1_2_10x12,4,16b-4,4,-8b-4,0,-4b1.json 1, 20
+../lattice_files/pyro_1_4_4x-4,-4,8b0,4,-4b4,4,0b1.json 1, 16
+../lattice_files/pyro_1_2_10x-4,-4,8b12,8,-4b-4,-4,0b1.json 1, 20
+../lattice_files/pyro_1_1_20x-8,4,4b-4,-20,-16b0,4,4b1.json 1, 20
+../lattice_files/pyro_1_1_14x12,-4,0b-36,0,-20b16,0,8b1.json 1, 14
+../lattice_files/pyro_1_1_15x4,8,-4b-20,4,24b4,0,-4b1.json 1, 15
+../lattice_files/pyro_1_1_24x16,12,12b68,12,56b-24,-4,-20b1.json 1, 24
+../lattice_files/pyro_1_1_20x4,16,4b16,20,4b4,4,0b1.json 1, 20
+../lattice_files/pyro_1_1_16x4,12,8b-12,4,-8b4,0,4b1.json 1, 16
+../lattice_files/pyro_1_1_15x-8,-4,-20b12,20,32b-4,-8,-12b1.json 1, 15
