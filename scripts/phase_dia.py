@@ -71,6 +71,7 @@ ap.add_argument("--max_x", type=float, default=2)
 ap.add_argument("--x_step", type=float, default=0.01)
 ap.add_argument("--kappa", type=float, default=0.2,
                 help="Dimensionless spacing parameter for tanh spacing")
+ap.add_argument("--basis_file", type=str, default=None)
 ap.add_argument("--spacing", choices=["linear", "log", "tanh"], default="linear")
 a = ap.parse_args()
 
@@ -81,7 +82,11 @@ latvecs = np.array(lat.lattice_vectors)
 
 rfh = RingflipHamiltonian(lat)
 print("Setting up basis...")
-rfh.calc_basis()
+if a.basis_file is None:
+    bfile = rfh.basisfile_loc
+else:
+    bfile = a.basis_file
+rfh.load_basis(bfile)
 
 
 def cartesian_product(*arrays):
