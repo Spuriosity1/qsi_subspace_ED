@@ -102,6 +102,7 @@ protected:
 	std::vector<unsigned> counters = {0};
 };
 
+/*
 // older implementation
 struct base_pyro_tree : public lat_container {
 	base_pyro_tree(const nlohmann::json& data) :
@@ -173,6 +174,6 @@ protected:
 	const unsigned n_threads;
 
 };
-
+*/
 
 

@@ -26,5 +26,5 @@ sqlite3.register_adapter(np.ndarray, adapt_array)
 sqlite3.register_converter("array", convert_array)
 
 
-def connect_npsql(db_path):
-    return sqlite3.connect(db_path, detect_types=sqlite3.PARSE_DECLTYPES)
+def connect_npsql(db_path, **kwargs):
+    return sqlite3.connect(db_path, detect_types=sqlite3.PARSE_DECLTYPES, **kwargs)
