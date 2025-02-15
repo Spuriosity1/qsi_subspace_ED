@@ -8,11 +8,12 @@ from db import connect_npsql
 import sys
 import os
 
-latfile = sys.argv[1]
 assert len(sys.argv) > 1, "usage: partition_basis BASIS_FILE_NAME"
-file_name = os.path.basename(sys.argv[1])
 
-lat = pyrochlore.import_json(sys.argv[1])
+latfile = sys.argv[1]
+file_name = os.path.basename(latfile)
+
+lat = pyrochlore.import_json(latfile)
 
 
 latvecs = np.array(lat.lattice_vectors)

@@ -92,8 +92,6 @@ x_list = SPACINGS[a.spacing]
 print(x_list)
 
 
-
-
 def simulate_111(sector, con):
     print("111 field:")
     for x in x_list:
@@ -109,6 +107,7 @@ def simulate_111(sector, con):
                            VALUES (?,?,?,?,?,?,?,?,?);""", (x, sign, latvecs, str(sector), ring_e, *ring_O.values()))
             cursor.close()
             con.commit()
+
 
 def simulate_110(sector, con):
     print("110 field:")
@@ -128,7 +127,6 @@ def simulate_110(sector, con):
 
 
 def process_sector(sector):
-
     print("SECTOR: " + str(sector))
     con = connect_npsql(a.db_path, timeout=60)
     con.execute("PRAGMA journal_mode=WAL")
@@ -138,8 +136,6 @@ def process_sector(sector):
     con.close()
 
     return f"completed sector {sector}"
-
-
 
 
 if __name__ == '__main__':
