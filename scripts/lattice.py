@@ -30,8 +30,7 @@ class Atom:
                 hasattr(x, 'is_rational') and x.is_rational)
             ):
                 # exclude floats because of weird rounding
-                raise ValueError(f"Positions must be rational, got '{
-                    type(x)}'")
+                raise ValueError(f"Positions must be rational, got '{type(x)}'")
         self.xyz = Matrix([Rational(x) for x in xyz])
 
         self.sl_name = sl_name
@@ -165,8 +164,7 @@ class PrimitiveCell:
         for a in self.sublattices:
             D = self.distance(xyz, a.xyz)
             if D < self.lattice_tolerance*10:
-                print(f"WARN: adding an atom very close ({
-                    D}) to existing atom {a}")
+                print(f"WARN: adding an atom very close ({D}) to existing atom {a}")
 
         self.sublattices.append(Sublattice(sl_label, xyz))
 

@@ -66,8 +66,7 @@ def search_sorted(basis_set, state):
     '''
     J = bisect_left(basis_set, state)
     if basis_set[J] != state:
-        raise LookupError(f"search_sorted is broken-> got {
-            state:b}, best I could do was {basis_set[J]:b}")
+        raise LookupError(f"search_sorted is broken-> got {state:b}, best I could do was {basis_set[J]:b}")
     return J
 
 

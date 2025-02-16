@@ -1,28 +1,3 @@
-#!/usr/bin/python3
-
-#SBATCH --output=wherever_you_want_to_store_the_output.log
-#SBATCH --partition=whatever_the_name_of_your_SLURM_partition_is
-
-#SBATCH -J par_phasedia
-#! Which project should be charged:
-#SBATCH -A CASTELNOVO-SL2-CPU
-#SBATCH -p icelake
-#! How many whole nodes should be allocated?
-#SBATCH --nodes=1
-#! How many (MPI) tasks will there be in total? (<= nodes*76)
-#! The Ice Lake (icelake) nodes have 76 CPUs (cores) each and
-#! 3380 MiB of memory per CPU.
-#SBATCH --ntasks=76
-#! How much wallclock time will be required?
-#SBATCH --time=12:00:00
-#! What types of email messages do you wish to receive?
-#SBATCH --mail-type=END,TIME_LIMIT_80
-#SBATCH --output=track/phasedia.%A_%a.out
-#SBATCH --error=track/phasedia.%A_%a.error
-
-
-
-
 import os
 # stop numpy from getting any funny ideas
 os.environ['OPENBLAS_NUM_THREADS'] = '1'
@@ -37,13 +12,16 @@ from db import connect_npsql
 
 from multiprocessing import Pool
 
+num_cpus=int(os.environ["SLURM_CPUS_ON_NODE"])
+print(f"phasedia thinks it has {num_cpus} cpus")
+
 ap = argparse.ArgumentParser()
 ap.add_argument("lattice_file", type=str)
 ap.add_argument("--db_path", type=str, default="results.db")
-ap.add_argument("--min_x", type=float, default=-2)
-ap.add_argument("--max_x", type=float, default=2)
-ap.add_argument("--x_step", type=float, default=0.01)
-ap.add_argument("--n_procs", type=int, default=76)
+ap.add_argument("--min_x", "-x", type=float, default=-2)
+ap.add_argument("--max_x", "-X", type=float, default=2)
+ap.add_argument("--x_step", "-d", type=float, default=0.01)
+ap.add_argument("--n_procs", type=int, default=num_cpus)
 ap.add_argument("--kappa", type=float, default=0.2,
                 help="Dimensionless spacing parameter for tanh spacing")
 ap.add_argument("--basis_file", type=str, default=None)
