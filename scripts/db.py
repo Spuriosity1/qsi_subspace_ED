@@ -28,3 +28,19 @@ sqlite3.register_converter("array", convert_array)
 
 def connect_npsql(db_path, **kwargs):
     return sqlite3.connect(db_path, detect_types=sqlite3.PARSE_DECLTYPES, **kwargs)
+
+
+def get_sector_list(con, lat):
+    retval = {}
+    res = con.execute("""
+        SELECT sector, count(sector)
+        FROM field_111
+        WHERE latvecs = ?
+        GROUP BY sector
+        """, (lat,))
+    for sector, count in res:
+        retval[sector] = count
+    res.close()
+        
+    return retval
+

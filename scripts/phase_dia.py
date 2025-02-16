@@ -17,13 +17,22 @@ ap.add_argument("--x_step", type=float, default=0.01)
 ap.add_argument("--kappa", type=float, default=0.2,
                 help="Dimensionless spacing parameter for tanh spacing")
 ap.add_argument("--basis_file", type=str, default=None)
+ap.add_argument("--rotation", type=str, choices='I X Y Z '.split(), default='I',
+                help="Rotates lattice relative to magnetic field")
 ap.add_argument("--spacing", choices=["linear", "log", "tanh"], default="linear")
 a = ap.parse_args()
 
 lat = pyrochlore.import_json(a.lattice_file)
 
 
-latvecs = np.array(lat.lattice_vectors)
+rotation_matrices = {
+    'I': np.array([[+1, 0, 0], [0, +1, 0], [0, 0, +1]]),
+    'X': np.array([[+1, 0, 0], [0, -1, 0], [0, 0, -1]]),
+    'Y': np.array([[-1, 0, 0], [0, +1, 0], [0, 0, -1]]),
+    'Z': np.array([[-1, 0, 0], [0, -1, 0], [0, 0, +1]])
+        }
+
+latvecs = rotation_matrices[a.rotation] @ np.array(lat.lattice_vectors)
 
 rfh = RingflipHamiltonian(lat)
 print("Setting up basis...")
@@ -64,13 +73,13 @@ for sector in rfh.sectors:
     for x in tqdm(x_list):
         for sign in [-1, 1]:
             r111 = calc_ring_exp_vals(rfh, g=sign*np.array([x, 1, 1, 1]),
-                                      sector=sector)
+                                      sector=sector, krylov_dim=20)
 
             cursor = con.cursor()
             cursor.execute("""INSERT INTO field_111 (g0_g123, g123_sign, latvecs, sector,
                                                      edata,
                                                      expO0, expO1, expO2, expO3)
-                           VALUES (?,?,?,?,?,?,?,?,?);""", (x, sign, latvecs, str(sector), r111[1], *r111[0].values()))
+                           VALUES (?,?,?,?,?,?,?,?,?);""", (x, sign, latvecs, str(sector), r111[0], *r111[1].values()))
             cursor.close()
             con.commit()
 
@@ -84,7 +93,7 @@ for sector in rfh.sectors:
             cursor.execute("""INSERT INTO field_110 (g01_g23, g23_sign, latvecs, sector,
                                                      edata,
                                                      expO0, expO1, expO2, expO3)
-                           VALUES (?,?,?,?,?,?,?,?,?);""", (x, sign, latvecs, str(sector), r110[1], *r110[0].values()))
+                           VALUES (?,?,?,?,?,?,?,?,?);""", (x, sign, latvecs, str(sector), r110[0], *r110[1].values()))
 
             cursor.close()
             con.commit()
