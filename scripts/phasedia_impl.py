@@ -10,26 +10,36 @@ def calc_spectrum(g, full_lat: RingflipHamiltonian):
     for s in full_lat.sectors:
         H = build_matrix(full_lat, g=g, sector=s)
 
-        if H.shape[0] < 10000:
+        if H.shape[0] < 1000:
             e, v = np.linalg.eigh(H.todense())
             results[s] = (e, v)
         else:
-            e, v = sLA.eigs(H, k=100, which='SR')
+            e, v = sLA.eigs(H, k=np.min(100,H.shape[0]), which='SR')
             results[s] = (e, v)
     return results
 
 
+def eigs_retry(hh, krylov_dim):
+    while True:
+        try:
+            return sLA.eigs(hh, k=krylov_dim, which='SR')
+        except sLA.ArpackNoConvergence as e:
+            print("Convergence failed, restarting with enlarged Kyrlov space")
+            krylov_dim *= 2
+
+
+
 def calc_ring_exp_vals(rfh: RingflipHamiltonian, g, sector, algo='sparse',
-                       krylov_dim=80):
+                       krylov_dim=200):
     # calculates the rimg expectation values o nthe four sublats, including
     # degeneracies
     H = build_matrix(rfh, sector=sector, g=g)
 
-    if H.shape[0] - 1 < krylov_dim:
+    if H.shape[0] - 2 < krylov_dim*2:
         algo = 'dense'
 
     alg_opts = {
-        'sparse': lambda hh: sLA.eigs(hh, k=krylov_dim, which='SR'),
+            'sparse': lambda hh: eigs_retry(hh, krylov_dim),
         'dense': lambda hh: LA.eigh(hh.todense())
     }
 
