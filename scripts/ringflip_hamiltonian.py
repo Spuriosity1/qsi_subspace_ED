@@ -128,12 +128,12 @@ class RingflipHamiltonian:
     @property
     def latfile_loc(self):
         name = self.lattice.shape_hash()
-        return "../lattice_files/pyro_"+name+".json"
+        return "lattice_files/pyro_"+name+".json"
 
     @property
     def basisfile_loc(self):
         name = self.lattice.shape_hash()
-        return "../lattice_files/pyro_"+name+".basis.csv"
+        return "lattice_files/pyro_"+name+".basis.csv"
 
     @property
     def basis_dim(self):
@@ -145,7 +145,7 @@ class RingflipHamiltonian:
         if recalc:
             print("Generating basis...")
             subprocess.run(
-                ["../build/gen_spinon_basis_parallel",
+                ["build/gen_spinon_basis_parallel",
                  self.latfile_loc,
                  str(nthread)])
 

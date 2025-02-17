@@ -9,6 +9,7 @@ import sys
 import os
 
 assert len(sys.argv) > 1, "usage: partition_basis BASIS_FILE_NAME"
+assert '.git' in os.listdir('.')
 
 latfile = sys.argv[1]
 file_name = os.path.basename(latfile)
@@ -22,7 +23,7 @@ rfh = RingflipHamiltonian(lat)
 print("Setting up basis...")
 rfh.calc_basis()
 
-sector_dir = os.path.join("../basis_partitions/",
+sector_dir = os.path.join("basis_partitions/",
                           file_name.rsplit( ".", 1 )[ 0 ])
 
 os.mkdir(sector_dir)
