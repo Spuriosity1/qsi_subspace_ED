@@ -17,8 +17,10 @@ fi
 
 latfile="../lattice_files/$lattice.json"
 
-
+index=1
 for p in `ls $sector_decomp`; do
-       	echo "python3 ../scripts/phase_dia.py $latfile -x -3 -X 0 -d 0.1 --db_repo ../../ed_data/ --basis_file ../basis_partitions/$lattice/$p"
-       	echo "python3 ../scripts/phase_dia.py $latfile -x -0 -X 3 -d 0.1 --db_repo ../../ed_data/ --basis_file ../basis_partitions/$lattice/$p"
+       	echo "python3 ../scripts/phase_dia.py $latfile -x -3 -X 0 -d 0.1 --db_repo ../../ed_data/ --basis_file ../basis_partitions/$lattice/$p --index $index"
+        let index+=1
+       	echo "python3 ../scripts/phase_dia.py $latfile -x -0 -X 3 -d 0.1 --db_repo ../../ed_data/ --basis_file ../basis_partitions/$lattice/$p --index $index"
+        let index+=1
 done

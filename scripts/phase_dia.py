@@ -23,6 +23,7 @@ ap.add_argument("--rotation", type=str, choices='I X Y Z '.split(), default='I',
 ap.add_argument("--spacing", choices=["linear", "log", "tanh"], default="linear")
 ap.add_argument("--db_repo", type=str, default="./",
                 help="Directory to store results in")
+ap.add_argument("--index", type=int, default=time.time_ns())
 ap.add_argument("--krylov_dim", type=int, default=200)
 a = ap.parse_args()
 
@@ -63,7 +64,7 @@ R3 = np.sqrt(3)
 R2 = np.sqrt(2)
 
 
-DB_FILE = os.path.join(a.db_repo, f"results_{time.time_ns()}.db")
+DB_FILE = os.path.join(a.db_repo, f"results_{a.index}.db")
 
 if os.path.isfile(DB_FILE):
     raise IOError("DB file already exists!")
