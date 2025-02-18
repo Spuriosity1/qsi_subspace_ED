@@ -9,3 +9,4 @@ lattice_files
 vendor/*
 hpc_driver/track
 basis_partitions
+.DS_Store

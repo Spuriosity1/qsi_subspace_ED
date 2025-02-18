@@ -44,3 +44,28 @@ def get_sector_list(con, lat):
         
     return retval
 
+
+def init_db(con):
+    con.execute("""
+        create table field_110 ( g01_g23 REAL, g23_sign INTEGER,
+                edata BLOB, 
+                expO0 REAL, 
+                expO1 REAL, expO2 REAL, expO3 REAL, latvecs BLOB, sector BLOB)
+                """)
+    con.execute("""
+create table field_111 ( g0_g123 REAL, g123_sign INTEGER,
+                        edata BLOB,
+                        expO0 REAL, expO1 REAL, expO2 REAL, expO3 REAL,
+                        latvecs BLOB, sector BLOB)
+                """)
+
+
+
+
+
+rotation_matrices = {
+    'I': np.array([[+1, 0, 0], [0, +1, 0], [0, 0, +1]]),
+    'X': np.array([[+1, 0, 0], [0, -1, 0], [0, 0, -1]]),
+    'Y': np.array([[-1, 0, 0], [0, +1, 0], [0, 0, -1]]),
+    'Z': np.array([[-1, 0, 0], [0, -1, 0], [0, 0, +1]])
+        }
