@@ -45,14 +45,14 @@ for sec_str in sectors:
         missing.append((sector, sec_str))
 
     c.close()
-    if a.v >= 2:
+    if a.verbosity >= 2:
         print(f"Sector {sector}: {n_records} records")
 
 if len(missing) == 0:
     sys.exit(0)
 
 
-if a.v >= 1:
+if a.verbosity >= 1:
     print("\n\nMISSING SECTORS:")
 
 with open("missing_sectors.txt", 'w') as f:
