@@ -20,12 +20,18 @@ def calc_spectrum(g, full_lat: RingflipHamiltonian):
 
 
 def eigs_retry(hh, krylov_dim):
+    n = hh.shape[0]
+    ncv = min(n, max(2*krylov_dim + 1, 20))
     while True:
+        if n < ncv*2:
+            return LA.eigh(hh.todense())
         try:
-            return sLA.eigs(hh, k=krylov_dim, which='SR')
+            return sLA.eigs(hh, k=krylov_dim, which='SR', ncv=ncv)
+
         except sLA.ArpackNoConvergence as e:
+            ncv *= 2
             print("Convergence failed, restarting with enlarged Kyrlov space")
-            krylov_dim *= 2
+            print(f"ncv={ncv}")
 
 
 
