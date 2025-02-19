@@ -10,7 +10,6 @@
 #! The Ice Lake (icelake) nodes have 76 CPUs (cores) each and
 #! 3380 MiB of memory per CPU.
 #SBATCH --ntasks=1
-#SBATCH --cpus-per-task=2
 #! How much wallclock time will be required?
 #SBATCH --time=12:00:00
 #! What types of email messages do you wish to receive?
