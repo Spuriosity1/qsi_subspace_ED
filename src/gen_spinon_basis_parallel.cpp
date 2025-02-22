@@ -1,4 +1,3 @@
-
 #include "pyro_tree.hpp"
 #include "vanity.hpp"
 #include <cstdio>

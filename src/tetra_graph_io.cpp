@@ -17,7 +17,7 @@ lattice::lattice(const json &data) {
 	std::set<int> unique_spinids;
 	
 	for (const auto &t : data["tetrahedra"]) {
-		auto ti = spin_set(t["member_spin_idx"]);
+		auto ti = tetra(t["member_spin_idx"]);
 		unique_spinids.insert(ti.member_spin_ids.begin(), ti.member_spin_ids.end());
 		this->tetras.push_back(std::move(ti));
 	}

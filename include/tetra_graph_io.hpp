@@ -6,9 +6,10 @@
 
 struct spin;
 struct spin_set; 
+struct tetra;
 
 struct spin {
-	std::vector<spin_set*> tetra_neighbours;
+	std::vector<tetra*> tetra_neighbours;
 	std::vector<spin_set*> rings_containing;
 };
 
@@ -26,13 +27,28 @@ struct spin_set {
 	Uint128 bitmask;
 };
 
+// represects specifically a tetra-like thing
+struct tetra : public spin_set {
+	tetra(const std::vector<int>& spin_ids, int min_spins_up, int max_spins_up) : 
+		spin_set(spin_ids), min_spins_up(min_spins_up), max_spins_up(max_spins_up) {}
+
+	// default no-spinon rules
+	tetra(const std::vector<int>& spin_ids) : 
+		spin_set(spin_ids){
+		max_spins_up = (this->member_spin_ids.size() +1) /2;
+		min_spins_up = (this->member_spin_ids.size() ) /2;
+		}
+
+	int min_spins_up;
+	int max_spins_up;
+};
 
 
 struct lattice {
 	lattice(const nlohmann::json &data); 
 	
 	std::vector<spin> spins;
-	std::vector<spin_set> tetras;
+	std::vector<tetra> tetras;
 	std::vector<spin_set> rings;
 	
 	private:

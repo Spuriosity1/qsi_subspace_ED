@@ -43,11 +43,9 @@ char lat_container::possible_spin_states(const Uint128& state, unsigned idx) con
 			int num_known_spins = popcnt_u128( t->bitmask & known_mask )+1;
 
 			int num_spins = t->member_spin_ids.size();
-			int max_spins_up = (num_spins +1) /2;
-			int min_spins_up = (num_spins   ) /2;
 			int num_unknown_spins = num_spins - num_known_spins;
 
-			if (Q + num_unknown_spins < min_spins_up || Q > max_spins_up){
+			if (Q + num_unknown_spins < t->min_spins_up || Q > t->max_spins_up){
 				// Q is inconsistent with an ice rule
 				res &= ~(1<<updown);
 				break; // no point checking anything else
