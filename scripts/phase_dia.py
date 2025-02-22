@@ -16,8 +16,6 @@ def get_parser():
     ap.add_argument("--min_x", '-x', type=float, default=-2)
     ap.add_argument("--max_x", '-X', type=float, default=2)
     ap.add_argument("--x_step", '-d', type=float, default=0.01)
-    ap.add_argument("--kappa", type=float, default=0.2,
-                    help="Dimensionless spacing parameter for tanh spacing")
     ap.add_argument("--basis_file", type=str, default=None)
     ap.add_argument("--rotation", type=str, choices='I X Y Z '.split(), default='I',
                     help="Rotates lattice relative to magnetic field")
@@ -139,7 +137,7 @@ if __name__ == "__main__":
                     print(f"WARN: duplicate found at {x}")
                     continue
 
-
+                
                 r111 = calc_ring_exp_vals(rfh, g=sign*g_111(x),
                                           sector=sector, krylov_dim=a.krylov_dim)
 
