@@ -11,11 +11,11 @@ using json=nlohmann::json;
 
 int main (int argc, char *argv[]) {
 	if (argc < 3) {
-		printf("USAGE: %s <latfile: json> <num_threads>\n", argv[0]);
+		printf("USAGE: %s <latfile: json> <num_threads> (<ext>=.basis)\n", argv[0]);
 	}
 
 	std::string infilename(argv[1]);
-	auto basis_file = as_basis_file(infilename);
+	auto basis_file = as_basis_file(infilename, (argc >= 4) ? argv[3] : ".basis" );
 
 	ifstream ifs(infilename);
 	json data = json::parse(ifs);

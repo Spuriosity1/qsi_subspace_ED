@@ -10,11 +10,13 @@ using json=nlohmann::json;
 
 int main (int argc, char *argv[]) {
 	if (argc < 2) {
-		printf("USAGE: %s <latfile: json\n", argv[0]);
+		printf("USAGE: %s <latfile: json> (<ext>=.basis)\n", argv[0]);
 	}
 
 	std::string infilename(argv[1]);
-	string outfilename=as_basis_file(infilename);
+	std::string outfilename;
+
+	outfilename=as_basis_file(infilename, (argc >= 3) ? argv[2] : ".basis" );
 
 	ifstream ifs(infilename);
 	json data = json::parse(ifs);
