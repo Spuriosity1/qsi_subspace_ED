@@ -72,7 +72,7 @@ def has_111_entry(con, x, sign, latvecs, sector):
                    AND g123_sign=? AND latvecs=? AND sector=?
     """, (x-tol, x+tol, sign, latvecs, str(sector))
     )
-    res = cursor.fetchall() != 0
+    res = len(cursor.fetchall()) != 0
     cursor.close()
     return res
 
@@ -85,7 +85,7 @@ def has_110_entry(con, x, sign, latvecs, sector):
                    AND g23_sign=? AND latvecs=? AND sector=?
     """, (x-tol, x+tol, sign, latvecs, str(sector))
     )
-    res = cursor.fetchall() != 0
+    res = len(cursor.fetchall()) != 0
     cursor.close()
     return res
 

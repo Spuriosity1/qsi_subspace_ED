@@ -2,6 +2,7 @@
 #include "bittools.hpp"
 #include "json.hpp"
 #include "tetra_graph_io.hpp"
+#include <array>
 #include <thread>
 #include <queue>
 #include <stack>
@@ -23,6 +24,9 @@ struct vtree_node_t {
 	// i.e. (1<<curr_spin) & state_thus_far is guaranteed to be 0
 };
 
+
+typedef std::array<int, 4> global_sz_sector_t;
+
 struct lat_container {
 	lat_container(const nlohmann::json& data) : 
 		lat(data) {}
@@ -39,6 +43,7 @@ struct lat_container {
 	char possible_spin_states(const Uint128& state, unsigned idx) const ;
 
 	protected:
+	global_sz_sector_t global_sz_sector;
 
 	template <typename Container>
 	void fork_state_impl(Container& to_examine, vtree_node_t curr); 
