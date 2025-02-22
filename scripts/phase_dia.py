@@ -10,21 +10,24 @@ import os
 from phasedia_impl import calc_spectrum, calc_ring_exp_vals
 import time
 
-ap = argparse.ArgumentParser()
-ap.add_argument("lattice_file", type=str)
-ap.add_argument("--min_x", '-x', type=float, default=-2)
-ap.add_argument("--max_x", '-X', type=float, default=2)
-ap.add_argument("--x_step", '-d', type=float, default=0.01)
-ap.add_argument("--kappa", type=float, default=0.2,
-                help="Dimensionless spacing parameter for tanh spacing")
-ap.add_argument("--basis_file", type=str, default=None)
-ap.add_argument("--rotation", type=str, choices='I X Y Z '.split(), default='I',
-                help="Rotates lattice relative to magnetic field")
-ap.add_argument("--spacing", choices=["linear", "log", "tanh"], default="linear")
-ap.add_argument("--db_repo", type=str, default="./",
-                help="Directory to store results in")
-ap.add_argument("--index", type=int, default=time.time_ns())
-ap.add_argument("--krylov_dim", type=int, default=200)
+def get_parser():
+    ap = argparse.ArgumentParser(prog="PHASE_DIA")
+    ap.add_argument("lattice_file", type=str)
+    ap.add_argument("--min_x", '-x', type=float, default=-2)
+    ap.add_argument("--max_x", '-X', type=float, default=2)
+    ap.add_argument("--x_step", '-d', type=float, default=0.01)
+    ap.add_argument("--kappa", type=float, default=0.2,
+                    help="Dimensionless spacing parameter for tanh spacing")
+    ap.add_argument("--basis_file", type=str, default=None)
+    ap.add_argument("--rotation", type=str, choices='I X Y Z '.split(), default='I',
+                    help="Rotates lattice relative to magnetic field")
+    ap.add_argument("--spacing", choices=["linear", "log", "tanh"], default="linear")
+    ap.add_argument("--db_repo", type=str, default="./",
+                    help="Directory to store results in")
+    ap.add_argument("--index", type=int, default=time.time_ns())
+    ap.add_argument("--krylov_dim", type=int, default=200)
+
+    return ap
 
 
 g_111_dict = {
@@ -62,7 +65,7 @@ def calc_x_list(args):
 tol=1e-4
 
 
-def has_111_entry(x, sign, latvecs, sector):
+def has_111_entry(con, x, sign, latvecs, sector):
     cursor = con.cursor()
     cursor.execute("""SELECT g0_g123 FROM field_111 WHERE
                     g0_g123 BETWEEN ? AND ?
@@ -74,7 +77,7 @@ def has_111_entry(x, sign, latvecs, sector):
     return res
 
 
-def has_110_entry(x, sign, latvecs, sector):
+def has_110_entry(con, x, sign, latvecs, sector):
 
     cursor = con.cursor()
     cursor.execute("""SELECT g01_g23 FROM field_110 WHERE
@@ -89,6 +92,7 @@ def has_110_entry(x, sign, latvecs, sector):
 
 if __name__ == "__main__":
 
+    ap = get_parser()
     a = ap.parse_args()
 
     lat = pyrochlore.import_json(a.lattice_file)
@@ -131,7 +135,7 @@ if __name__ == "__main__":
         print("111 field:")
         for x in tqdm(x_list):
             for sign in [-1, 1]:
-                if has_111_entry(x, sign, latvecs, sector):
+                if has_111_entry(con, x, sign, latvecs, sector):
                     print(f"WARN: duplicate found at {x}")
                     continue
 
@@ -150,7 +154,7 @@ if __name__ == "__main__":
         print("110 field:")
         for x in tqdm(x_list):
             for sign in [-1, 1]:
-                if has_110_entry(x,sign,latvecs,sector):
+                if has_110_entry(con, x,sign,latvecs,sector):
                     print(f"WARN: skipping duplicate at g01_g23={x}")
                     continue
 

@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Check if the user provided an input file
-if [ "$#" -ne 3 ]; then
+if [ "$#" -ne 2 ]; then
     echo "Usage: $0 <command_file> <cpus_per_task>"
     exit 1
 fi
