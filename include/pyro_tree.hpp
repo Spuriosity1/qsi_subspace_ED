@@ -40,7 +40,8 @@ struct lat_container {
 	// 0b01 -> spin down (0) state valid
 	// 0b10 -> spin up (1) state valid
 	// 0b11 -> both up and down valid
-	char possible_spin_states(const Uint128& state, unsigned idx) const ;
+	char possible_spin_states(const vtree_node_t& curr) const;
+	//char possible_spin_states(const Uint128& state, unsigned idx) const ;
 
 	protected:
 	global_sz_sector_t global_sz_sector;

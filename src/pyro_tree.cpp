@@ -10,11 +10,13 @@
 
 
 
-
 // LOGIC
-char lat_container::possible_spin_states(const Uint128& state, unsigned idx) const {
+char lat_container::possible_spin_states(const vtree_node_t& curr) const {
 	// state is only initialised up to (but not including) bit 1<<idx
 	// returns possible states of state&(1<<idx)
+	const Uint128& state = curr.state_thus_far;
+	unsigned idx=curr.curr_spin;
+
 
 	// return values:
 	// 0b00 -> no spin state valid
@@ -60,7 +62,7 @@ char lat_container::possible_spin_states(const Uint128& state, unsigned idx) con
 // Attempts to generate the two next configurations and add them to the queue
 template <typename Container>
 void lat_container::fork_state_impl(Container& to_examine, vtree_node_t curr) {
-    char poss_states = this->possible_spin_states(curr.state_thus_far, curr.curr_spin);
+    char poss_states = this->possible_spin_states(curr);
     if (poss_states & 0b01) { // 0 is allowed
         auto tmp = vtree_node_t({curr.state_thus_far, curr.curr_spin + 1});
         to_examine.push(tmp);

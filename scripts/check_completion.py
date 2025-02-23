@@ -7,6 +7,7 @@ from db import connect_npsql, rotation_matrices
 import sys
 import os
 import argparse
+from tqdm import tqdm
 
 assert '.git' in os.listdir('.')
 
@@ -17,7 +18,8 @@ ap.add_argument("latfile", type=str,
                 help="JSON file of lattice")
 ap.add_argument("--rotation", type=str, choices='I X Y Z '.split(), default='I',
                 help="Rotates lattice relative to magnetic field")
-ap.add_argument("-v", "--verbosity", type=int, default=2)
+ap.add_argument("-v", "--verbosity", type=int, default=1)
+ap.add_argument("--output_file", type=str, default="incomplete_sectors.txt")
 
 a = ap.parse_args()
 
@@ -33,30 +35,41 @@ sector_dir = os.path.join("basis_partitions/",
 sectors = os.listdir(sector_dir)
 
 con = connect_npsql(a.result_database)
-missing = []
+counts = []
 
-for sec_str in sectors:
+for sec_str in tqdm(sectors,desc="iterating sectors"):
     sector = tuple(int(a) for a in sec_str[1:-1].split('.'))
     c = con.execute("""
         SELECT count(*) FROM field_111 WHERE latvecs=? AND sector = ?
                 """, (latvecs, str(sector)))
     n_records, = c.fetchone()
-    if n_records == 0:
-        missing.append((sector, sec_str))
+    counts.append(n_records)
 
     c.close()
     if a.verbosity >= 2:
         print(f"Sector {sector}: {n_records} records")
 
-if len(missing) == 0:
+expected_n_records = max(counts)
+
+print(counts)
+if min(counts) == expected_n_records:
     sys.exit(0)
 
+damaged_sectors, = np.nonzero(np.array(counts) != expected_n_records)
+
+print(f"Expect {expected_n_records} records")
 
 if a.verbosity >= 1:
-    print("\n\nMISSING SECTORS:")
+    print("\n\nINCOMPLETE SECTORS:")
 
-with open("missing_sectors.txt", 'w') as f:
-    for sec, sec_str in missing:
-        print(sec)
-        f.write(f"{sec_str}\n")
+with open(a.output_file, 'w') as f:
+    for idx in damaged_sectors:
+        if counts[idx] == 0:
+            print( "\033[91m",end="")
+        print(f"{idx:6d} Sector {sectors[idx]}: {counts[idx]} records")
+
+        if counts[idx] == 0:
+            print( "\033[0m",end="")
+        f.write(f"{sectors[idx]}\n")
+
 
