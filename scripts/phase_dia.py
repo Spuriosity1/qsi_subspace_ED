@@ -9,6 +9,7 @@ from db import connect_npsql, init_db, rotation_matrices
 import os
 from phasedia_impl import calc_spectrum, calc_ring_exp_vals
 import time
+import concurrent.futures
 
 def get_parser():
     ap = argparse.ArgumentParser(prog="PHASE_DIA")
@@ -90,6 +91,56 @@ def has_110_entry(con, x, sign, latvecs, sector):
     return res
 
 
+def process_111_field(sector, x, sign, con, latvecs, rfh, a):
+    if has_111_entry(con, x, sign, latvecs, sector):
+        print(f"WARN: duplicate found at {x}")
+        return
+
+    r111 = calc_ring_exp_vals(rfh, g=sign * g_111(x),
+                              sector=sector, krylov_dim=a.krylov_dim)
+
+    with con:
+        con.execute("""
+            INSERT INTO field_111 (g0_g123, g123_sign, latvecs, sector, edata,
+                                  expO0, expO1, expO2, expO3)
+            VALUES (?,?,?,?,?,?,?,?,?);
+        """, (x, sign, latvecs, str(sector), r111[0], *r111[1].values()))
+
+
+def process_110_field(sector, x, sign, con, latvecs, rfh, a):
+    if has_110_entry(con, x, sign, latvecs, sector):
+        print(f"WARN: skipping duplicate at g01_g23={x}")
+        return
+
+    r110 = calc_ring_exp_vals(rfh, g=sign * g_110(x),
+                              sector=sector, krylov_dim=a.krylov_dim)
+
+    with con:
+        con.execute("""
+            INSERT INTO field_110 (g01_g23, g23_sign, latvecs, sector, edata,
+                                  expO0, expO1, expO2, expO3)
+            VALUES (?,?,?,?,?,?,?,?,?);
+        """, (x, sign, latvecs, str(sector), r110[0], *r110[1].values()))
+
+
+def run_parallel():
+    max_workers = int(os.getenv("SLURM_CPUS_PER_TASK", 1))  # Default to 1 if the variable isn't set
+
+    with concurrent.futures.ProcessPoolExecutor(max_workers=max_workers) as executor:
+        futures = []
+        for sector in rfh.sectors:
+            print("SECTOR: " + str(sector))
+
+            for x in x_list:
+                for sign in [-1, 1]:
+                    futures.append(executor.submit(
+                        process_111_field, sector, x, sign, con, latvecs, rfh, a))
+                    futures.append(executor.submit(
+                        process_110_field, sector, x, sign, con, latvecs, rfh, a))
+
+        concurrent.futures.wait(futures)
+
+
 if __name__ == "__main__":
 
     ap = get_parser()
@@ -98,7 +149,6 @@ if __name__ == "__main__":
     lat = pyrochlore.import_json(a.lattice_file)
     g_111 = g_111_dict[a.rotation]
     g_110 = g_110_dict[a.rotation]
-
 
     latvecs = rotation_matrices[a.rotation] @ np.array(lat.lattice_vectors)
 
@@ -110,17 +160,15 @@ if __name__ == "__main__":
         bfile = a.basis_file
     rfh.load_basis(bfile)
 
-
     R3 = np.sqrt(3)
     R2 = np.sqrt(2)
 
-
     DB_FILE = os.path.join(a.db_repo, f"results_{a.index}.db")
 
-    initialise=True
+    initialise = True
     if os.path.isfile(DB_FILE):
         print("WARN: db already exists!")
-        initialise=False
+        initialise = False
 
     con = connect_npsql(DB_FILE, timeout=60)
     if initialise:
@@ -129,45 +177,4 @@ if __name__ == "__main__":
     x_list = calc_x_list(a)
     print(x_list)
 
-    for sector in rfh.sectors:
-        print("SECTOR: " + str(sector))
-
-        print("111 field:")
-        for x in tqdm(x_list):
-            for sign in [-1, 1]:
-                if has_111_entry(con, x, sign, latvecs, sector):
-                    print(f"WARN: duplicate found at {x}")
-                    continue
-
-
-                r111 = calc_ring_exp_vals(rfh, g=sign*g_111(x),
-                                          sector=sector, krylov_dim=a.krylov_dim)
-
-                cursor = con.cursor()
-                cursor.execute("""INSERT INTO field_111 (g0_g123, g123_sign, latvecs, sector,
-                                                         edata,
-                                                         expO0, expO1, expO2, expO3)
-                               VALUES (?,?,?,?,?,?,?,?,?);""", (x, sign, latvecs, str(sector), r111[0], *r111[1].values()))
-                cursor.close()
-                con.commit()
-
-        print("110 field:")
-        for x in tqdm(x_list):
-            for sign in [-1, 1]:
-                if has_110_entry(con, x,sign,latvecs,sector):
-                    print(f"WARN: skipping duplicate at g01_g23={x}")
-                    continue
-
-                r110 = calc_ring_exp_vals(rfh, g=sign*g_110(x),
-                                          sector=sector, krylov_dim = a.krylov_dim)
-                
-                cursor = con.cursor()
-                cursor.execute("""INSERT INTO field_110 (g01_g23, g23_sign, latvecs, sector,
-                                                         edata,
-                                                         expO0, expO1, expO2, expO3)
-                               VALUES (?,?,?,?,?,?,?,?,?);""", (x, sign, latvecs, str(sector), r110[0], *r110[1].values()))
-
-                cursor.close()
-                con.commit()
-
-                # save the data
+    run_parallel()

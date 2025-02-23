@@ -11,6 +11,10 @@ for table in $(sqlite3 "$outdb" "SELECT name FROM sqlite_master WHERE type='tabl
   echo "table: $table"
   for db in "$@"; do
     echo "db: $db"
-    sqlite3 "$outdb" "attach '$db' as 'db2'" "insert into \"$table\" select * from \"db2\".\"$table\""
+    sqlite3 "$outdb" <<EOF
+      ATTACH '$db' AS db2;
+      INSERT OR IGNORE INTO "$table" SELECT * FROM db2."$table";
+      DETACH db2;
+EOF
   done
 done
