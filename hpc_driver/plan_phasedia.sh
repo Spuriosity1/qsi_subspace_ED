@@ -27,7 +27,7 @@ latfile="../lattice_files/$lattice.json"
 
 
 
-index=1
+index=1000
 for p in $sector_list; do
 
 	BASE_CMD="python3 ../scripts/phase_dia.py $latfile --db_repo ../../ed_data/ --basis_file ../basis_partitions/$lattice/$p"
