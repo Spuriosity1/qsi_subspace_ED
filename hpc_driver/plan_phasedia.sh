@@ -1,8 +1,8 @@
 #!/bin/bash
 
 # Check if the user provided an input file
-if [ "$#" -lt 1 ]; then
-    echo "Usage: $0 <latspec> [sector_list]"
+if [ "$#" -lt 2 ]; then
+    echo "Usage: $0 <latspec> <initial_index>"
     exit 1
 fi
 
@@ -15,19 +15,14 @@ if [ ! -d "$sector_decomp" ]; then
 	exit 1
 fi
 
-if [ ! -f "$2" ]; then
-	sector_list=`ls $sector_decomp`;
-else
-	sector_list=`cat $2`;
-fi
+sector_list=`ls $sector_decomp`;
 
 
 latfile="../lattice_files/$lattice.json"
 
 
 
-
-index=1
+index=$2
 for p in $sector_list; do
 
 	BASE_CMD="python3 ../scripts/phase_dia.py $latfile --db_repo ../../ed_data/ --basis_file ../basis_partitions/$lattice/$p"
