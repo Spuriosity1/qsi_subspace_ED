@@ -33,43 +33,60 @@ sector_dir = os.path.join("basis_partitions/",
                           latfile_name.rsplit( ".", 1 )[ 0 ])
 
 sectors = os.listdir(sector_dir)
-
-con = connect_npsql(a.result_database)
-counts = []
-
+sec_strings = {}
 for sec_str in tqdm(sectors,desc="iterating sectors"):
     sector = tuple(int(a) for a in sec_str[1:-1].split('.'))
-    c = con.execute("""
-        SELECT count(*) FROM field_111 WHERE latvecs=? AND sector = ?
-                """, (latvecs, str(sector)))
-    n_records, = c.fetchone()
-    counts.append(n_records)
+    sec_strings[str(sector)] = sec_str
 
-    c.close()
-    if a.verbosity >= 2:
-        print(f"Sector {sector}: {n_records} records")
 
-expected_n_records = max(counts)
 
-print(counts)
-if min(counts) == expected_n_records:
+con = connect_npsql(a.result_database)
+
+
+c = con.execute("""
+                SELECT sector, count(*) FROM field_111 WHERE latvecs=? GROUP BY sector
+                """, (latvecs,))
+counts_111 = {}
+
+for sector, n_rec in c:
+    counts_111[sector] = n_rec
+
+
+c = con.execute("""
+                SELECT sector, count(*) FROM field_110 WHERE latvecs=? GROUP BY sector
+                """, (latvecs,))
+counts_110 = {}
+
+for sector, n_rec in c:
+    counts_110[sector] = n_rec
+
+c.close()
+
+
+expected_n_records = max(counts_111.values())
+
+if min(counts_111.values()) == expected_n_records and min(counts_110.values()) == expected_n_records:
     sys.exit(0)
 
-damaged_sectors, = np.nonzero(np.array(counts) != expected_n_records)
+damaged_sectors = []
+for sec in counts_111:
+    if counts_111[sec] != expected_n_records or counts_110[sec] != expected_n_records:
+        damaged_sectors.append(sec)
 
 print(f"Expect {expected_n_records} records")
+
+
 
 if a.verbosity >= 1:
     print("\n\nINCOMPLETE SECTORS:")
 
 with open(a.output_file, 'w') as f:
     for idx in damaged_sectors:
-        if counts[idx] == 0:
+        if counts_111[idx] == 0 or counts_110[idx] == 0:
             print( "\033[91m",end="")
-        print(f"{idx:6d} Sector {sectors[idx]}: {counts[idx]} records")
+        print(f"Sector {idx}: {counts_111[idx]} 111 records, {counts_110[idx]} 110 records")
 
-        if counts[idx] == 0:
-            print( "\033[0m",end="")
-        f.write(f"{sectors[idx]}\n")
+        print( "\033[0m",end="")
+        f.write(f"{sec_strings[idx]}\n")
 
 
