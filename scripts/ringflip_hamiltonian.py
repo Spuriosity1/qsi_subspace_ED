@@ -162,10 +162,6 @@ class RingflipHamiltonian:
     def flip_state(self, state):
         return state ^ (2**self.lattice.num_atoms - 1)
 
-    def split_basis_irreps(self):
-        # partitions the Hilbert space into irreps of the translational symmetries
-        T = get_transl_generators(self.lattice)
-
 
     @property
     def Hilbert_dim(self):

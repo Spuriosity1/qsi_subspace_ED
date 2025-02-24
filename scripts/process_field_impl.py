@@ -98,7 +98,7 @@ def process_expO(raw):
 
 class RingInterpolator:
     def __init__(self, data_importer, interpolation_f=CubicSpline):
-    
+        
         x_list_plus, E_list_plus, expO_list_plus = data_importer(1)
         expO_series_plus = process_expO(expO_list_plus)
     
@@ -183,7 +183,7 @@ def close(x,y,tol=1e-10):
     return np.abs(x-y)<tol
 
 
-def _load_E_and_expO(res):
+def load_E_and_expO(res):
     x_list = []
     E_list = []
     expO_list = []
@@ -200,46 +200,6 @@ def _load_E_and_expO(res):
 
     return x_list, E_list, expO_list
     
-
-
-def import_data_111(g123_sign:int, latvecs, sector):
-    res = con.execute(f"""
-    SELECT g0_g123, edata, expO0, expO1, expO2, expO3 
-    FROM field_111
-    WHERE g123_sign = ? AND latvecs = ? AND sector = ?
-    ORDER BY g0_g123
-    """, (g123_sign, latvecs, str(sector) ))
-    return _load_E_and_expO(res)
-   
-
-
-def import_data_110(g23_sign:int, latvecs, sector):
-    res = con.execute(f"""
-    SELECT g01_g23, edata, expO0, expO1, expO2, expO3 
-    FROM field_110
-    WHERE g23_sign = ? AND latvecs = ? AND sector = ?
-    ORDER BY g01_g23
-    """, (g23_sign, latvecs, str(sector) ))
-    return _load_E_and_expO(res)
-
-
-
-# trivial specilisations
-class RingInterpolator_111(RingInterpolator):
-    def __init__(self, latvecs, sector, **kwargs):
-        super().__init__(lambda g : import_data_111(g, latvecs, sector), **kwargs)
-
-    def check_g_compatible(self, g):
-        assert close(g[1], g[2]) and close(g[1], g[3])
-
-
-class RingInterpolator_110(RingInterpolator):
-    def __init__(self, latvecs, sector, **kwargs):
-        super().__init__(lambda g : import_data_110(g, latvecs, sector),**kwargs)
-
-    def check_g_compatible(self, g):
-        assert close(g[0], g[1]) and close(g[2], g[3])
-
 
 
 

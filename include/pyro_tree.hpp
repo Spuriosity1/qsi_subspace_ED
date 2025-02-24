@@ -2,11 +2,13 @@
 #include "bittools.hpp"
 #include "json.hpp"
 #include "tetra_graph_io.hpp"
+#include <array>
 #include <thread>
 #include <queue>
 #include <stack>
 #include <vector>
 
+/*
 struct node_t {
 	unsigned spin_idx; // aka layer, 	
 	Uint128 state_thus_far; // only up to (1>>spin_idx) have been set
@@ -14,18 +16,24 @@ struct node_t {
 	node_t* leaf[2]={nullptr, nullptr};
 
 };
+*/
 
 
 struct vtree_node_t {
 	Uint128 state_thus_far;
 	unsigned curr_spin;
+
+	unsigned num_spinon_pairs;
 	// curr_spin is the bit ID of the rightmost unknown spin
 	// i.e. (1<<curr_spin) & state_thus_far is guaranteed to be 0
 };
 
+
+typedef std::array<int, 4> global_sz_sector_t;
+
 struct lat_container {
-	lat_container(const nlohmann::json& data) : 
-		lat(data) {}
+	lat_container(const nlohmann::json& data, int num_spinon_pairs) : 
+		 num_spinon_pairs(num_spinon_pairs), lat(data) {}
 
 
 	// state is only initialised up to (but not including) bit 1<<idx
@@ -36,9 +44,14 @@ struct lat_container {
 	// 0b01 -> spin down (0) state valid
 	// 0b10 -> spin up (1) state valid
 	// 0b11 -> both up and down valid
-	char possible_spin_states(const Uint128& state, unsigned idx) const ;
+	char possible_spin_states(const vtree_node_t& curr) const;
+	//char possible_spin_states(const Uint128& state, unsigned idx) const ;
 
+	const int num_spinon_pairs;
 	protected:
+	//global_sz_sector_t global_sz_sector;
+
+
 
 	template <typename Container>
 	void fork_state_impl(Container& to_examine, vtree_node_t curr); 
@@ -51,8 +64,8 @@ struct lat_container {
 };
 
 struct pyro_vtree : public lat_container {
-	pyro_vtree(const nlohmann::json&data) :
-		lat_container(data) {
+	pyro_vtree(const nlohmann::json&data, int num_spinon_pairs) :
+		lat_container(data, num_spinon_pairs) {
 		}
 
 	void build_state_tree();
@@ -74,8 +87,9 @@ struct pyro_vtree : public lat_container {
 };
 
 struct pyro_vtree_parallel : public lat_container {
-	pyro_vtree_parallel(const nlohmann::json &data, unsigned n_threads = 1)
-		: lat_container(data), n_threads(n_threads) {}
+	pyro_vtree_parallel(const nlohmann::json &data, int num_spinon_pairs, 
+			unsigned n_threads = 1)
+		: lat_container(data, num_spinon_pairs), n_threads(n_threads) {}
 
 	void build_state_tree();
 	void write_basis_file(FILE *outfile) {

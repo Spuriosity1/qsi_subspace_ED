@@ -10,11 +10,13 @@
 
 
 
-
 // LOGIC
-char lat_container::possible_spin_states(const Uint128& state, unsigned idx) const {
+char lat_container::possible_spin_states(const vtree_node_t& curr) const {
 	// state is only initialised up to (but not including) bit 1<<idx
 	// returns possible states of state&(1<<idx)
+	const Uint128& state = curr.state_thus_far;
+	unsigned idx=curr.curr_spin;
+
 
 	// return values:
 	// 0b00 -> no spin state valid
@@ -30,6 +32,7 @@ char lat_container::possible_spin_states(const Uint128& state, unsigned idx) con
 #endif
 	const auto known_mask = make_mask(idx);
 
+	// iterate over the two possible states of state&(1<<idx)
 	for (__uint128_t updown=0; updown<2; updown++){
 		if (updown == 1){
 			or_bit(state_new, idx);
@@ -43,11 +46,9 @@ char lat_container::possible_spin_states(const Uint128& state, unsigned idx) con
 			int num_known_spins = popcnt_u128( t->bitmask & known_mask )+1;
 
 			int num_spins = t->member_spin_ids.size();
-			int max_spins_up = (num_spins +1) /2;
-			int min_spins_up = (num_spins   ) /2;
 			int num_unknown_spins = num_spins - num_known_spins;
 
-			if (Q + num_unknown_spins < min_spins_up || Q > max_spins_up){
+			if (Q + num_unknown_spins < t->min_spins_up || Q > t->max_spins_up){
 				// Q is inconsistent with an ice rule
 				res &= ~(1<<updown);
 				break; // no point checking anything else
@@ -62,16 +63,25 @@ char lat_container::possible_spin_states(const Uint128& state, unsigned idx) con
 // Attempts to generate the two next configurations and add them to the queue
 template <typename Container>
 void lat_container::fork_state_impl(Container& to_examine, vtree_node_t curr) {
-    char poss_states = this->possible_spin_states(curr.state_thus_far, curr.curr_spin);
+    char poss_states = this->possible_spin_states(curr);
+	bool may_create_pair = (curr.num_spinon_pairs < this->num_spinon_pairs);
     if (poss_states & 0b01) { // 0 is allowed
-        auto tmp = vtree_node_t({curr.state_thus_far, curr.curr_spin + 1});
+        auto tmp = vtree_node_t({curr.state_thus_far, curr.curr_spin + 1, curr.num_spinon_pairs});
         to_examine.push(tmp);
-    }
-    if (poss_states & 0b10) { // 1 is allowed
-        auto tmp = vtree_node_t({curr.state_thus_far, curr.curr_spin + 1});
+    } else if (may_create_pair) {
+        auto tmp = vtree_node_t({curr.state_thus_far, curr.curr_spin + 1, curr.num_spinon_pairs+1});
+        to_examine.push(tmp);
+	}
+
+	if (poss_states & 0b10) { // 1 is allowed
+        auto tmp = vtree_node_t({curr.state_thus_far, curr.curr_spin + 1, curr.num_spinon_pairs});
         or_bit(tmp.state_thus_far, curr.curr_spin);
         to_examine.push(tmp);
-    } 
+    } else if (may_create_pair) {
+        auto tmp = vtree_node_t({curr.state_thus_far, curr.curr_spin + 1, curr.num_spinon_pairs+1});
+        or_bit(tmp.state_thus_far, curr.curr_spin);
+        to_examine.push(tmp);
+	}
 }
 
 void lat_container::fork_state(std::stack<vtree_node_t>& to_examine) {
@@ -150,7 +160,7 @@ build_state_tree(){
 	// strategy: fork nodes until we exceed the thread pool	
 	// BFS to keep the layer of all threads roughly the same
 	std::queue<vtree_node_t> starting_nodes;
-	starting_nodes.push(vtree_node_t({0,0}));
+	starting_nodes.push(vtree_node_t({0,0,0}));
 	_build_state_bfs(starting_nodes, n_threads);
 	assert(starting_nodes.size() <= n_threads);
 	n_threads = starting_nodes.size();
