@@ -16,7 +16,7 @@ int main (int argc, char *argv[]) {
 	std::string infilename(argv[1]);
 	std::string outfilename;
 
-	int n_spinons=atoi(argv[2]);
+	int num_spinon_pairs=(argc >= 3) ? atoi(argv[2]) : 0;
 
 	outfilename=as_basis_file(infilename, (argc >= 4) ? argv[3] : ".basis" );
 
@@ -24,7 +24,7 @@ int main (int argc, char *argv[]) {
 	json data = json::parse(ifs);
 	ifs.close();
 
-	pyro_vtree L(data);
+	pyro_vtree L(data, num_spinon_pairs);
 	
 	printf("Building state tree...\n");
 	L.build_state_tree();

@@ -11,7 +11,7 @@ sort "${ref_outfile}" > "${ref_outfile}.sorted"
 ref_outfile="${ref_outfile}.sorted"
 
 
-CMD1="../build/gen_spinon_basis $infile .test_basis"
+CMD1="../build/gen_spinon_basis $infile 0 .test_basis"
 echo $CMD1
 eval "$CMD1" > tmp.txt
 
