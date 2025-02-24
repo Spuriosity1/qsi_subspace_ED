@@ -15,8 +15,13 @@ int main (int argc, char *argv[]) {
 	}
 
 	std::string infilename(argv[1]);
-	auto basis_file = as_basis_file(infilename, (argc >= 5) ? argv[4] : ".basis" );
 	int num_spinon_pairs=(argc >= 4) ? atoi(argv[3]) : 0;
+
+	std::string ext = ".";
+	ext += std::to_string(num_spinon_pairs);
+	ext += (argc >= 5) ? argv[4] : ".basis";
+
+	auto basis_file = as_basis_file(infilename,ext );
 
 	ifstream ifs(infilename);
 	json data = json::parse(ifs);

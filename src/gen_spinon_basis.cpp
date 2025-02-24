@@ -1,6 +1,7 @@
 #include "pyro_tree.hpp"
 #include <cstdio>
 #include <fstream>
+#include <string>
 #include "admin.hpp"
 
 
@@ -18,7 +19,11 @@ int main (int argc, char *argv[]) {
 
 	int num_spinon_pairs=(argc >= 3) ? atoi(argv[2]) : 0;
 
-	outfilename=as_basis_file(infilename, (argc >= 4) ? argv[3] : ".basis" );
+	std::string ext = ".";
+	ext += std::to_string(num_spinon_pairs);
+	ext += (argc >= 4) ? argv[3] : ".basis";
+
+	outfilename=as_basis_file(infilename, ext );
 
 	ifstream ifs(infilename);
 	json data = json::parse(ifs);
