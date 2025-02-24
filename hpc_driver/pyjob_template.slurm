@@ -25,8 +25,8 @@ module load python/3.11.0-icl
 
 
 
-export OPENBLAS_NUM_THREADS=1
-export MKL_NUM_THREADS=1
+export OPENBLAS_NUM_THREADS=$SLURM_CPUS_PER_TASK
+export MKL_NUM_THREADS=$SLURM_CPUS_PER_TASK
 
 
 # load the custom py env
