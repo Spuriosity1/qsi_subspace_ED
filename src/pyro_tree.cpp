@@ -32,6 +32,7 @@ char lat_container::possible_spin_states(const vtree_node_t& curr) const {
 #endif
 	const auto known_mask = make_mask(idx);
 
+	// iterate over the two possible states of state&(1<<idx)
 	for (__uint128_t updown=0; updown<2; updown++){
 		if (updown == 1){
 			or_bit(state_new, idx);
@@ -63,15 +64,24 @@ char lat_container::possible_spin_states(const vtree_node_t& curr) const {
 template <typename Container>
 void lat_container::fork_state_impl(Container& to_examine, vtree_node_t curr) {
     char poss_states = this->possible_spin_states(curr);
+	bool may_create_pair = (curr.num_spinon_pairs < this->num_spinon_pairs);
     if (poss_states & 0b01) { // 0 is allowed
-        auto tmp = vtree_node_t({curr.state_thus_far, curr.curr_spin + 1});
+        auto tmp = vtree_node_t({curr.state_thus_far, curr.curr_spin + 1, curr.num_spinon_pairs});
         to_examine.push(tmp);
-    }
-    if (poss_states & 0b10) { // 1 is allowed
-        auto tmp = vtree_node_t({curr.state_thus_far, curr.curr_spin + 1});
+    } else if (may_create_pair) {
+        auto tmp = vtree_node_t({curr.state_thus_far, curr.curr_spin + 1, curr.num_spinon_pairs+1});
+        to_examine.push(tmp);
+	}
+
+	if (poss_states & 0b10) { // 1 is allowed
+        auto tmp = vtree_node_t({curr.state_thus_far, curr.curr_spin + 1, curr.num_spinon_pairs});
         or_bit(tmp.state_thus_far, curr.curr_spin);
         to_examine.push(tmp);
-    } 
+    } else if (may_create_pair) {
+        auto tmp = vtree_node_t({curr.state_thus_far, curr.curr_spin + 1, curr.num_spinon_pairs+1});
+        or_bit(tmp.state_thus_far, curr.curr_spin);
+        to_examine.push(tmp);
+	}
 }
 
 void lat_container::fork_state(std::stack<vtree_node_t>& to_examine) {
@@ -150,7 +160,7 @@ build_state_tree(){
 	// strategy: fork nodes until we exceed the thread pool	
 	// BFS to keep the layer of all threads roughly the same
 	std::queue<vtree_node_t> starting_nodes;
-	starting_nodes.push(vtree_node_t({0,0}));
+	starting_nodes.push(vtree_node_t({0,0,0}));
 	_build_state_bfs(starting_nodes, n_threads);
 	assert(starting_nodes.size() <= n_threads);
 	n_threads = starting_nodes.size();

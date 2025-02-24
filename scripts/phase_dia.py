@@ -124,7 +124,8 @@ def process_110_field(sector, x, sign, con, latvecs, rfh, a):
 
 
 def run_parallel():
-    max_workers = int(os.getenv("SLURM_CPUS_PER_TASK", 1))  # Default to 1 if the variable isn't set
+    max_workers = int(os.getenv("SLURM_CPUS_PER_TASK", os.cpu_count()))
+    # Default to os.cpu_count if the variable isn't set
 
     with concurrent.futures.ProcessPoolExecutor(max_workers=max_workers) as executor:
         futures = []

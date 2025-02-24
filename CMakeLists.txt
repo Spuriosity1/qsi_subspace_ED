@@ -50,10 +50,12 @@ endfunction()
 
 # main functions
 add_executable(gen_spinon_basis
-    src/gen_0spinon_basis.cpp
+    src/gen_spinon_basis.cpp
     src/tetra_graph_io.cpp
     src/pyro_tree.cpp
 )
+
+
 
 add_executable(gen_spinon_basis_parallel
     src/gen_spinon_basis_parallel.cpp
