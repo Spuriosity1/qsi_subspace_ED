@@ -50,6 +50,8 @@ def calc_ring_exp_vals(rfh: RingflipHamiltonian, g, sector, algo='sparse',
     }
 
     e, v = alg_opts[algo](H)
+    e = e[:krylov_dim]
+    v = v[:, :krylov_dim]
 
     # account for possible degenerate ground state
     mask = (e-e[0]) < 1e-10

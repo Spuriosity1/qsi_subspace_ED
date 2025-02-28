@@ -64,10 +64,15 @@ class Tetra:
         self.members = members
 
 
-def get_ringflips(lat: lattice.Lattice, sl=[0, 1, 2, 3]):
+def get_ringflips(lat: lattice.Lattice, sl=[0, 1, 2, 3], include_partial=False):
     if not hasattr(sl, "__iter__"):
         sl = [sl]
-    retval = []
+
+    if include_partial:
+        retval = {0:[], 1:[], 2:[], 3:[], 4:[], 5:[], 6:[]}
+    else:
+        retval = []
+
     for ix, iy, iz in lat.enumerate_primitives():
         dx = lat.primitive.lattice_vectors @ Matrix([ix, iy, iz])
         for mu in sl:
@@ -75,9 +80,17 @@ def get_ringflips(lat: lattice.Lattice, sl=[0, 1, 2, 3]):
             plaq_pos = lat.wrap_coordinate(plaq_sl_pos + dx)
             spin_members = [lat.as_linear_idx(plaq_pos + x)
                             for x in plaqt[mu]]
-            retval.append(Ring(plaq_pos, mu, spin_members))
+            n_missing = sum(j is None for j in spin_members)
+
+            rr = Ring(plaq_pos, mu, spin_members)
+            if include_partial:
+                retval[n_missing].append(rr)
+            elif n_missing == 0:
+                retval.append(rr)
+            
 
     return retval
+
 
 
 def get_tetras(lat: lattice.Lattice):
@@ -116,7 +129,7 @@ for c, (i,j) in enumerate(sublat_pairs):
 # TODO change API to support making these difernet bond colours
 
 
-def export_json(lat: lattice.Lattice, filename: str):
+def export_json(lat: lattice.Lattice, filename: str, include_partial=False):
     output = lattice.to_dict(lat)
     t_up, t_dn = get_tetras(lat)
     output["tetrahedra"] = []
@@ -130,11 +143,21 @@ def export_json(lat: lattice.Lattice, filename: str):
         'sl': 1,
         'member_spin_idx': t.members
         } for t in t_dn]
-    output["rings"] = [{
-        'xyz': lattice.listify(r.xyz),
-        'sl': r.sl,
-        'member_spin_idx': r.members
-    } for r in get_ringflips(lat)]
+    if include_partial:
+        output["rings"] = [
+            [{
+                'xyz': lattice.listify(r.xyz),
+                'sl': r.sl,
+                'member_spin_idx': r.members
+            } for r in rr]
+            for rr in get_ringflips(lat).values()
+        ]
+    else:
+        output["rings"] = [{
+            'xyz': lattice.listify(r.xyz),
+            'sl': r.sl,
+            'member_spin_idx': r.members
+        } for r in get_ringflips(lat)]
 
     with open(filename, 'w') as f:
         json.dump(output, f)

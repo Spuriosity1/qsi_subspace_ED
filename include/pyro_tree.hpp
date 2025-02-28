@@ -3,6 +3,7 @@
 #include "json.hpp"
 #include "tetra_graph_io.hpp"
 #include <array>
+#include <cstdio>
 #include <thread>
 #include <queue>
 #include <stack>
@@ -69,11 +70,17 @@ struct pyro_vtree : public lat_container {
 		}
 
 	void build_state_tree();
-	void write_basis_file(FILE* outfile){
-		for (auto b : states_2I2O){
-			write_line(outfile, b);
-		}
-	}
+
+	void write_basis_csv(const std::string &outfilename) {
+	    FILE *outfile = std::fopen((outfilename + ".csv").c_str(), "w");
+	    for (auto b : states_2I2O) {
+	      write_line(outfile, b);
+	    }
+
+        std::fclose(outfile);
+    }
+
+    void write_basis_hdf5(const std::string& outfile);
 	protected:
 	void save_state(const Uint128& state) {
 			states_2I2O.push_back(state);
@@ -92,13 +99,17 @@ struct pyro_vtree_parallel : public lat_container {
 		: lat_container(data, num_spinon_pairs), n_threads(n_threads) {}
 
 	void build_state_tree();
-	void write_basis_file(FILE *outfile) {
+	void write_basis_csv(const std::string& outfilename) {
+        FILE *outfile = std::fopen((outfilename+".csv").c_str(), "w");
 		for (auto states_2I2O : state_set) {
 			for (auto b : states_2I2O) {
 				write_line(outfile, b);
 			}
 		}
+		std::fclose(outfile);
 	}
+	void write_basis_hdf5(const std::string& outfile);
+
 
 protected:
 	void _build_state_dfs(std::stack<vtree_node_t> &node_stack, unsigned thread_id,
@@ -152,7 +163,7 @@ struct pyro_tree : public base_pyro_tree {
 	}
 
 	void build_state_tree();
-	void write_basis_file(FILE* outfile){
+	void write_basis_csv(FILE* outfile){
 		for (auto b : states_2I2O){
 			std::fprintf(outfile, "0x%016llx%016llx\n", b.uint64[1],b.uint64[0]);
 		}
@@ -173,7 +184,7 @@ struct parallel_pyro_tree : public base_pyro_tree {
 	}
 
 	void build_state_tree();
-	void write_basis_file(FILE* outfile){
+	void write_basis_csv(FILE* outfile){
 		for (auto states_2I2O : state_set){
 			for (auto b : states_2I2O){
 				std::fprintf(outfile, "0x%016llx%016llx\n", b.uint64[1],b.uint64[0]);

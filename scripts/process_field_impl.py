@@ -26,15 +26,40 @@ def load_geometries(con):
 
 
 def find_groundstate_impl(con, lat, sign, x_name, table_name, sign_name):
-
-    x_list = np.array(con.execute(f"""
+    c = con.cursor()
+    x_list = np.array(c.execute(f"""
         SELECT {x_name} FROM {table_name}
         WHERE latvecs = ? AND {sign_name} = ? 
-        AND {x_name} > -3 AND {x_name} < 3
         GROUP BY {x_name}
         ORDER BY {x_name}
         """,
         (lat, sign)).fetchall())[:,0]
+
+    # best_sectors = []
+    # sector_energies = []
+    
+    # for x in x_list:
+    #     res = c.execute(f"""
+    #         SELECT edata, sector FROM {table_name}
+    #         WHERE {x_name} = ? AND latvecs = ? AND {sign_name} = ?""",
+    #                     (x,lat, sign) )
+    #     gse = np.inf
+    #     best_sec = None
+        
+    #     for e, sec in res:
+    #         curr_gse = convert_array(e)[0]
+    #         if  curr_gse < gse:
+    #             gse = curr_gse
+    #             best_sec = sec
+                
+        
+        
+            
+        
+
+
+    # c.close()
+
 
     sectors = list(get_sector_list(con, lat).keys())
 
@@ -43,10 +68,9 @@ def find_groundstate_impl(con, lat, sign, x_name, table_name, sign_name):
     for sector in sectors:
         
         
-        res = con.execute(f"""
+        res = c.execute(f"""
         SELECT {x_name}, edata FROM {table_name}
         WHERE sector = ? AND latvecs = ? AND {sign_name} = ? 
-        AND {x_name} > -3 AND {x_name} < 3
         ORDER BY {x_name}
         """,
         (sector, lat, sign))
@@ -56,7 +80,7 @@ def find_groundstate_impl(con, lat, sign, x_name, table_name, sign_name):
             e = convert_array(e)[0]
             tmp.append(e)
 
-        assert len(tmp) == len(x_list), f"Lengths don't match - {len(tmp)} != {len(x_list)}"
+        assert len(tmp) == len(x_list), f"sector {sector} - Lengths don't match - {len(tmp)} != {len(x_list)}"
         energy_list.append(tmp)
 
     best_sectors = []
@@ -70,6 +94,7 @@ def find_groundstate_impl(con, lat, sign, x_name, table_name, sign_name):
         best_sectors.append(best_sector_idx)
         sector_energies.append(E_set[best_sector_idx])
 
+    c.close()
     return x_list, best_sectors, sector_energies, sectors
         
         
@@ -105,6 +130,24 @@ class RingInterpolator:
         x_list_minus, E_list_minus, expO_list_minus = data_importer(-1)
         expO_series_minus = process_expO(expO_list_minus)
 
+    
+        mask_plus = np.diff(np.hstack((x_list_plus,np.inf))) > 1e-10
+        mask_minus = np.diff(np.hstack((x_list_minus,np.inf))) > 1e-10
+
+        print(mask_plus, x_list_plus, len(mask_plus), len(x_list_plus))
+
+        x_list_plus =np.array( x_list_plus)[mask_plus]
+        E_list_plus =np.array( E_list_plus)[mask_plus, :]
+
+        x_list_minus = np.array(x_list_minus)[mask_minus]
+        E_list_minus = np.array(E_list_minus)[mask_minus, :]
+        
+        for sl in range(4):
+            expO_series_minus[sl] = np.array(expO_series_minus[sl])[mask_minus]
+            expO_series_plus[sl] = np.array(expO_series_plus[sl])[mask_plus]
+
+        
+
         E_list_plus = np.sort(E_list_plus, axis=-1)
         E_list_minus = np.sort(E_list_minus, axis=-1)
     
@@ -127,8 +170,7 @@ class RingInterpolator:
         self.E_list = {1: E_list_plus, -1:E_list_minus}
         self.expO_series = {1: expO_series_plus, -1: expO_series_minus}
     
-        assert all(np.diff(x_list_plus) > 1e-10)
-        assert all(np.diff(x_list_minus) > 1e-10)
+        
             
     def interpolate_ring(self, sign, x, check=True):
         if x > np.max(self.x_list[sign]):

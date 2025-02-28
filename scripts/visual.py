@@ -107,7 +107,10 @@ def plot_parallelepiped(ax, a, origin=np.array([0, 0, 0])):
 
 def plot_atoms(ax, p:Lattice, atom_list=None, fmt_dict=None):
     if atom_list is None:
-        atom_list = p.atoms
+        atom_list = []
+        for a in p.atoms:
+            if a is not None:
+                atom_list.append(a)
     if fmt_dict is None:
         gen = ColorAlphabet()
         fmt_dict = {a.sl_name: {'color':gen()} for a in p.primitive.atoms}

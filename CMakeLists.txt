@@ -48,14 +48,37 @@ endfunction()
 #target_include_directories(test_arpack_SLU PUBLIC ARPACK::ARPACK)
 #target_link_libraries(test_arpack_SLU ARPACK::ARPACK superlu::superlu)
 
+
+# Find HDF5 (both C and C++ versions)
+find_package(HDF5 REQUIRED COMPONENTS C CXX)
+
+
+# Debugging output
+message(STATUS "HDF5 Include Dirs: ${HDF5_INCLUDE_DIRS}")
+message(STATUS "HDF5 Libraries: ${HDF5_LIBRARIES} ${HDF5_CXX_LIBRARIES}")
+
+# Ensure we use the correct libraries in case imported targets are missing
+set(HDF5_C_LIBS "")
+set(HDF5_CXX_LIBS "")
+
+if(HDF5_C_LIBRARIES)
+    set(HDF5_C_LIBS ${HDF5_C_LIBRARIES})
+elseif(TARGET HDF5::HDF5_C)
+    set(HDF5_C_LIBS HDF5::HDF5_C)
+endif()
+
+if(HDF5_CXX_LIBRARIES)
+    set(HDF5_CXX_LIBS ${HDF5_CXX_LIBRARIES})
+elseif(TARGET HDF5::HDF5_CXX)
+    set(HDF5_CXX_LIBS HDF5::HDF5_CXX)
+endif()
+
 # main functions
 add_executable(gen_spinon_basis
     src/gen_spinon_basis.cpp
     src/tetra_graph_io.cpp
     src/pyro_tree.cpp
 )
-
-
 
 add_executable(gen_spinon_basis_parallel
     src/gen_spinon_basis_parallel.cpp
@@ -73,6 +96,12 @@ add_executable(gen_spinon_basis_parallel
 #
 
 
+target_include_directories(gen_spinon_basis PRIVATE ${HDF5_INCLUDE_DIRS})
+target_link_libraries(gen_spinon_basis PRIVATE ${HDF5_C_LIBS} ${HDF5_CXX_LIBS})
+
+target_include_directories(gen_spinon_basis_parallel PRIVATE ${HDF5_INCLUDE_DIRS})
+target_link_libraries(gen_spinon_basis_parallel PRIVATE ${HDF5_C_LIBS} ${HDF5_CXX_LIBS})
+
 
 
 # TARGET_INCLUDE_DIRECTORIES(build_hamiltonian PUBLIC PARPACK::PARPACK)
@@ -84,7 +113,7 @@ add_executable(gen_spinon_basis_parallel
 if(CMAKE_BUILD_TYPE STREQUAL "Release")
     set(CMAKE_CXX_FLAGS "-DNDEBUG -Ofast")
 else()
-    set(CMAKE_CXX_FLAGS "-Wall -Wpedantic -g -O0")
+    set(CMAKE_CXX_FLAGS "-Wall -Wpedantic -g -O0 -D_GLIBCXX_USE_CXX11_ABI=1")
     target_compile_definitions(gen_spinon_basis_parallel PRIVATE VERBOSITY=2)
     target_compile_definitions(gen_spinon_basis PRIVATE VERBOSITY=2)
 

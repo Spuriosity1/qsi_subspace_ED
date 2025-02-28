@@ -10,41 +10,6 @@ import scipy.sparse as sp
 from bit_tools import bitperm, make_state, as_mask
 
 
-# inefficient implementation
-
-def calc_spinonfree_basis(lat: Lattice):
-    # input -> a Lattice object
-    # output -> Sz, a set of bitstrings with spins corresponding to the order of lat.atoms; the basis vectors
-
-    N_ATOMS = len(lat.atoms)
-    N_UP_TETRAS = N_ATOMS // 4
-    assert N_ATOMS % 4 == 0, "natoms must be a multiple of 4"
-    T_up, T_down = pyrochlore.get_tetras(lat)
-    # strategy: can tile the full lattice using up tetras
-    # iterate exhaustively through the set of up tetras configs,
-    # reject those that make spinons on down tetras
-    states_2I2O = [0b0011, 0b0101, 0b1001, 0b0110, 0b1010, 0b1100]
-    basis = []
-
-    B_masks = np.array([as_mask(tB.members) for tB in T_down])
-
-    for tetra_states in tqdm(itertools.product(*[
-            states_2I2O]*N_UP_TETRAS), total=6**N_UP_TETRAS):
-        state = 0
-        for t, t_state in zip(T_up, tetra_states):
-            state |= make_state(t.members, t_state)
-
-        good = True
-        # filter out B spinons
-        for tB_mask in B_masks:
-            if (state & tB_mask).bit_count() != 2:
-                good = False
-                break
-        if good:
-            basis.append(state)
-
-    return sorted(basis)
-
 
 def all_unique(l: list):
     return len(set(l)) == len(l)
@@ -104,7 +69,16 @@ class RingflipHamiltonian:
                 for b in self.basis[sector]:
                     f.write('0x%08x\n' % b)
 
-    def load_basis(self, fname):
+    def load_basis(self, fname, sectorfunc=None):
+        """
+        loads the basis from file
+        @param fname: the filename to load, in CSV format
+        @param sectorfunc: a funciton taking two arguments (lat and state)
+            returning an immutable type. The basis is stored as a dict 
+            with the outputs of sectorfunc treated as keys.
+        """
+        if sectorfunc is None:
+            def sectorfunc(lat, state): return 0
         print("Loading basis...\n")
         self.basis = {}
         line_no = 0
@@ -114,7 +88,7 @@ class RingflipHamiltonian:
                 if not line.startswith("0x"):
                     continue
                 state = int(line, 16)
-                sector = calc_polarisation(self.lattice, state)
+                sector = sectorfunc(self.lattice, state)
                 if sector in self.basis:
                     self.basis[sector].append(state)
                 else:
@@ -139,7 +113,7 @@ class RingflipHamiltonian:
     def basis_dim(self):
         return sum(len(b) for b in self.basis.values())
 
-    def calc_basis(self, nthread=1, recalc=False):
+    def calc_basis(self, nthread=1, recalc=False, sectorfunc=None):
         pyrochlore.export_json(self.lattice, self.latfile_loc)
 
         if recalc:
@@ -154,7 +128,7 @@ class RingflipHamiltonian:
                 "No basis file has been generated (expected " +
                 self.basisfile_loc + "). run with recalc=True to generate")
 
-        self.load_basis(self.basisfile_loc)
+        self.load_basis(self.basisfile_loc, sectorfunc)
 
         print(f"Basis stats: {len(self.basis)} charge sectors, total dim {self.basis_dim}")
 

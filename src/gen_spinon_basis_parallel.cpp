@@ -32,9 +32,7 @@ int main (int argc, char *argv[]) {
 	printf("Building state tree...\n");
 	L.build_state_tree();
 	
-	FILE* outfile = std::fopen(basis_file.c_str(), "w");
-	L.write_basis_file(outfile);
-	std::fclose(outfile);
+	L.write_basis_csv(basis_file);
 
 	return 0;
 }

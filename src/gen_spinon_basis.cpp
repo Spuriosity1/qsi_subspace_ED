@@ -34,9 +34,8 @@ int main (int argc, char *argv[]) {
 	printf("Building state tree...\n");
 	L.build_state_tree();
 	
-	FILE* outfile = std::fopen(outfilename.c_str(), "w");
-	L.write_basis_file(outfile);
-	std::fclose(outfile);
+	L.write_basis_csv(outfilename);
+	L.write_basis_hdf5(outfilename);
 
 	return 0;
 }

@@ -1,4 +1,6 @@
 #include "pyro_tree.hpp"
+#include "H5Cpp.h"
+#include <H5DataSpace.h>
 #include <cassert>
 #include <cstdint>
 #include <iostream>
@@ -7,6 +9,9 @@
 #include "bittools.hpp"
 #include "vanity.hpp"
 
+#include <H5Cpp.h>
+
+using namespace H5;
 
 
 
@@ -192,3 +197,22 @@ build_state_tree(){
 
 }
 
+
+// IO
+
+
+void pyro_vtree::write_basis_hdf5(const std::string& outfile){
+    constexpr hsize_t UINT128_SIZE = sizeof(Uint128);  // Define the size of uint128
+
+	H5File file(outfile.c_str(), H5F_ACC_TRUNC);
+	hsize_t dims[2] = {2, this->states_2I2O.size()}; // N x 2 dataset	
+	H5::DataSpace dataspace(2, dims);
+
+	
+    // Create an HDF5 opaque type for 128-bit integers
+    IntType uint128_datatype(UINT128_SIZE);
+
+	DataSet dataset = file.createDataSet("basis", uint128_datatype, dataspace);
+	dataset.write(states_2I2O.data(),uint128_datatype);
+
+}

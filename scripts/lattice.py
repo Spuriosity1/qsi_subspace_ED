@@ -273,6 +273,9 @@ class Lattice:
 
         self.atoms = []
         self.bonds = []  # format: {from_idx, to_idx, color}
+
+        self.deleted_atoms = []
+
         self._populate_atoms()
         self._populate_bonds()
 
@@ -365,10 +368,22 @@ class Lattice:
             assert (cell_idx[j] >= 0 and cell_idx[j] < self.periodicity[j])
         return (cell_idx, sl_idx)
 
+    def delete_atom_at_idx(self, idx):
+        self.atoms[idx] = None # set to None instead of popping
+        to_remove = []
+        for j, b in enumerate(self.bonds):
+            if b.from_idx == idx or b.to_idx == idx:
+                to_remove.append(j)
+
+        for mu, j in enumerate(to_remove):
+            del self.bonds[j-mu]
+
     def linear_idx_from_tuple(self, cell_idx, sl_idx):
         N = self.periodicity
-        return cell_idx[2] + N[2]*(cell_idx[1] +
+        J = cell_idx[2] + N[2]*(cell_idx[1] +
                                    N[1]*(cell_idx[0] + N[0]*sl_idx))
+        if self.atoms[J] is not None:
+            return J
 
     def as_linear_idx(self, xyz: Matrix):
         cell_idx, sl_idx = self.as_idx(xyz)

@@ -1,4 +1,5 @@
-from ringflip_hamiltonian import RingflipHamiltonian, build_matrix, ring_exp_values
+from ringflip_hamiltonian import RingflipHamiltonian, build_matrix 
+from ringflip_hamiltonian import ring_exp_values, calc_polarisation
 import scipy.sparse.linalg as sLA
 import pyrochlore
 import numpy.linalg as LA
@@ -106,7 +107,7 @@ if __name__ == "__main__":
         bfile = rfh.basisfile_loc
     else:
         bfile = a.basis_file
-    rfh.load_basis(bfile)
+    rfh.load_basis(bfile, sectorfunc=calc_polarisation)
 
 
     R3 = np.sqrt(3)
