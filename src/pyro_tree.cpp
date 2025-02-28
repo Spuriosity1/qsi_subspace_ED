@@ -1,6 +1,4 @@
 #include "pyro_tree.hpp"
-#include "H5Cpp.h"
-#include <H5DataSpace.h>
 #include <cassert>
 #include <cstdint>
 #include <iostream>
@@ -9,9 +7,8 @@
 #include "bittools.hpp"
 #include "vanity.hpp"
 
-#include <H5Cpp.h>
-
-using namespace H5;
+#include <hdf5.h>
+#include "admin.hpp"
 
 
 
@@ -202,17 +199,46 @@ build_state_tree(){
 
 
 void pyro_vtree::write_basis_hdf5(const std::string& outfile){
-    constexpr hsize_t UINT128_SIZE = sizeof(Uint128);  // Define the size of uint128
-
-	H5File file(outfile.c_str(), H5F_ACC_TRUNC);
-	hsize_t dims[2] = {2, this->states_2I2O.size()}; // N x 2 dataset	
-	H5::DataSpace dataspace(2, dims);
-
+	// do this C style because the C++ API is borked
+	//
 	
-    // Create an HDF5 opaque type for 128-bit integers
-    IntType uint128_datatype(UINT128_SIZE);
+    constexpr hsize_t UINT128_SIZE = sizeof(Uint128);  // Define the size of uint128
+	hsize_t dims[1] = {states_2I2O.size()};
 
-	DataSet dataset = file.createDataSet("basis", uint128_datatype, dataspace);
-	dataset.write(states_2I2O.data(),uint128_datatype);
+    hid_t file_id = -1, dataspace_id = -1, uint128_datatype = -1, dataset_id = -1;
+    herr_t status;
 
+    // Create a new HDF5 file
+    file_id = H5Fcreate((outfile+".h5").c_str(), H5F_ACC_TRUNC, H5P_DEFAULT, H5P_DEFAULT);
+    if (file_id < 0) goto error;
+
+    // Create a dataspace
+    dataspace_id = H5Screate_simple(1, dims, nullptr);
+    if (dataspace_id < 0) goto error;
+
+    // Create an opaque datatype for 128-bit integers
+    uint128_datatype = H5Tcreate(H5T_OPAQUE, UINT128_SIZE);
+    if (uint128_datatype < 0) goto error;
+
+    // Create the dataset
+    dataset_id = H5Dcreate(file_id, "basis", uint128_datatype, dataspace_id, H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT);
+    if (dataset_id < 0) goto error;
+
+    // Write data to the dataset
+    status = H5Dwrite(dataset_id, uint128_datatype, H5S_ALL, H5S_ALL, H5P_DEFAULT, states_2I2O.data());
+    if (status < 0) goto error;
+
+    // Cleanup and close everything
+    H5Dclose(dataset_id);
+    H5Tclose(uint128_datatype);
+    H5Sclose(dataspace_id);
+    H5Fclose(file_id);
+    return;
+
+error:
+    if (dataset_id >= 0) H5Dclose(dataset_id);
+    if (uint128_datatype >= 0) H5Tclose(uint128_datatype);
+    if (dataspace_id >= 0) H5Sclose(dataspace_id);
+    if (file_id >= 0) H5Fclose(file_id);
+    throw HDF5Error(file_id, dataspace_id, uint128_datatype, dataset_id, "write_basis");
 }
