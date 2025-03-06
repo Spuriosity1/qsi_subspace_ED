@@ -110,12 +110,11 @@ target_link_libraries(gen_spinon_basis_parallel PRIVATE ${HDF5_C_LIBS} ${HDF5_CX
 # TARGET_LINK_LIBRARIES(build_hamiltonian MPI::MPI_Fortran)
 
 
-if(CMAKE_BUILD_TYPE STREQUAL "Release")
-    set(CMAKE_CXX_FLAGS "-DNDEBUG -Ofast")
-else()
+if(CMAKE_BUILD_TYPE STREQUAL "Debug")
     set(CMAKE_CXX_FLAGS "-Wall -Wpedantic -g -O0 -D_GLIBCXX_USE_CXX11_ABI=1")
     target_compile_definitions(gen_spinon_basis_parallel PRIVATE VERBOSITY=2)
     target_compile_definitions(gen_spinon_basis PRIVATE VERBOSITY=2)
-
+else()
+    set(CMAKE_CXX_FLAGS "-DNDEBUG -Ofast")
 endif()
     
