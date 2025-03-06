@@ -6,9 +6,10 @@ import os
 from bisect import bisect_left
 import numpy as np
 import subprocess
+import time
 import scipy.sparse as sp
 from bit_tools import bitperm, make_state, as_mask
-
+from scipy.optimize import curve_fit
 
 def all_unique(ll: list):
     return len(set(ll)) == len(ll)
@@ -33,6 +34,66 @@ def search_sorted(basis_set, state):
     if J>=len(basis_set) or basis_set[J] != state:
         return None
     return J
+
+
+class BasisBenchmarker:
+    def __init__(self):
+        self.test_latfile_dir = "test/data"
+        self._popt = None
+
+    def run(self, N, nthread):
+        lengths = list(range(1,N))
+        times = [self._time_test_sim(L, nthread) for L in lengths]
+
+        self.measured = {}
+        for L, t in zip(lengths, times):
+            print(f"{L:3d} -> {t:.4f} seconds")
+            self.measured[(1, 1, L)] = t
+
+        def _model(L, A, t0):
+            return t0 + A*np.exp(L)
+
+        popt, pcov = curve_fit(_model, lengths, times,
+                               (0.1, 0.001),
+                               bounds=((0, 0), (1, np.inf))
+                               )
+        self._popt = popt
+        self._pcov = pcov
+
+
+    def estimated_runtime(self, bravais_vectors):
+        n_cells = np.abs(np.linalg.det(np.array(bravais_vectors,dtype=np.float64)))
+        A, t0 = self._popt
+        sigma_A = np.sqrt(self._pcov[0,0])
+        sigma_t0 = np.sqrt(self._pcov[1,1])
+        return (
+                A*np.exp(n_cells) + t0,
+                (A-sigma_A)*np.exp(n_cells) + t0-sigma_t0,
+                (A+sigma_A)*np.exp(n_cells) + t0+sigma_t0
+                )
+
+
+
+    def _time_test_sim(self, L, nthread):
+        latfile_loc = os.path.join(
+                self.test_latfile_dir,
+                f"testlat_1_1_{L}.json"
+                )
+        lattice = Lattice(
+            bravais_vectors=[[1, 0, 0], [0, 1, 0], [0, 0, L]],
+            primitive_suggestion=pyrochlore.primitive,
+            populate=True)
+        pyrochlore.export_json(lattice, latfile_loc)
+
+        t1 = time.time()
+        subprocess.run(
+            ["build/gen_spinon_basis_parallel",
+             latfile_loc,
+             str(nthread)])
+
+        t2 = time.time()
+
+        return t2 - t1
 
 
 class RingflipHamiltonian:
@@ -115,24 +176,33 @@ class RingflipHamiltonian:
     def basis_dim(self):
         return sum(len(b) for b in self.basis.values())
 
-    def calc_basis(self, nthread=1, recalc=False, sectorfunc=None):
+    def generate_basis_file(self, nthread):
+        subprocess.run(
+            ["build/gen_spinon_basis_parallel",
+             self.latfile_loc,
+             str(nthread)])
+
+    def calc_basis(self, nthread=1, recalc=True, force_recalc=False,
+                   sectorfunc=None):
         pyrochlore.export_json(self.lattice, self.latfile_loc)
 
-        if recalc:
-            print("Generating basis...")
-            subprocess.run(
-                ["build/gen_spinon_basis_parallel",
-                 self.latfile_loc,
-                 str(nthread)])
+        if recalc is True:
+            if os.path.exists(self.basisfile_loc):
+                print("Basis file already generated.")
+            else:
+                print("Generating basis...")
+                self.generate_basis_file(nthread)
 
-        if not os.path.exists(self.basisfile_loc):
+        if os.path.exists(self.basisfile_loc):
+                print(f"Importing {self.basisfile_loc}...")
+        else:
             raise Exception(
-                "No basis file has been generated (expected " +
+                "No basis file found (expected " +
                 self.basisfile_loc + "). run with recalc=True to generate")
 
         self.load_basis(self.basisfile_loc, sectorfunc)
 
-        print(f"Basis stats: {len(self.basis)} charge sectors, total dim {self.basis_dim}")
+        print(f"Basis stats: {len(self.basis)} sectors, total dim {self.basis_dim}")
 
     def flip_state(self, state):
         return state ^ (2**self.lattice.num_atoms - 1)
