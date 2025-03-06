@@ -105,21 +105,35 @@ def plot_parallelepiped(ax, a, origin=np.array([0, 0, 0])):
     # Plot the points themselves to force the scaling of the axes
     ax.scatter(points[:, 0], points[:, 1], points[:, 2], s=0)
 
-def plot_atoms(ax, p:Lattice, atom_list=None, fmt_dict=None):
+
+def plot_atoms(ax, p: Lattice, atom_list=None, fmt_dict=None):
     if atom_list is None:
-        atom_list = []
-        for a in p.atoms:
-            if a is not None:
-                atom_list.append(a)
+        atom_list = p.atoms
     if fmt_dict is None:
         gen = ColorAlphabet()
-        fmt_dict = {a.sl_name: {'color':gen()} for a in p.primitive.atoms}
+        fmt_dict = {a.sl_name: {'color': gen()} for a in p.primitive.atoms}
     if len(fmt_dict) != len(p.primitive.atoms):
         raise ValueError("Provided format dict must have same number of keys as sublattices")
 
     for j, a in enumerate(atom_list):
+        assert a is not None
         ax.plot(*a.xyz, 'o', **fmt_dict[a.sl_name])
         ax.text(*a.xyz, j)
+
+
+def show_state(ax, lat, state: int, emph=()):
+    for j, a in enumerate(lat.atoms):
+        assert a is not None
+        c = 'k'
+        if state & (1 << j):
+            c = 'white'
+        alph = 1.0
+        if len(emph) > 0 and j not in emph:
+            alph = 0.4
+
+        ax.plot(*a.xyz, 'o', color=c, mec='k', alpha=alph)
+        ax.text(*a.xyz, j)
+
 
 def plot_bonds(ax, p:Lattice, bond_list=None, fmt_dict=None):
     if bond_list is None:

@@ -6,6 +6,7 @@ from sympy import Matrix, Rational, ZZ, denom, gcd, nsimplify
 from sympy.matrices.normalforms import smith_normal_decomp
 from sympy.functions.elementary.integers import floor
 from sympy.matrices.dense import diag
+import numpy as np
 import itertools
 
 ########################################
@@ -256,7 +257,8 @@ def reshape_primitive_cell(cell: PrimitiveCell, bravais: Matrix):
 
 
 class Lattice:
-    def __init__(self, primitive_suggestion: PrimitiveCell, bravais_vectors):
+    def __init__(self, primitive_suggestion: PrimitiveCell, bravais_vectors,
+                 populate=True):
         '''
          @param primitive         A primitive unit cell of the lattice. 
                                   This class may choose a different one to 
@@ -274,10 +276,14 @@ class Lattice:
         self.atoms = []
         self.bonds = []  # format: {from_idx, to_idx, color}
 
-        self.deleted_atoms = []
-
-        self._populate_atoms()
-        self._populate_bonds()
+        # XYZ hash to idx table
+        self.atom_lookup = {i: None for i in range(self.primitive.num_atoms
+                                    * self.periodicity[0]   
+                                    * self.periodicity[1]   
+                                    * self.periodicity[2])}
+        if populate:
+            self._populate_atoms()
+            self._populate_bonds()
 
     def shape_hash(self):
         return "%d_%d_%d" % tuple(self.periodicity) + "x" + self.primitive.shape_hash()
@@ -302,10 +308,16 @@ class Lattice:
         # suggests a good way to index it in terms of the A1 A2 A3 := (a1 a2 a3) S-1
         # see INDEXING.md for details
 
-        if not all([x.is_rational for x in bravais_vectors]):
+        if not all([x.is_integer for x in bravais_vectors]):
             raise TypeError("Bravais vectors must be integers")
 
-        D, S, T = smith_normal_decomp(bravais_vectors, ZZ)
+        if bravais_vectors.is_diagonal:
+            D = bravais_vectors
+            S = Matrix([[1,0,0],[0,1,0],[0,0,1]])
+            T = Matrix([[1,0,0],[0,1,0],[0,0,1]])
+        else:
+            D, S, T = smith_normal_decomp(bravais_vectors, ZZ)
+
         self.periodicity = [int(x) for x in D.diagonal()]
         self.primitive = reshape_primitive_cell(primitive_suggestion, S.inv())
 
@@ -314,6 +326,10 @@ class Lattice:
             for ix, iy, iz in self.enumerate_primitives():
                 delta = self.primitive.lattice_vectors @ Matrix(
                         [ix, iy, iz])
+
+                J_raw = self.hash_tuple(*self.cell_index(sl.xyz + delta))
+
+                self.atom_lookup[J_raw] = len(self.atoms)
                 self.atoms.append(
                         Atom(sl.sl_name, sl.xyz + delta)
                         )
@@ -334,7 +350,7 @@ class Lattice:
                         color=b.color
                         ))
 
-    def as_idx(self, xyz: Matrix):
+    def cell_index(self, xyz: Matrix):
         '''
         Takes in the xyz poisition, returns a site index
         Note: after rolling, all xyz must have the form
@@ -369,7 +385,7 @@ class Lattice:
         return (cell_idx, sl_idx)
 
     def delete_atom_at_idx(self, idx):
-        self.atoms[idx] = None # set to None instead of popping
+        del self.atoms[idx]
         to_remove = []
         for j, b in enumerate(self.bonds):
             if b.from_idx == idx or b.to_idx == idx:
@@ -378,23 +394,35 @@ class Lattice:
         for mu, j in enumerate(to_remove):
             del self.bonds[j-mu]
 
-    def linear_idx_from_tuple(self, cell_idx, sl_idx):
+        # shuffle indices
+        for b in self.bonds:
+            if b.from_idx > idx:
+                b.from_idx -= 1
+            if b.to_idx > idx:
+                b.to_idx -= 1
+
+        for J_raw in self.atom_lookup:
+            if self.atom_lookup[J_raw] == idx:
+                self.atom_lookup[J_raw] = None
+            elif self.atom_lookup[J_raw] > idx:
+                self.atom_lookup[J_raw] -= 1
+
+
+    def hash_tuple(self, cell_idx, sl_idx):
         N = self.periodicity
         J = cell_idx[2] + N[2]*(cell_idx[1] +
                                    N[1]*(cell_idx[0] + N[0]*sl_idx))
-        if self.atoms[J] is not None:
-            return J
+        return J
 
     def as_linear_idx(self, xyz: Matrix):
-        cell_idx, sl_idx = self.as_idx(xyz)
-        return self.linear_idx_from_tuple(cell_idx, sl_idx)
+        cell_idx, sl_idx = self.cell_index(xyz)
+        return self.atom_lookup[
+                self.hash_tuple(cell_idx, sl_idx)
+                ]
 
     @property
     def num_atoms(self):
-        n = self.primitive.num_atoms
-        for j in range(3):
-            n *= self.periodicity[j]
-        return n
+        return len(self.atoms)
 
     def wrap_coordinate(self, xyz):
         return _wrap_coordinate(self.lattice_vectors, xyz)
@@ -406,7 +434,7 @@ def listify(X):
     return [float(x) for x in X]
 
 
-def to_dict(lat:Lattice):
+def to_dict(lat: Lattice):
     output = {}
     output["primitive"] = {}
     a = lat.primitive.lattice_vectors
@@ -422,10 +450,11 @@ def to_dict(lat:Lattice):
         'A1': listify(A[:, 1]),
         'A2': listify(A[:, 2])
     }
-    output["atoms"] = [{
-        'xyz': listify(a.xyz),
-        'sl': a.sl_name
-    }
+    output["atoms"] = [
+        {
+            'xyz': listify(a.xyz),
+            'sl': a.sl_name
+        }
         for a in lat.atoms]
     output["bonds"] = [{
         'from_idx': b.from_idx,
@@ -435,8 +464,9 @@ def to_dict(lat:Lattice):
         for b in lat.bonds]
     return output
 
+
 def from_dict(data: dict, primitive_spec: PrimitiveCell):
-# Extract the primitive lattice vectors and Bravais vectors
+    # Extract the primitive lattice vectors and Bravais vectors
     a = from_cols(*data["primitive"]["lattice_vectors"].values())
     primitive_cell = PrimitiveCell(a)
     for sl in primitive_spec.sublattices:
@@ -448,7 +478,8 @@ def from_dict(data: dict, primitive_spec: PrimitiveCell):
     bv = primitive_cell.lattice_vectors.solve(A)
 
     lat = Lattice(primitive_suggestion=primitive_cell,
-                  bravais_vectors=Matrix(3,3, lambda i,j : int(bv[i,j]) ))
+                  bravais_vectors=Matrix(3, 3, lambda i, j: int(bv[i, j])),
+                  populate=False)
 
     for a in data['atoms']:
         x = nsimplify(Matrix(a['xyz']), rational=True)
@@ -461,7 +492,7 @@ def from_dict(data: dict, primitive_spec: PrimitiveCell):
                               color='k'))
 
     return lat
-    
+
 
 # SYMMETRY OPERATIONS
 def get_transl_generators(lat: Lattice):

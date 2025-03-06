@@ -25,6 +25,44 @@ def load_geometries(con):
     return lats
 
 
+def find_groundstate_impl2(con, lat, sign, x_name, table_name, sign_name):
+    c = con.cursor()
+    x_list = np.array(c.execute(f"""
+        SELECT {x_name} FROM {table_name}
+        WHERE latvecs = ? AND {sign_name} = ? 
+        GROUP BY {x_name}
+        ORDER BY {x_name}
+        """,
+        (lat, sign)).fetchall())[:,0]
+
+    for x in x_list:
+
+    # best_sectors = []
+    # sector_energies = []
+    
+    # for x in x_list:
+    #     res = c.execute(f"""
+    #         SELECT edata, sector FROM {table_name}
+    #         WHERE {x_name} = ? AND latvecs = ? AND {sign_name} = ?""",
+    #                     (x,lat, sign) )
+    #     gse = np.inf
+    #     best_sec = None
+        
+    #     for e, sec in res:
+    #         curr_gse = convert_array(e)[0]
+    #         if  curr_gse < gse:
+    #             gse = curr_gse
+    #             best_sec = sec
+                
+        
+        
+            
+        
+
+
+    # c.close()
+
+
 def find_groundstate_impl(con, lat, sign, x_name, table_name, sign_name):
     c = con.cursor()
     x_list = np.array(c.execute(f"""
@@ -122,7 +160,7 @@ def process_expO(raw):
 
 
 class RingInterpolator:
-    def __init__(self, data_importer, interpolation_f=CubicSpline):
+    def __init__(self, data_importer, interpolation_f=CubicSpline, n_energies=5):
         
         x_list_plus, E_list_plus, expO_list_plus = data_importer(1)
         expO_series_plus = process_expO(expO_list_plus)
@@ -156,15 +194,10 @@ class RingInterpolator:
             -1: [ interpolation_f(x_list_minus, expO_series_minus[sl]) for sl in range(4)]
         }
 
-        self.gse_interpolators = {
-             1 : interpolation_f(x_list_plus, np.array(E_list_plus)[:,0]),
-            -1 : interpolation_f(x_list_minus, np.array(E_list_minus)[:,0])
-        }
-
-        self.es1_interpolators = {
-             1 : interpolation_f(x_list_plus, np.array(E_list_plus)[:,1]),
-            -1 : interpolation_f(x_list_minus, np.array(E_list_minus)[:,1])
-        }
+        self.E_interpolators = [{
+             1 : interpolation_f(x_list_plus, np.array(E_list_plus)[:,n]),
+            -1 : interpolation_f(x_list_minus, np.array(E_list_minus)[:,n])
+        } for n in range(n_energies)]
 
         self.x_list = {1: x_list_plus, -1:x_list_minus}
         self.E_list = {1: E_list_plus, -1:E_list_minus}
@@ -203,8 +236,8 @@ class RingInterpolator:
         
         sign = 1 if g[3] >= 0 else -1
         
-        e1 = self.es1_interpolators[sign](x)
-        e0 = self.gse_interpolators[sign](x)
+        e0 = self.E_interpolators[0][sign](x)
+        e1 = self.E_interpolators[1][sign](x)
 
         if x > np.max(self.x_list[sign]):
             # if check:

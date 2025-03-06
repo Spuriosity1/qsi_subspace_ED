@@ -1,15 +1,18 @@
 # import itertools
-def as_mask(spin_indices) -> int:
+def as_mask(spin_indices: list) -> int:
     mask = 0
     for j in spin_indices:
         mask |= 1 << j
     return mask
 
-def make_state(spin_indices: list, state:int):
+
+def make_state(spin_indices: list, state: int):
     # state = n-bit integer
     mask = 0
-    for i, spin_idx in enumerate(spin_indices):
-        mask |= ((state & (1 << i)) >> i) << spin_idx 
+    i = 0
+    for spin_idx in spin_indices:
+        mask |= ((state & (1 << i)) >> i) << spin_idx
+        i += 1
     return mask
 
 

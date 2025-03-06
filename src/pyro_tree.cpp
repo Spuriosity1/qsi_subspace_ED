@@ -200,12 +200,10 @@ build_state_tree(){
 
 void pyro_vtree::write_basis_hdf5(const std::string& outfile){
 	// do this C style because the C++ API is borked
-	//
-	
-    constexpr hsize_t UINT128_SIZE = sizeof(Uint128);  // Define the size of uint128
-	hsize_t dims[1] = {states_2I2O.size()};
+	//	
+	hsize_t dims[2] = {states_2I2O.size(),2};
 
-    hid_t file_id = -1, dataspace_id = -1, uint128_datatype = -1, dataset_id = -1;
+    hid_t file_id = -1, dataspace_id = -1, dataset_id = -1;
     herr_t status;
 
     // Create a new HDF5 file
@@ -213,32 +211,26 @@ void pyro_vtree::write_basis_hdf5(const std::string& outfile){
     if (file_id < 0) goto error;
 
     // Create a dataspace
-    dataspace_id = H5Screate_simple(1, dims, nullptr);
+    dataspace_id = H5Screate_simple(2, dims, nullptr);
     if (dataspace_id < 0) goto error;
 
-    // Create an opaque datatype for 128-bit integers
-    uint128_datatype = H5Tcreate(H5T_OPAQUE, UINT128_SIZE);
-    if (uint128_datatype < 0) goto error;
-
     // Create the dataset
-    dataset_id = H5Dcreate(file_id, "basis", uint128_datatype, dataspace_id, H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT);
+    dataset_id = H5Dcreate(file_id, "basis", H5T_NATIVE_UINT64, dataspace_id, H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT);
     if (dataset_id < 0) goto error;
 
     // Write data to the dataset
-    status = H5Dwrite(dataset_id, uint128_datatype, H5S_ALL, H5S_ALL, H5P_DEFAULT, states_2I2O.data());
+    status = H5Dwrite(dataset_id, H5T_NATIVE_UINT64, H5S_ALL, H5S_ALL, H5P_DEFAULT, states_2I2O.data());
     if (status < 0) goto error;
 
     // Cleanup and close everything
     H5Dclose(dataset_id);
-    H5Tclose(uint128_datatype);
     H5Sclose(dataspace_id);
     H5Fclose(file_id);
     return;
 
 error:
     if (dataset_id >= 0) H5Dclose(dataset_id);
-    if (uint128_datatype >= 0) H5Tclose(uint128_datatype);
     if (dataspace_id >= 0) H5Sclose(dataspace_id);
     if (file_id >= 0) H5Fclose(file_id);
-    throw HDF5Error(file_id, dataspace_id, uint128_datatype, dataset_id, "write_basis");
+    throw HDF5Error(file_id, dataspace_id, dataset_id, "write_basis");
 }
