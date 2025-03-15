@@ -373,16 +373,21 @@ y_ring_ham needs to be changed otherwise"
 
 
 
-def ring_exp_values(H: RingflipHamiltonian, sector, psi):
+def ring_exp_values(H: RingflipHamiltonian, sector, psi, include_imag=False):
     """
     calculates <psi| O + Odag |psi> for all ringflips involved
     psi is one or several wavefunctions.
     """
     tallies = []
+    tallies_im = []
 
-    ringxc_ops, _ = H.build_ringops(sector)
 
-    for ring_O in ringxc_ops:
+    for ring_O, ring_L in zip(*H.build_ringops(sector)):
         tallies.append(psi.conj().T @ ring_O @ psi)
+        if include_imag:
+            tallies_im.append(1j*psi.conj().T @ (ring_L-ring_L.T) @ psi)
 
-    return tallies
+    if include_imag:
+        return tallies, tallies_im
+    else:
+        return tallies

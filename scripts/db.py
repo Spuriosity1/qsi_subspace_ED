@@ -48,18 +48,19 @@ def get_sector_list(con, lat):
 def init_db(con):
     con.execute("""
         create table field_110 ( g01_g23 REAL, g23_sign INTEGER,
-                edata BLOB, 
-                expO0 REAL, 
-                expO1 REAL, expO2 REAL, expO3 REAL, latvecs BLOB, sector BLOB)
+                edata BLOB,
+                reO0 BLOB, reO1 BLOB, reO2 BLOB, reO3 BLOB,
+                imO0 BLOB, imO1 BLOB, imO2 BLOB, imO3 BLOB,
+                latvecs BLOB, sector BLOB
+                )
                 """)
     con.execute("""
 create table field_111 ( g0_g123 REAL, g123_sign INTEGER,
                         edata BLOB,
-                        expO0 REAL, expO1 REAL, expO2 REAL, expO3 REAL,
-                        latvecs BLOB, sector BLOB)
+                reO0 BLOB, reO1 BLOB, reO2 BLOB, reO3 BLOB,
+                imO0 BLOB, imO1 BLOB, imO2 BLOB, imO3 BLOB,
+                latvecs BLOB, sector BLOB)
                 """)
-
-
 
 
 

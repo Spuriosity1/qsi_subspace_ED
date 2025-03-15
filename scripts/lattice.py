@@ -295,6 +295,7 @@ class Lattice:
 
     @property
     def lattice_vectors(self):
+        # Returns a matrix of lattice vectors (understood as cols)
         return self.primitive.lattice_vectors @ diag(self.periodicity, unpack=True)
 
     def establish_primitive_cell(self, primitive_suggestion, bravais_vectors: Matrix):
@@ -313,26 +314,28 @@ class Lattice:
 
         if bravais_vectors.is_diagonal:
             D = bravais_vectors
-            S = Matrix([[1,0,0],[0,1,0],[0,0,1]])
-            T = Matrix([[1,0,0],[0,1,0],[0,0,1]])
+            S = Matrix([[1, 0, 0], [0, 1, 0], [0, 0, 1]])
+            T = Matrix([[1, 0, 0], [0, 1, 0], [0, 0, 1]])
         else:
             D, S, T = smith_normal_decomp(bravais_vectors, ZZ)
 
         self.periodicity = [int(x) for x in D.diagonal()]
         self.primitive = reshape_primitive_cell(primitive_suggestion, S.inv())
 
+    def add_atom(self, a: Atom):
+        J_raw = self.hash_tuple(*self.cell_index(a.xyz))
+        self.atom_lookup[J_raw] = len(self.atoms)
+        self.atoms.append(a)
+
     def _populate_atoms(self):
         for sl in self.primitive.sublattices:
             for ix, iy, iz in self.enumerate_primitives():
                 delta = self.primitive.lattice_vectors @ Matrix(
                         [ix, iy, iz])
-
-                J_raw = self.hash_tuple(*self.cell_index(sl.xyz + delta))
-
-                self.atom_lookup[J_raw] = len(self.atoms)
-                self.atoms.append(
+                self.add_atom(
                         Atom(sl.sl_name, sl.xyz + delta)
                         )
+
 
     def _populate_bonds(self):
         for a in self.primitive.sublattices:
@@ -459,7 +462,8 @@ def to_dict(lat: Lattice):
     output["bonds"] = [{
         'from_idx': b.from_idx,
         'to_idx': b.to_idx,
-        'bond_delta': listify(b.bond_delta)
+        'bond_delta': listify(b.bond_delta),
+        'color': b.color
     }
         for b in lat.bonds]
     return output
@@ -481,15 +485,18 @@ def from_dict(data: dict, primitive_spec: PrimitiveCell):
                   bravais_vectors=Matrix(3, 3, lambda i, j: int(bv[i, j])),
                   populate=False)
 
-    for a in data['atoms']:
+    assert len(lat.atoms) == 0
+    for J, a in enumerate(data['atoms']):
         x = nsimplify(Matrix(a['xyz']), rational=True)
-        lat.atoms.append(Atom(sl_name=a['sl'], xyz=x))
+        lat.add_atom(Atom(sl_name=a['sl'], xyz=x))
 
     for b in data['bonds']:
+        bd = Matrix(b['bond_delta'])
+        bc = b['color'] if 'color' in b else 0
         lat.bonds.append(Bond(from_idx=b['from_idx'],
                               to_idx=b['to_idx'],
-                              bond_delta=Matrix(b['bond_delta']),
-                              color='k'))
+                              bond_delta=bd,
+                              color=bc))
 
     return lat
 

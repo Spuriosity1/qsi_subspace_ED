@@ -139,7 +139,7 @@ def plot_bonds(ax, p:Lattice, bond_list=None, fmt_dict=None):
     if bond_list is None:
         bond_list = p.bonds
 
-    bond_sls = set([b.color for b in p.primitive.bonds])
+    bond_sls = set([b.color for b in p.bonds])
 
     if fmt_dict is None:
         gen = ColorAlphabet()

@@ -59,23 +59,27 @@ def calc_ring_exp_vals(rfh: RingflipHamiltonian, g, sector, algo='sparse',
     degen_energy = e[mask]
     degen_psi = v[:, mask]
     # print(f"degeneracy: {degen_energy.shape[0]}")
-    O_list = ring_exp_values(rfh, sector, degen_psi)
+    rO_list, iO_list = ring_exp_values(rfh, sector, degen_psi, include_imag=True)
 
-    tallies = {}
+    sum_reO = {}
+    sum_imO = {}
     num_entries = {}
     for ring in rfh.ringflips:
-        tallies[ring.sl] = 0.
+        sum_reO[ring.sl] = 0.
+        sum_imO[ring.sl] = 0.
         num_entries[ring.sl] = 0
 
-    for ring, O in zip(rfh.ringflips, O_list):
-        tallies[ring.sl] += O
+    for ring, reO, imO in zip(rfh.ringflips, rO_list, iO_list):
+        sum_reO[ring.sl] += np.real(reO)
+        sum_imO[ring.sl] += np.real(imO)
         num_entries[ring.sl] += 1
 
-    for k in tallies:
+    for k in sum_reO:
         if num_entries[k] > 0:
-            tallies[k] /= num_entries[k]
+            sum_reO[k] /= num_entries[k]
+            sum_imO[k] /= num_entries[k]
 
-    return e, tallies  # , degen_energy.shape[0]
+    return e, sum_reO, sum_imO  # , degen_energy.shape[0]
 
 
 

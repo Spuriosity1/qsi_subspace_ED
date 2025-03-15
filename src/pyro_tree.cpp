@@ -1,4 +1,5 @@
 #include "pyro_tree.hpp"
+#include <H5public.h>
 #include <cassert>
 #include <cstdint>
 #include <iostream>
@@ -197,6 +198,25 @@ build_state_tree(){
 
 // IO
 
+void pyro_vtree::write_basis_csv(const std::string &outfilename) {
+	FILE *outfile = std::fopen((outfilename + ".csv").c_str(), "w");
+	for (auto b : this->states_2I2O) {
+	  write_line(outfile, b);
+	}
+
+	std::fclose(outfile);
+}
+
+void pyro_vtree_parallel::write_basis_csv(const std::string& outfilename)
+{
+	FILE *outfile = std::fopen((outfilename+".csv").c_str(), "w");
+	for (auto states_2I2O : state_set) {
+		for (auto b : states_2I2O) {
+			write_line(outfile, b);
+		}
+	}
+	std::fclose(outfile);
+}
 
 void pyro_vtree::write_basis_hdf5(const std::string& outfile){
 	// do this C style because the C++ API is borked
@@ -207,7 +227,8 @@ void pyro_vtree::write_basis_hdf5(const std::string& outfile){
     herr_t status;
 
     // Create a new HDF5 file
-    file_id = H5Fcreate((outfile+".h5").c_str(), H5F_ACC_TRUNC, H5P_DEFAULT, H5P_DEFAULT);
+    file_id = H5Fcreate((outfile+".h5").c_str(), H5F_ACC_TRUNC, H5P_DEFAULT,
+			H5P_DEFAULT);
     if (file_id < 0) goto error;
 
     // Create a dataspace
@@ -215,11 +236,13 @@ void pyro_vtree::write_basis_hdf5(const std::string& outfile){
     if (dataspace_id < 0) goto error;
 
     // Create the dataset
-    dataset_id = H5Dcreate(file_id, "basis", H5T_NATIVE_UINT64, dataspace_id, H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT);
+    dataset_id = H5Dcreate(file_id, "basis", H5T_NATIVE_UINT64, dataspace_id,
+			H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT);
     if (dataset_id < 0) goto error;
 
     // Write data to the dataset
-    status = H5Dwrite(dataset_id, H5T_NATIVE_UINT64, H5S_ALL, H5S_ALL, H5P_DEFAULT, states_2I2O.data());
+    status = H5Dwrite(dataset_id, H5T_NATIVE_UINT64, H5S_ALL, H5S_ALL,
+			H5P_DEFAULT, states_2I2O.data());
     if (status < 0) goto error;
 
     // Cleanup and close everything
@@ -234,3 +257,79 @@ error:
     if (file_id >= 0) H5Fclose(file_id);
     throw HDF5Error(file_id, dataspace_id, dataset_id, "write_basis");
 }
+
+
+
+void pyro_vtree_parallel::write_basis_hdf5(const std::string& outfile){
+	// do this C style because the C++ API is borked
+	
+	hsize_t dims[2] = {n_states(),2};
+	hsize_t row_offset, block_rows;
+	hsize_t start[2];
+	hsize_t block[2];
+
+    hid_t file_id = -1, dataspace_id = -1, dataset_id = -1, memspace_id=-1;
+    herr_t status;
+	int idx;
+
+    // Create a new HDF5 file
+    file_id = H5Fcreate((outfile+".h5").c_str(), H5F_ACC_TRUNC, H5P_DEFAULT,
+			H5P_DEFAULT);
+    if (file_id < 0) goto error;
+
+    // Create a dataspace
+    dataspace_id = H5Screate_simple(2, dims, nullptr);
+    if (dataspace_id < 0) goto error;
+
+    // Create the dataset
+    dataset_id = H5Dcreate(file_id, "basis", H5T_NATIVE_UINT64, dataspace_id,
+			H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT);
+    if (dataset_id < 0) goto error;
+
+    // Write data to the dataset
+	row_offset = 0;
+	for (idx=0; idx<state_set.size(); idx++){	
+		if (state_set[idx].empty()) continue;
+
+		block_rows = state_set[idx].size();  // Number of rows to write
+		start[0] = row_offset;  // Start at correct row
+        block[0] = block_rows;  // Block size (N x 2)
+
+        // Create a hyperslab selection in the dataset
+        hid_t memspace_id = H5Screate_simple(2, block, nullptr);
+        if (memspace_id < 0) goto error;
+
+        status = H5Sselect_hyperslab(dataspace_id, H5S_SELECT_SET, start, nullptr, block, nullptr);
+        if (status < 0) {
+            H5Sclose(memspace_id);
+            goto error;
+        }
+
+        status = H5Dwrite(dataset_id, H5T_NATIVE_UINT64, memspace_id, dataspace_id, H5P_DEFAULT, state_set[idx].data());
+        if (status < 0) {
+            H5Sclose(memspace_id);
+            goto error;
+        }
+
+        H5Sclose(memspace_id);
+        row_offset += block_rows;  // Move write position forward
+
+	}
+
+    // Cleanup and close everything
+    H5Dclose(dataset_id);
+    H5Sclose(dataspace_id);
+    H5Fclose(file_id);
+    return;
+
+error:
+    if (dataset_id >= 0) H5Dclose(dataset_id);
+    if (dataspace_id >= 0) H5Sclose(dataspace_id);
+    if (file_id >= 0) H5Fclose(file_id);
+    throw HDF5Error(file_id, dataspace_id, dataset_id, "write_basis");
+}
+
+
+
+
+

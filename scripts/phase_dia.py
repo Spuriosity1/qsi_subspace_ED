@@ -71,7 +71,7 @@ def has_111_entry(con, x, sign, latvecs, sector):
                    AND g123_sign=? AND latvecs=? AND sector=?
     """, (x-tol, x+tol, sign, latvecs, str(sector))
     )
-    res = cursor.fetchall() != 0
+    res = (cursor.fetchone() is not None)
     cursor.close()
     return res
 
@@ -84,7 +84,7 @@ def has_110_entry(con, x, sign, latvecs, sector):
                    AND g23_sign=? AND latvecs=? AND sector=?
     """, (x-tol, x+tol, sign, latvecs, str(sector))
     )
-    res = cursor.fetchall() != 0
+    res = (cursor.fetchone() is not None)
     cursor.close()
     return res
 
@@ -138,15 +138,16 @@ if __name__ == "__main__":
                     print(f"WARN: duplicate found at {x}")
                     continue
 
-                
+    
                 r111 = calc_ring_exp_vals(rfh, g=sign*g_111(x),
-                                          sector=sector, krylov_dim=a.krylov_dim)
-
+                                          sector=sector, krylov_dim=a.krylov_dim,)
                 cursor = con.cursor()
                 cursor.execute("""INSERT INTO field_111 (g0_g123, g123_sign, latvecs, sector,
                                                          edata,
-                                                         expO0, expO1, expO2, expO3)
-                               VALUES (?,?,?,?,?,?,?,?,?);""", (x, sign, latvecs, str(sector), r111[0], *r111[1].values()))
+                                                         reO0, reO1, reO2, reO3,
+                                                         imO0, imO1, imO2, imO3
+                                                         )
+                               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?);""", (x, sign, latvecs, str(sector), r111[0], *r111[1].values(), *r111[2].values() ))
                 cursor.close()
                 con.commit()
 
@@ -159,12 +160,14 @@ if __name__ == "__main__":
 
                 r110 = calc_ring_exp_vals(rfh, g=sign*g_110(x),
                                           sector=sector, krylov_dim = a.krylov_dim)
-                
+
                 cursor = con.cursor()
                 cursor.execute("""INSERT INTO field_110 (g01_g23, g23_sign, latvecs, sector,
                                                          edata,
-                                                         expO0, expO1, expO2, expO3)
-                               VALUES (?,?,?,?,?,?,?,?,?);""", (x, sign, latvecs, str(sector), r110[0], *r110[1].values()))
+                                                         reO0, reO1, reO2, reO3,
+                                                         imO0, imO1, imO2, imO3
+                                                         )
+                               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?);""", (x, sign, latvecs, str(sector), r110[0], *r110[1].values(), *r110[2].values()))
 
                 cursor.close()
                 con.commit()

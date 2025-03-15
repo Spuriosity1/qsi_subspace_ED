@@ -15,7 +15,6 @@ int main (int argc, char *argv[]) {
 	}
 
 	std::string infilename(argv[1]);
-	std::string outfilename;
 
 	int num_spinon_pairs=(argc >= 3) ? atoi(argv[2]) : 0;
 
@@ -23,7 +22,7 @@ int main (int argc, char *argv[]) {
 	ext += std::to_string(num_spinon_pairs);
 	ext += (argc >= 4) ? argv[3] : ".basis";
 
-	outfilename=as_basis_file(infilename, ext );
+	auto outfilename=as_basis_file(infilename, ext );
 
 	ifstream ifs(infilename);
 	json data = json::parse(ifs);

@@ -25,34 +25,34 @@ def load_geometries(con):
     return lats
 
 
-def find_groundstate_impl2(con, lat, sign, x_name, table_name, sign_name):
-    c = con.cursor()
-    x_list = np.array(c.execute(f"""
-        SELECT {x_name} FROM {table_name}
-        WHERE latvecs = ? AND {sign_name} = ? 
-        GROUP BY {x_name}
-        ORDER BY {x_name}
-        """,
-        (lat, sign)).fetchall())[:,0]
+# def find_groundstate_impl2(con, lat, sign, x_name, table_name, sign_name):
+#     c = con.cursor()
+#     x_list = np.array(c.execute(f"""
+#         SELECT {x_name} FROM {table_name}
+#         WHERE latvecs = ? AND {sign_name} = ? 
+#         GROUP BY {x_name}
+#         ORDER BY {x_name}
+#         """,
+#         (lat, sign)).fetchall())[:,0]
 
-    for x in x_list:
+#     for x in x_list:
 
-    # best_sectors = []
-    # sector_energies = []
+#     # best_sectors = []
+#     # sector_energies = []
     
-    # for x in x_list:
-    #     res = c.execute(f"""
-    #         SELECT edata, sector FROM {table_name}
-    #         WHERE {x_name} = ? AND latvecs = ? AND {sign_name} = ?""",
-    #                     (x,lat, sign) )
-    #     gse = np.inf
-    #     best_sec = None
+#     # for x in x_list:
+#     #     res = c.execute(f"""
+#     #         SELECT edata, sector FROM {table_name}
+#     #         WHERE {x_name} = ? AND latvecs = ? AND {sign_name} = ?""",
+#     #                     (x,lat, sign) )
+#     #     gse = np.inf
+#     #     best_sec = None
         
-    #     for e, sec in res:
-    #         curr_gse = convert_array(e)[0]
-    #         if  curr_gse < gse:
-    #             gse = curr_gse
-    #             best_sec = sec
+#     #     for e, sec in res:
+#     #         curr_gse = convert_array(e)[0]
+#     #         if  curr_gse < gse:
+#     #             gse = curr_gse
+#     #             best_sec = sec
                 
         
         
@@ -60,7 +60,7 @@ def find_groundstate_impl2(con, lat, sign, x_name, table_name, sign_name):
         
 
 
-    # c.close()
+#     # c.close()
 
 
 def find_groundstate_impl(con, lat, sign, x_name, table_name, sign_name):
@@ -277,6 +277,46 @@ def load_E_and_expO(res):
     
 
 
+def add_phasedia_boundaries(a, jpm_arr, B_arr, B_direction, **kwargs):
+    B = np.array(B_direction,dtype=np.float64)
+    B /= np.linalg.norm(B)
+
+    
+    
+    f0 = lambda j,b : Jring(j, b*B)[0] + 0.5*sum(Jring(j, b*B)[1:3])
+    f1 = lambda j,b : Jring(j, b*B)[1]
+
+
+    
+    sing_vals_0 = []
+    sing_vals_1 = []
+    for bb in B_arr:
+        res0, res1 = None, None
+        try:
+            res0 = brentq(f0, 0.000000001, np.max(jpm_arr)*2,args=bb)
+        except ValueError:
+            res0 =  None
+
+        try:
+            if res0 is not None:
+                res1 = brentq(f1, res0*0.01, res0*0.9,args=bb)
+            else:
+                res1 = brentq(f1, 0.01, 0.2,args=bb)
+        except ValueError:
+            res1 =  None
+
+       
+        
+        sing_vals_0.append(res0)
+        sing_vals_1.append(res1)
+            
+    
+    # a.axvline(0,**kwargs)
+    a.plot(sing_vals_0, B_arr, **kwargs)
+    a.plot(sing_vals_1, B_arr, **kwargs)
+    # a.plot( 0.455 * B_arr**2,B_arr, **kwargs)
+    # a.plot( 0.09 * B_arr**2,B_arr, **kwargs)
+    a.set_xlim([np.min(jpm_arr), np.max(jpm_arr)])
 
 
 def calc_phasedia_data(rfi: RingInterpolator, field_direction, 

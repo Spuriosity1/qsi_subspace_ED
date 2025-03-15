@@ -9,15 +9,6 @@
 #include <stack>
 #include <vector>
 
-/*
-struct node_t {
-	unsigned spin_idx; // aka layer, 	
-	Uint128 state_thus_far; // only up to (1>>spin_idx) have been set
-
-	node_t* leaf[2]={nullptr, nullptr};
-
-};
-*/
 
 
 struct vtree_node_t {
@@ -71,15 +62,7 @@ struct pyro_vtree : public lat_container {
 
 	void build_state_tree();
 
-	void write_basis_csv(const std::string &outfilename) {
-	    FILE *outfile = std::fopen((outfilename + ".csv").c_str(), "w");
-	    for (auto b : states_2I2O) {
-	      write_line(outfile, b);
-	    }
-
-        std::fclose(outfile);
-    }
-
+	void write_basis_csv(const std::string &outfilename); 
     void write_basis_hdf5(const std::string& outfile);
 	protected:
 	void save_state(const Uint128& state) {
@@ -99,16 +82,7 @@ struct pyro_vtree_parallel : public lat_container {
 		: lat_container(data, num_spinon_pairs), n_threads(n_threads) {}
 
 	void build_state_tree();
-	void write_basis_csv(const std::string& outfilename) {
-        FILE *outfile = std::fopen((outfilename+".csv").c_str(), "w");
-		for (auto states_2I2O : state_set) {
-			for (auto b : states_2I2O) {
-				write_line(outfile, b);
-			}
-		}
-		std::fclose(outfile);
-	}
-	void write_basis_hdf5(const std::string& outfile);
+	void write_basis_csv(const std::string& outfilename); 	void write_basis_hdf5(const std::string& outfile);
 
 
 protected:
@@ -117,6 +91,13 @@ protected:
 	void _build_state_bfs(std::queue<vtree_node_t>& node_stack, 
 		unsigned long max_queue_len);
 	unsigned n_threads;
+
+	size_t n_states() const {
+		size_t acc=0;
+		for (auto v : state_set){
+			acc += v.size();
+		}
+	}
 
 	// first index is the thread ID
 	std::vector<std::vector<Uint128>> state_set;

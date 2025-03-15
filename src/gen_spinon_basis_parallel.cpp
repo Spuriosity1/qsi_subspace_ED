@@ -21,7 +21,7 @@ int main (int argc, char *argv[]) {
 	ext += std::to_string(num_spinon_pairs);
 	ext += (argc >= 5) ? argv[4] : ".basis";
 
-	auto basis_file = as_basis_file(infilename,ext );
+	auto outfilename=as_basis_file(infilename, ext );
 
 	ifstream ifs(infilename);
 	json data = json::parse(ifs);
@@ -32,7 +32,8 @@ int main (int argc, char *argv[]) {
 	printf("Building state tree...\n");
 	L.build_state_tree();
 	
-	L.write_basis_csv(basis_file);
+	L.write_basis_csv(outfilename);
+	L.write_basis_hdf5(outfilename);
 
 	return 0;
 }

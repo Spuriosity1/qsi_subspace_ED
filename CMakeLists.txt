@@ -86,6 +86,10 @@ add_executable(gen_spinon_basis_parallel
     src/pyro_tree.cpp
 )
 
+add_executable(csv_to_h5
+    src/csv_to_h5.cpp
+)
+
 #add_executable(build_hamiltonian
 #    src/build_hamiltonian.cpp
 #    src/tetra_graph_io.cpp
