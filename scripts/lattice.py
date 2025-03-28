@@ -75,6 +75,9 @@ class Bond:
         self.color = color
         self.bond_delta = Matrix(bond_delta)
 
+    def __repr__(self):
+        return f"{self.from_idx}->{self.to_idx} color={self.color}"
+
 
 def _wrap_coordinate(A: Matrix, X: Matrix):
     """
@@ -278,8 +281,8 @@ class Lattice:
 
         # XYZ hash to idx table
         self.atom_lookup = {i: None for i in range(self.primitive.num_atoms
-                                    * self.periodicity[0]   
-                                    * self.periodicity[1]   
+                                    * self.periodicity[0]
+                                    * self.periodicity[1]
                                     * self.periodicity[2])}
         if populate:
             self._populate_atoms()
@@ -312,12 +315,21 @@ class Lattice:
         if not all([x.is_integer for x in bravais_vectors]):
             raise TypeError("Bravais vectors must be integers")
 
-        if bravais_vectors.is_diagonal:
+        bravais_vectors = Matrix(bravais_vectors)
+
+        if bravais_vectors.is_diagonal():
             D = bravais_vectors
             S = Matrix([[1, 0, 0], [0, 1, 0], [0, 0, 1]])
             T = Matrix([[1, 0, 0], [0, 1, 0], [0, 0, 1]])
         else:
             D, S, T = smith_normal_decomp(bravais_vectors, ZZ)
+            signs = [ 1 if d>0 else -1 for d in D.diagonal()]
+            signs = Matrix.diag(*signs)
+            D *= signs
+            T *= signs
+            print(D,S,T)
+
+            assert S * bravais_vectors * T == D
 
         self.periodicity = [int(x) for x in D.diagonal()]
         self.primitive = reshape_primitive_cell(primitive_suggestion, S.inv())

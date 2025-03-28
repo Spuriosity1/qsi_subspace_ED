@@ -281,9 +281,7 @@ def add_phasedia_boundaries(a, jpm_arr, B_arr, B_direction, **kwargs):
     B = np.array(B_direction,dtype=np.float64)
     B /= np.linalg.norm(B)
 
-    
-    
-    f0 = lambda j,b : Jring(j, b*B)[0] + 0.5*sum(Jring(j, b*B)[1:3])
+    f0 = lambda j,b : Jring(j, b*B)[0]
     f1 = lambda j,b : Jring(j, b*B)[1]
 
 
@@ -293,15 +291,12 @@ def add_phasedia_boundaries(a, jpm_arr, B_arr, B_direction, **kwargs):
     for bb in B_arr:
         res0, res1 = None, None
         try:
-            res0 = brentq(f0, 0.000000001, np.max(jpm_arr)*2,args=bb)
+            res0 = brentq(f0, -0.1, bb**2,args=bb)
         except ValueError:
             res0 =  None
 
         try:
-            if res0 is not None:
-                res1 = brentq(f1, res0*0.01, res0*0.9,args=bb)
-            else:
-                res1 = brentq(f1, 0.01, 0.2,args=bb)
+            res1 = brentq(f1, 0, 0.2,args=bb)
         except ValueError:
             res1 =  None
 
@@ -317,7 +312,6 @@ def add_phasedia_boundaries(a, jpm_arr, B_arr, B_direction, **kwargs):
     # a.plot( 0.455 * B_arr**2,B_arr, **kwargs)
     # a.plot( 0.09 * B_arr**2,B_arr, **kwargs)
     a.set_xlim([np.min(jpm_arr), np.max(jpm_arr)])
-
 
 def calc_phasedia_data(rfi: RingInterpolator, field_direction, 
                        resolution = (128,64), 
