@@ -288,7 +288,7 @@ class Lattice:
             self._populate_atoms()
             self._populate_bonds()
 
-    def shape_hash(self):
+    def shape_hash(self, legacy=False):
         return "%d_%d_%d" % tuple(self.periodicity) + "x" + self.primitive.shape_hash()
 
     def enumerate_primitives(self):

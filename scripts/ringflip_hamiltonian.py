@@ -130,7 +130,7 @@ class RingflipHamiltonian:
                 for b in self.basis[sector]:
                     f.write('0x%08x\n' % b)
 
-    def load_basis(self, fname, sectorfunc=None):
+    def load_basis(self, fname, sectorfunc=None, print_every=100):
         """
         loads the basis from file
         @param fname: the filename to load, in CSV format
@@ -145,9 +145,10 @@ class RingflipHamiltonian:
         line_no = 0
         with open(fname, 'r') as f:
             for line in f:
-                print(f"\r{len(self.basis)} sectors | line {line_no}", end='')
                 if not line.startswith("0x"):
                     continue
+                if (line_no % print_every == 0):
+                    print(f"\r{len(self.basis)} sectors | line {line_no}", end='')
                 state = int(line, 16)
                 sector = sectorfunc(self.lattice, state)
                 if sector in self.basis:
@@ -163,14 +164,12 @@ class RingflipHamiltonian:
     @property
     def latfile_loc(self):
         name = self.lattice.shape_hash()
-        N = self.lattice.num_atoms
-        return f"lattice_files/pyro{N}_"+name+".json"
+        return f"lattice_files/pyro_"+name+".json"
 
     @property
     def basisfile_loc(self):
         name = self.lattice.shape_hash()
-        N = self.lattice.num_atoms
-        return f"lattice_files/pyro{N}_"+name+".0.basis.csv"
+        return f"lattice_files/pyro_"+name+".0.basis.csv"
 
     @property
     def basis_dim(self):
@@ -363,7 +362,7 @@ y_ring_ham needs to be changed otherwise"
     ringxc_ops, _ = h.build_ringops(sector)
     assert len(ringxc_ops) == len(exchange_consts)
 
-    if nk == None:
+    if nk is None:
         return sum(gi * O for gi, O in zip(exchange_consts, ringxc_ops))
     else:
 
