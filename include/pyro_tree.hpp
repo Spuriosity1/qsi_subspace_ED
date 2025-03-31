@@ -61,15 +61,16 @@ struct pyro_vtree : public lat_container {
 		}
 
 	void build_state_tree();
+	void sort();
 
 	void write_basis_csv(const std::string &outfilename); 
     void write_basis_hdf5(const std::string& outfile);
 	protected:
 	void save_state(const Uint128& state) {
-			states_2I2O.push_back(state);
+			state_list.push_back(state);
 	}
 	// Repository of ice states for perusal
-	std::vector<Uint128> states_2I2O;
+	std::vector<Uint128> state_list;
 
 
 	// auxiliary variable for printing
@@ -82,6 +83,7 @@ struct pyro_vtree_parallel : public lat_container {
 		: lat_container(data, num_spinon_pairs), n_threads(n_threads) {}
 
 	void build_state_tree();
+	void sort();
 	void write_basis_csv(const std::string& outfilename); 	void write_basis_hdf5(const std::string& outfile);
 
 
@@ -97,6 +99,7 @@ protected:
 		for (auto v : state_set){
 			acc += v.size();
 		}
+		return acc;
 	}
 
 	// first index is the thread ID

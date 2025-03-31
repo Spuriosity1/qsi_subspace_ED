@@ -1,5 +1,7 @@
 #include "pyro_tree.hpp"
+#include <H5Spublic.h>
 #include <H5public.h>
+#include <algorithm>
 #include <cassert>
 #include <cstdint>
 #include <iostream>
@@ -116,12 +118,31 @@ void pyro_vtree::build_state_tree(){
 		printf("State %016llx; spin_idx %d, queue size %lu\n", curr.state_thus_far.uint128, curr.curr_spin, to_examine.size());
 #endif
 		if (to_examine.top().curr_spin == lat.spins.size()){
-			states_2I2O.push_back(to_examine.top().state_thus_far);
+			state_list.push_back(to_examine.top().state_thus_far);
 			to_examine.pop();
 		} else {
 			fork_state(to_examine);
 		}
 	}
+}
+
+void pyro_vtree::sort(){
+	std::sort(state_list.begin(), state_list.end());
+}
+
+
+void pyro_vtree_parallel::sort(){	
+	// step 1: move everything into state_set[0]
+	auto& state_list = state_set[0];
+	for (int i=1; i<state_set.size(); i++){
+          state_list.insert(state_list.end(), state_set[i].begin(),
+                            state_set[i].end());
+		  // delete the old vector
+		  state_set[i].clear();
+		  state_set[i].shrink_to_fit();
+	}
+	// sort as normal
+	std::sort(state_list.begin(), state_list.end());	
 }
 
 void pyro_vtree_parallel::
@@ -200,7 +221,7 @@ build_state_tree(){
 
 void pyro_vtree::write_basis_csv(const std::string &outfilename) {
 	FILE *outfile = std::fopen((outfilename + ".csv").c_str(), "w");
-	for (auto b : this->states_2I2O) {
+	for (auto b : this->state_list) {
 	  write_line(outfile, b);
 	}
 
@@ -221,7 +242,7 @@ void pyro_vtree_parallel::write_basis_csv(const std::string& outfilename)
 void pyro_vtree::write_basis_hdf5(const std::string& outfile){
 	// do this C style because the C++ API is borked
 	//	
-	hsize_t dims[2] = {states_2I2O.size(),2};
+	hsize_t dims[2] = {state_list.size(),2};
 
     hid_t file_id = -1, dataspace_id = -1, dataset_id = -1;
     herr_t status;
@@ -242,7 +263,7 @@ void pyro_vtree::write_basis_hdf5(const std::string& outfile){
 
     // Write data to the dataset
     status = H5Dwrite(dataset_id, H5T_NATIVE_UINT64, H5S_ALL, H5S_ALL,
-			H5P_DEFAULT, states_2I2O.data());
+			H5P_DEFAULT, state_list.data());
     if (status < 0) goto error;
 
     // Cleanup and close everything
@@ -262,15 +283,18 @@ error:
 
 void pyro_vtree_parallel::write_basis_hdf5(const std::string& outfile){
 	// do this C style because the C++ API is borked
-	
 	hsize_t dims[2] = {n_states(),2};
-	hsize_t row_offset, block_rows;
-	hsize_t start[2];
-	hsize_t block[2];
 
-    hid_t file_id = -1, dataspace_id = -1, dataset_id = -1, memspace_id=-1;
+    hid_t file_id = -1, dataspace_id = -1, dataset_id = -1, memspace_id = -1;
     herr_t status;
-	int idx;
+
+	size_t thread_idx=0;
+
+	// specifying slabs for thread-by-thread writes
+	hsize_t row_offset=0;
+	hsize_t block_rows = 0;	
+	hsize_t start[2] = {row_offset, 0};
+	hsize_t block[2] = {block_rows, 2};
 
     // Create a new HDF5 file
     file_id = H5Fcreate((outfile+".h5").c_str(), H5F_ACC_TRUNC, H5P_DEFAULT,
@@ -287,33 +311,27 @@ void pyro_vtree_parallel::write_basis_hdf5(const std::string& outfile){
     if (dataset_id < 0) goto error;
 
     // Write data to the dataset
-	row_offset = 0;
-	for (idx=0; idx<state_set.size(); idx++){	
-		if (state_set[idx].empty()) continue;
+	for (thread_idx=0; thread_idx < this->n_threads; thread_idx++){
+		if (state_set[thread_idx].empty()) continue;
 
-		block_rows = state_set[idx].size();  // Number of rows to write
-		start[0] = row_offset;  // Start at correct row
-        block[0] = block_rows;  // Block size (N x 2)
+		// specifying the block to write
+		start[0] = row_offset;
+		block[0] = state_set[thread_idx].size();
 
-        // Create a hyperslab selection in the dataset
-        hid_t memspace_id = H5Screate_simple(2, block, nullptr);
-        if (memspace_id < 0) goto error;
+		memspace_id = H5Screate_simple(2, block, nullptr); 
+		if (memspace_id < 0) goto error;
 
+		// select slab
         status = H5Sselect_hyperslab(dataspace_id, H5S_SELECT_SET, start, nullptr, block, nullptr);
-        if (status < 0) {
-            H5Sclose(memspace_id);
-            goto error;
-        }
+        if (status < 0) goto error;	
+		
+		// write slab
+		status = H5Dwrite(dataset_id, H5T_NATIVE_UINT64, memspace_id,
+				dataspace_id, H5P_DEFAULT, state_set[thread_idx].data());
+		H5Sclose(memspace_id); memspace_id = -1;
+		if (status < 0) goto error;
 
-        status = H5Dwrite(dataset_id, H5T_NATIVE_UINT64, memspace_id, dataspace_id, H5P_DEFAULT, state_set[idx].data());
-        if (status < 0) {
-            H5Sclose(memspace_id);
-            goto error;
-        }
-
-        H5Sclose(memspace_id);
-        row_offset += block_rows;  // Move write position forward
-
+		row_offset += block[0];
 	}
 
     // Cleanup and close everything
@@ -323,9 +341,11 @@ void pyro_vtree_parallel::write_basis_hdf5(const std::string& outfile){
     return;
 
 error:
+    if (memspace_id >= 0) H5Sclose(memspace_id);
     if (dataset_id >= 0) H5Dclose(dataset_id);
     if (dataspace_id >= 0) H5Sclose(dataspace_id);
     if (file_id >= 0) H5Fclose(file_id);
+	std::cerr << "memspace id " << memspace_id; 
     throw HDF5Error(file_id, dataspace_id, dataset_id, "write_basis");
 }
 

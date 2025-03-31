@@ -20,6 +20,10 @@ union Uint128 {
         uint128 ^= other.uint128;
         return *this;
     }
+
+    bool operator<(const Uint128& other) const {
+        return uint128 < other.uint128;
+    }
 };
 
 static inline   int   popcnt_u128 (const Uint128& n)
