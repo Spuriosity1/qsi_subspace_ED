@@ -3,15 +3,19 @@
 mkdir -p "tmp"
 
 data_dir="data"
+tmp_dir="tmp"
 stem="pyro_2_2_2x0,4,4b4,0,4b4,4,0b1"
 
-infile="${data_dir}/${stem}.json"
+
+# Copy the json file from the reference folder
+infile="${tmp_dir}/${stem}.json"
+cp "${data_dir}/${stem}.json" $infile
 
 ext_st=".test_basis_st"
 ext_par=".test_basis_st"
 
-gen_outfile_st="${data_dir}/${stem}.0${ext_st}.csv"
-gen_outfile_par="${data_dir}/${stem}.0${ext_par}.csv"
+gen_outfile_st="${tmp_dir}/${stem}.0${ext_st}.csv"
+gen_outfile_par="${tmp_dir}/${stem}.0${ext_par}.csv"
 ref_outfile="${data_dir}/${stem}.reference.basis.csv"
 
 sort "${ref_outfile}" > "${ref_outfile}.sorted"
@@ -48,4 +52,12 @@ else
 	echo -e "\033[31;1;4mparallel test failed!\033[0m"
 fi
 
-rm "${gen_outfile}"
+DCMD="h5diff ${gen_outfile_st%.csv}.h5 ${gen_outfile_par%.csv}.h5"
+echo $DCMD
+eval "$DCMD"
+if [[ $? -eq 0 ]]; then
+	echo -e "\033[32;1;4mHDF5 export test passed!\033[0m"
+else
+	echo -e "\033[31;1;4mHDF5 export test failed!\033[0m"
+fi
+
