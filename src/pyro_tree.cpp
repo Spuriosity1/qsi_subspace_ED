@@ -124,11 +124,14 @@ void pyro_vtree::build_state_tree(){
 }
 
 void pyro_vtree::sort(){
+	if (this->is_sorted) return;
 	std::sort(state_list.begin(), state_list.end());
+	this->is_sorted = true;
 }
 
 
 void pyro_vtree_parallel::sort(){	
+	if (this->is_sorted) return;
 	// step 1: move everything into state_set[0]
 	auto& state_list = state_set[0];
 	for (int i=1; i<state_set.size(); i++){
@@ -140,6 +143,7 @@ void pyro_vtree_parallel::sort(){
 	}
 	// sort as normal
 	std::sort(state_list.begin(), state_list.end());	
+	this->is_sorted = true;
 }
 
 void pyro_vtree_parallel::
@@ -217,67 +221,34 @@ build_state_tree(){
 // IO
 
 void pyro_vtree::write_basis_csv(const std::string &outfilename) {
-	FILE *outfile = std::fopen((outfilename + ".csv").c_str(), "w");
-	for (auto b : this->state_list) {
-	  basis_io::write_line(outfile, b);
-	}
-
-	std::fclose(outfile);
+	this->sort();
+	basis_io::write_basis_csv(state_list, outfilename);
 }
 
 void pyro_vtree_parallel::write_basis_csv(const std::string& outfilename)
 {
-	FILE *outfile = std::fopen((outfilename+".csv").c_str(), "w");
-	for (auto states_2I2O : state_set) {
-		for (auto b : states_2I2O) {
-			basis_io::write_line(outfile, b);
+	this->sort();
+	for (size_t i=1; i<state_set.size(); i++){
+		if(state_set[i].size() != 0){
+			throw std::logic_error("Error in write_basis_csv - basis was not sorted properly");
 		}
 	}
-	std::fclose(outfile);
+	basis_io::write_basis_csv(state_set[0], outfilename);
 }
 
-void pyro_vtree::write_basis_hdf5(const std::string& outfile){
-	// do this C style because the C++ API is borked
-	//	
-	hsize_t dims[2] = {state_list.size(),2};
-
-    hid_t file_id = -1, dataspace_id = -1, dataset_id = -1;
-    herr_t status;
-
-    // Create a new HDF5 file
-    file_id = H5Fcreate((outfile+".h5").c_str(), H5F_ACC_TRUNC, H5P_DEFAULT,
-			H5P_DEFAULT);
-    if (file_id < 0) goto error;
-
-    // Create a dataspace
-    dataspace_id = H5Screate_simple(2, dims, nullptr);
-    if (dataspace_id < 0) goto error;
-
-    // Create the dataset
-    dataset_id = H5Dcreate(file_id, "basis", H5T_NATIVE_UINT64, dataspace_id,
-			H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT);
-    if (dataset_id < 0) goto error;
-
-    // Write data to the dataset
-    status = H5Dwrite(dataset_id, H5T_NATIVE_UINT64, H5S_ALL, H5S_ALL,
-			H5P_DEFAULT, state_list.data());
-    if (status < 0) goto error;
-
-    // Cleanup and close everything
-    H5Dclose(dataset_id);
-    H5Sclose(dataspace_id);
-    H5Fclose(file_id);
-    return;
-
-error:
-    if (dataset_id >= 0) H5Dclose(dataset_id);
-    if (dataspace_id >= 0) H5Sclose(dataspace_id);
-    if (file_id >= 0) H5Fclose(file_id);
-    throw HDF5Error(file_id, dataspace_id, dataset_id, "write_basis");
+void pyro_vtree::write_basis_hdf5(const std::string& outfilename){
+	this->sort();
+	basis_io::write_basis_hdf5(this->state_list, outfilename);
 }
 
 
+void pyro_vtree_parallel::write_basis_hdf5(const std::string& outfilename){
+	this->sort();
+	basis_io::write_basis_hdf5(this->state_set[0], outfilename);
+}
 
+
+/*
 
 void pyro_vtree_parallel::write_basis_hdf5(const std::string& outfile){
 	// do this C style because the C++ API is borked
@@ -347,6 +318,6 @@ error:
     throw HDF5Error(file_id, dataspace_id, dataset_id, "write_basis");
 }
 
-
+*/
 
 

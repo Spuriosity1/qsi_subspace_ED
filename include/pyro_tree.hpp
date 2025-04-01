@@ -43,8 +43,6 @@ struct lat_container {
 	protected:
 	//global_sz_sector_t global_sz_sector;
 
-
-
 	template <typename Container>
 	void fork_state_impl(Container& to_examine, vtree_node_t curr); 
 
@@ -58,6 +56,7 @@ struct lat_container {
 struct pyro_vtree : public lat_container {
 	pyro_vtree(const nlohmann::json&data, int num_spinon_pairs) :
 		lat_container(data, num_spinon_pairs) {
+			is_sorted = false;
 		}
 
 	void build_state_tree();
@@ -72,6 +71,8 @@ struct pyro_vtree : public lat_container {
 	// Repository of ice states for perusal
 	std::vector<Uint128> state_list;
 
+	bool is_sorted;
+
 
 	// auxiliary variable for printing
 	unsigned counter = 0;
@@ -80,7 +81,9 @@ struct pyro_vtree : public lat_container {
 struct pyro_vtree_parallel : public lat_container {
 	pyro_vtree_parallel(const nlohmann::json &data, int num_spinon_pairs, 
 			unsigned n_threads = 1)
-		: lat_container(data, num_spinon_pairs), n_threads(n_threads) {}
+		: lat_container(data, num_spinon_pairs), n_threads(n_threads) {
+		is_sorted = false;
+		}
 
 	void build_state_tree();
 	void sort();
@@ -93,6 +96,8 @@ protected:
 	void _build_state_bfs(std::queue<vtree_node_t>& node_stack, 
 		unsigned long max_queue_len);
 	unsigned n_threads;
+
+	bool is_sorted;
 
 	size_t n_states() const {
 		size_t acc=0;
