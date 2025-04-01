@@ -1,18 +1,15 @@
 #include "pyro_tree.hpp"
-#include <H5Spublic.h>
-#include <H5public.h>
 #include <algorithm>
 #include <cassert>
-#include <cstdint>
 #include <iostream>
 #include <stdexcept>
 #include <thread>
 #include "bittools.hpp"
 #include "vanity.hpp"
+#include "basis_io.hpp"
 
 #include <hdf5.h>
 #include "admin.hpp"
-
 
 
 // LOGIC
@@ -222,7 +219,7 @@ build_state_tree(){
 void pyro_vtree::write_basis_csv(const std::string &outfilename) {
 	FILE *outfile = std::fopen((outfilename + ".csv").c_str(), "w");
 	for (auto b : this->state_list) {
-	  write_line(outfile, b);
+	  basis_io::write_line(outfile, b);
 	}
 
 	std::fclose(outfile);
@@ -233,7 +230,7 @@ void pyro_vtree_parallel::write_basis_csv(const std::string& outfilename)
 	FILE *outfile = std::fopen((outfilename+".csv").c_str(), "w");
 	for (auto states_2I2O : state_set) {
 		for (auto b : states_2I2O) {
-			write_line(outfile, b);
+			basis_io::write_line(outfile, b);
 		}
 	}
 	std::fclose(outfile);
@@ -278,6 +275,7 @@ error:
     if (file_id >= 0) H5Fclose(file_id);
     throw HDF5Error(file_id, dataspace_id, dataset_id, "write_basis");
 }
+
 
 
 
@@ -348,7 +346,6 @@ error:
 	std::cerr << "memspace id " << memspace_id; 
     throw HDF5Error(file_id, dataspace_id, dataset_id, "write_basis");
 }
-
 
 
 
