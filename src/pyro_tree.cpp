@@ -134,7 +134,7 @@ void pyro_vtree_parallel::sort(){
 	if (this->is_sorted) return;
 	// step 1: move everything into state_set[0]
 	auto& state_list = state_set[0];
-	for (int i=1; i<state_set.size(); i++){
+	for (size_t i=1; i<state_set.size(); i++){
           state_list.insert(state_list.end(), state_set[i].begin(),
                             state_set[i].end());
 		  // delete the old vector

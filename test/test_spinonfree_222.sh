@@ -12,7 +12,7 @@ infile="${tmp_dir}/${stem}.json"
 cp "${data_dir}/${stem}.json" $infile
 
 ext_st=".test_basis_st"
-ext_par=".test_basis_st"
+ext_par=".test_basis_par"
 
 gen_outfile_st="${tmp_dir}/${stem}.0${ext_st}.csv"
 gen_outfile_par="${tmp_dir}/${stem}.0${ext_par}.csv"

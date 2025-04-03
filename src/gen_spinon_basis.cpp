@@ -17,7 +17,7 @@ int main (int argc, char *argv[]) {
 
 	std::string infilename(argv[1]);
 
-	int num_spinon_pairs=(argc >= 3) ? atoi(argv[2]) : 0;
+	unsigned num_spinon_pairs=(argc >= 3) ? atoi(argv[2]) : 0;
 
 	std::string ext = ".";
 	ext += std::to_string(num_spinon_pairs);

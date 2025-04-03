@@ -24,7 +24,7 @@ struct vtree_node_t {
 typedef std::array<int, 4> global_sz_sector_t;
 
 struct lat_container {
-	lat_container(const nlohmann::json& data, int num_spinon_pairs) : 
+	lat_container(const nlohmann::json& data, unsigned num_spinon_pairs) : 
 		 num_spinon_pairs(num_spinon_pairs), lat(data) {}
 
 
@@ -39,7 +39,7 @@ struct lat_container {
 	char possible_spin_states(const vtree_node_t& curr) const;
 	//char possible_spin_states(const Uint128& state, unsigned idx) const ;
 
-	const int num_spinon_pairs;
+	const unsigned num_spinon_pairs;
 	protected:
 	//global_sz_sector_t global_sz_sector;
 
@@ -54,7 +54,7 @@ struct lat_container {
 };
 
 struct pyro_vtree : public lat_container {
-	pyro_vtree(const nlohmann::json&data, int num_spinon_pairs) :
+	pyro_vtree(const nlohmann::json&data, unsigned num_spinon_pairs) :
 		lat_container(data, num_spinon_pairs) {
 			is_sorted = false;
 		}
@@ -79,7 +79,7 @@ struct pyro_vtree : public lat_container {
 };
 
 struct pyro_vtree_parallel : public lat_container {
-	pyro_vtree_parallel(const nlohmann::json &data, int num_spinon_pairs, 
+	pyro_vtree_parallel(const nlohmann::json &data, unsigned num_spinon_pairs, 
 			unsigned n_threads = 1)
 		: lat_container(data, num_spinon_pairs), n_threads(n_threads) {
 		is_sorted = false;

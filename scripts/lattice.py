@@ -288,8 +288,12 @@ class Lattice:
             self._populate_atoms()
             self._populate_bonds()
 
-    def shape_hash(self, legacy=False):
-        return "%d_%d_%d" % tuple(self.periodicity) + "x" + self.primitive.shape_hash()
+        self.shape_hash_str =  "%d_%d_%d" % tuple(self.periodicity)
+        self.shape_hash_str += "x" + self.primitive.shape_hash()
+
+
+    def shape_hash(self):
+        return self.shape_hash_str
 
     def enumerate_primitives(self):
         return itertools.product(range(self.periodicity[0]),
@@ -417,11 +421,14 @@ class Lattice:
                 b.to_idx -= 1
 
         for J_raw in self.atom_lookup:
-            if self.atom_lookup[J_raw] == idx:
+            if self.atom_lookup[J_raw] is None:
+                continue
+            elif self.atom_lookup[J_raw] == idx:
                 self.atom_lookup[J_raw] = None
             elif self.atom_lookup[J_raw] > idx:
                 self.atom_lookup[J_raw] -= 1
 
+        self.shape_hash_str += f'd{idx}'
 
     def hash_tuple(self, cell_idx, sl_idx):
         N = self.periodicity
@@ -509,6 +516,11 @@ def from_dict(data: dict, primitive_spec: PrimitiveCell):
                               to_idx=b['to_idx'],
                               bond_delta=bd,
                               color=bc))
+
+    # make sure we loaded things right
+    for J, a in enumerate(lat.atoms):
+        jj = lat.as_linear_idx(a.xyz)
+        assert jj == J, f"Issue at idx {J} -> {jj}"
 
     return lat
 

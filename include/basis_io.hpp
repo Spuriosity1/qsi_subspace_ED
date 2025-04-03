@@ -58,7 +58,7 @@ inline void write_basis_hdf5(const std::vector<Uint128>& state_list, const std::
 		// Write data to the dataset
 		status = H5Dwrite(dataset_id, H5T_NATIVE_UINT64, H5S_ALL, H5S_ALL,
 				H5P_DEFAULT, state_list.data());
-		if (dataset_id < 0) throw HDF5Error(file_id, dataspace_id, dataset_id, "write_basis: Failed to write data");
+		if (status < 0) throw HDF5Error(file_id, dataspace_id, dataset_id, "write_basis: Failed to write data");
 
 		// Cleanup and close everything
 		H5Dclose(dataset_id);

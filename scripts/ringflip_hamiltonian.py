@@ -10,6 +10,7 @@ import time
 import scipy.sparse as sp
 from bit_tools import bitperm, make_state, as_mask
 from scipy.optimize import curve_fit
+import h5py
 
 def all_unique(ll: list):
     return len(set(ll)) == len(ll)
@@ -130,17 +131,8 @@ class RingflipHamiltonian:
                 for b in self.basis[sector]:
                     f.write('0x%08x\n' % b)
 
-    def load_basis(self, fname, sectorfunc=None, print_every=100):
-        """
-        loads the basis from file
-        @param fname: the filename to load, in CSV format
-        @param sectorfunc: a funciton taking two arguments (lat and state)
-            returning an immutable type. The basis is stored as a dict
-            with the outputs of sectorfunc treated as keys.
-        """
-        if sectorfunc is None:
-            def sectorfunc(lat, state): return 0
-        print("Loading basis...\n")
+
+    def _load_basis_csv(self, fname, sectorfunc, print_every=100):
         self.basis = {}
         line_no = 0
         with open(fname, 'r') as f:
@@ -157,9 +149,50 @@ class RingflipHamiltonian:
                     self.basis[sector] = [state]
 
                 line_no += 1
-        print("\n Sorting...")
-        for k in self.basis:
-            self.basis[k].sort()
+
+
+    def _load_basis_h5(self, fname, sectorfunc, print_every=100):
+        self.basis = {}
+        with h5py.File(fname, 'r') as f:
+            data = f["basis"][:]  # Read full dataset
+
+        if data.shape[1] != 2:
+            raise ValueError("Dataset shape must be (N,2) for Uint128 storage.")
+        
+        # Convert (N,2) uint64 array to (N,) uint128 array
+        uint128_array = (data[:, 1].astype(np.uint128) << 64) | data[:, 0].astype(np.uint128)
+        
+        for line_no in range(data.shape[0]):
+            if (line_no % print_every == 0):
+                print(f"\r{len(self.basis)} sectors | line {line_no}", end='')
+            sector = sectorfunc(self.lattice, uint128_array[line_no])
+            self.basis[sector].append(uint128_array[line_no])
+
+
+
+    def load_basis(self, fname, sectorfunc=None, print_every=100, sort=False):
+        """
+        loads the basis from file
+        @param fname: the filename to load, in CSV format
+        @param sectorfunc: a funciton taking two arguments (lat and state)
+            returning an immutable type. The basis is stored as a dict
+            with the outputs of sectorfunc treated as keys.
+        """
+        if sectorfunc is None:
+            def sectorfunc(lat, state): return 0
+        print("Loading basis...\n")
+        if fname.endswith('.csv'):
+            self._load_basis_csv(fname, sectorfunc, print_every)
+        elif fname.endswith('.h5'):
+            self._load_basis_h5(fname, sectorfunc, print_every)
+        else:
+            raise ValueError("Basis file must be either h5 or csv")
+
+
+        if sort:
+            print("\n Sorting...")
+            for k in self.basis:
+                self.basis[k].sort()
 
     @property
     def latfile_loc(self):
