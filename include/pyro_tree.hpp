@@ -1,6 +1,6 @@
 #pragma once
 #include "bittools.hpp"
-#include "json.hpp"
+#include <nlohmann/json.hpp>
 #include "tetra_graph_io.hpp"
 #include <array>
 #include <cstdio>

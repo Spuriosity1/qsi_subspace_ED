@@ -1,4 +1,4 @@
-from ringflip_hamiltonian import RingflipHamiltonian, build_matrix, ring_exp_values
+from ringflip_hamiltonian import RingflipHamiltonian, build_matrix, ring_exp_values, calc_polarisation
 import scipy.sparse.linalg as sLA
 import pyrochlore
 import numpy as np
@@ -17,7 +17,7 @@ latvecs = np.array(lat.lattice_vectors)
 
 rfh = RingflipHamiltonian(lat)
 print("Setting up basis...")
-rfh.calc_basis()
+rfh.load_basis(rfh.basisfile_loc, sectorfunc=calc_polarisation)
 
 sector_dir = os.path.join("basis_partitions/",
                           file_name.rsplit( ".", 1 )[ 0 ])
