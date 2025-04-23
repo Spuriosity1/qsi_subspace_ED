@@ -142,21 +142,10 @@ for c, (i,j) in enumerate(sublat_pairs):
 # TODO change API to support making these difernet bond colours
 
 
-
-
 def export_json(lat: lattice.Lattice, filename: str):
-
-    # convert to compressed indices
-    as_compressed = []
-    idx = 0
-    for J, a in enumerate(lat.atoms):
-        as_compressed.append(None)
-        if a is not None:
-            as_compressed[J] = idx
-            idx += 1
-
     output = lattice.to_dict(lat)
     t_up, t_dn = get_tetras(lat)
+    output["__version__"] = "1.0"
     output["tetrahedra"] = []
     output["tetrahedra"] += [{
         'xyz': lattice.listify(t.xyz),
@@ -171,8 +160,9 @@ def export_json(lat: lattice.Lattice, filename: str):
     output["rings"] = [{
         'xyz': lattice.listify(r.xyz),
         'sl': r.sl,
-        'member_spin_idx': r.members
-    } for r in get_ringflips(lat)]
+        'member_spin_idx': r.members,
+        'signs': r.signs
+    } for r in get_ringflips(lat, include_partial=True)]
 
     with open(filename, 'w') as f:
         json.dump(output, f)

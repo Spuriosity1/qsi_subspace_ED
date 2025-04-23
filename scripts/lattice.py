@@ -75,6 +75,9 @@ class Bond:
         self.color = color
         self.bond_delta = Matrix(bond_delta)
 
+    def __repr__(self):
+        return f"{self.from_idx}->{self.to_idx} color={self.color}"
+
 
 def _wrap_coordinate(A: Matrix, X: Matrix):
     """
@@ -278,15 +281,19 @@ class Lattice:
 
         # XYZ hash to idx table
         self.atom_lookup = {i: None for i in range(self.primitive.num_atoms
-                                    * self.periodicity[0]   
-                                    * self.periodicity[1]   
+                                    * self.periodicity[0]
+                                    * self.periodicity[1]
                                     * self.periodicity[2])}
         if populate:
             self._populate_atoms()
             self._populate_bonds()
 
+        self.shape_hash_str =  "%d_%d_%d" % tuple(self.periodicity)
+        self.shape_hash_str += "x" + self.primitive.shape_hash()
+
+
     def shape_hash(self):
-        return "%d_%d_%d" % tuple(self.periodicity) + "x" + self.primitive.shape_hash()
+        return self.shape_hash_str
 
     def enumerate_primitives(self):
         return itertools.product(range(self.periodicity[0]),
@@ -312,12 +319,21 @@ class Lattice:
         if not all([x.is_integer for x in bravais_vectors]):
             raise TypeError("Bravais vectors must be integers")
 
-        if bravais_vectors.is_diagonal:
+        bravais_vectors = Matrix(bravais_vectors)
+
+        if bravais_vectors.is_diagonal():
             D = bravais_vectors
             S = Matrix([[1, 0, 0], [0, 1, 0], [0, 0, 1]])
             T = Matrix([[1, 0, 0], [0, 1, 0], [0, 0, 1]])
         else:
             D, S, T = smith_normal_decomp(bravais_vectors, ZZ)
+            signs = [ 1 if d>0 else -1 for d in D.diagonal()]
+            signs = Matrix.diag(*signs)
+            D *= signs
+            T *= signs
+            print(D,S,T)
+
+            assert S * bravais_vectors * T == D
 
         self.periodicity = [int(x) for x in D.diagonal()]
         self.primitive = reshape_primitive_cell(primitive_suggestion, S.inv())
@@ -405,11 +421,14 @@ class Lattice:
                 b.to_idx -= 1
 
         for J_raw in self.atom_lookup:
-            if self.atom_lookup[J_raw] == idx:
+            if self.atom_lookup[J_raw] is None:
+                continue
+            elif self.atom_lookup[J_raw] == idx:
                 self.atom_lookup[J_raw] = None
             elif self.atom_lookup[J_raw] > idx:
                 self.atom_lookup[J_raw] -= 1
 
+        self.shape_hash_str += f'd{idx}'
 
     def hash_tuple(self, cell_idx, sl_idx):
         N = self.periodicity
@@ -497,6 +516,11 @@ def from_dict(data: dict, primitive_spec: PrimitiveCell):
                               to_idx=b['to_idx'],
                               bond_delta=bd,
                               color=bc))
+
+    # make sure we loaded things right
+    for J, a in enumerate(lat.atoms):
+        jj = lat.as_linear_idx(a.xyz)
+        assert jj == J, f"Issue at idx {J} -> {jj}"
 
     return lat
 

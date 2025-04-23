@@ -27,6 +27,15 @@ endfunction()
 
 
 
+set(CMAKE_THREAD_LIBS_INIT "-lpthread")
+SET(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -pthread")
+set(CMAKE_HAVE_THREADS_LIBRARY 1)
+set(CMAKE_USE_WIN32_THREADS_INIT 0)
+set(CMAKE_USE_PTHREADS_INIT 1)
+set(THREADS_PREFER_PTHREAD_FLAG ON)
+
+
+
 # In case dependencies were installed by a package manager, we need to let CMake know
 # where to look for the modules.
 #set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} ${CMAKE_SOURCE_DIR}/cmake/modules)
@@ -86,9 +95,9 @@ add_executable(gen_spinon_basis_parallel
     src/pyro_tree.cpp
 )
 
-add_executable(csv_to_h5
-    src/csv_to_h5.cpp
-)
+#add_executable(csv_to_h5
+#    src/csv_to_h5.cpp
+#)
 
 #add_executable(build_hamiltonian
 #    src/build_hamiltonian.cpp
@@ -98,6 +107,15 @@ add_executable(csv_to_h5
 #target_include_directories(build_hamiltonian PUBLIC ARPACK::ARPACK)
 #target_link_libraries(build_hamiltonian ARPACK::ARPACK superlu::superlu)
 #
+
+
+
+
+
+find_package(nlohmann_json 3.11.0 REQUIRED)
+target_link_libraries(gen_spinon_basis PRIVATE nlohmann_json::nlohmann_json)
+target_link_libraries(gen_spinon_basis_parallel PRIVATE nlohmann_json::nlohmann_json)
+
 
 
 target_include_directories(gen_spinon_basis PRIVATE ${HDF5_INCLUDE_DIRS})
@@ -115,10 +133,10 @@ target_link_libraries(gen_spinon_basis_parallel PRIVATE ${HDF5_C_LIBS} ${HDF5_CX
 
 
 if(CMAKE_BUILD_TYPE STREQUAL "Debug")
-    set(CMAKE_CXX_FLAGS "-Wall -Wpedantic -g -O0 -D_GLIBCXX_USE_CXX11_ABI=1")
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wpedantic -g -O0 -D_GLIBCXX_USE_CXX11_ABI=1")
     target_compile_definitions(gen_spinon_basis_parallel PRIVATE VERBOSITY=2)
     target_compile_definitions(gen_spinon_basis PRIVATE VERBOSITY=2)
 else()
-    set(CMAKE_CXX_FLAGS "-DNDEBUG -Ofast")
+	set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DNDEBUG -Ofast")
 endif()
     

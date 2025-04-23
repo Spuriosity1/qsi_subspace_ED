@@ -1,6 +1,6 @@
 #pragma once
 #include "bittools.hpp"
-#include "json.hpp"
+#include <nlohmann/json.hpp>
 #include "tetra_graph_io.hpp"
 #include <array>
 #include <cstdio>
@@ -24,7 +24,7 @@ struct vtree_node_t {
 typedef std::array<int, 4> global_sz_sector_t;
 
 struct lat_container {
-	lat_container(const nlohmann::json& data, int num_spinon_pairs) : 
+	lat_container(const nlohmann::json& data, unsigned num_spinon_pairs) : 
 		 num_spinon_pairs(num_spinon_pairs), lat(data) {}
 
 
@@ -39,11 +39,9 @@ struct lat_container {
 	char possible_spin_states(const vtree_node_t& curr) const;
 	//char possible_spin_states(const Uint128& state, unsigned idx) const ;
 
-	const int num_spinon_pairs;
+	const unsigned num_spinon_pairs;
 	protected:
 	//global_sz_sector_t global_sz_sector;
-
-
 
 	template <typename Container>
 	void fork_state_impl(Container& to_examine, vtree_node_t curr); 
@@ -56,20 +54,24 @@ struct lat_container {
 };
 
 struct pyro_vtree : public lat_container {
-	pyro_vtree(const nlohmann::json&data, int num_spinon_pairs) :
+	pyro_vtree(const nlohmann::json&data, unsigned num_spinon_pairs) :
 		lat_container(data, num_spinon_pairs) {
+			is_sorted = false;
 		}
 
 	void build_state_tree();
+	void sort();
 
 	void write_basis_csv(const std::string &outfilename); 
     void write_basis_hdf5(const std::string& outfile);
 	protected:
 	void save_state(const Uint128& state) {
-			states_2I2O.push_back(state);
+			state_list.push_back(state);
 	}
 	// Repository of ice states for perusal
-	std::vector<Uint128> states_2I2O;
+	std::vector<Uint128> state_list;
+
+	bool is_sorted;
 
 
 	// auxiliary variable for printing
@@ -77,11 +79,14 @@ struct pyro_vtree : public lat_container {
 };
 
 struct pyro_vtree_parallel : public lat_container {
-	pyro_vtree_parallel(const nlohmann::json &data, int num_spinon_pairs, 
+	pyro_vtree_parallel(const nlohmann::json &data, unsigned num_spinon_pairs, 
 			unsigned n_threads = 1)
-		: lat_container(data, num_spinon_pairs), n_threads(n_threads) {}
+		: lat_container(data, num_spinon_pairs), n_threads(n_threads) {
+		is_sorted = false;
+		}
 
 	void build_state_tree();
+	void sort();
 	void write_basis_csv(const std::string& outfilename); 	void write_basis_hdf5(const std::string& outfile);
 
 
@@ -92,11 +97,14 @@ protected:
 		unsigned long max_queue_len);
 	unsigned n_threads;
 
+	bool is_sorted;
+
 	size_t n_states() const {
 		size_t acc=0;
 		for (auto v : state_set){
 			acc += v.size();
 		}
+		return acc;
 	}
 
 	// first index is the thread ID

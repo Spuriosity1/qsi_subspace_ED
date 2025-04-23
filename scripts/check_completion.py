@@ -33,6 +33,8 @@ sector_dir = os.path.join("basis_partitions/",
                           latfile_name.rsplit( ".", 1 )[ 0 ])
 
 sectors = os.listdir(sector_dir)
+if len(sectors) ==0:
+    raise Exception(f"No basis partitions found in {sector_dir}")
 sec_strings = {}
 for sec_str in tqdm(sectors,desc="iterating sectors"):
     sector = tuple(int(a) for a in sec_str[1:-1].split('.'))
