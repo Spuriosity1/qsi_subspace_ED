@@ -35,8 +35,7 @@ fi
 
 
 index=$2
-for p in $sector_list; do
-    
+for p in $sector_list; do 
 	BASE_CMD="python3 ../scripts/phase_dia.py $latfile --db_repo ${DB_REPO} --basis_file ../basis_partitions/$lattice/$p --rotation $ROTATION"
        	echo $BASE_CMD -x -3 -X 0 -d 0.1 --index $index
         let index+=1

@@ -80,9 +80,6 @@ inline Uint128 operator<<(Uint128 x, T idx){
     return res;
 }
 
-inline bool operator<(const Uint128& x, const Uint128& y){
-    return x.uint128 < y.uint128;
-}
 
 template <typename T>
 inline Uint128 make_mask(T idx){

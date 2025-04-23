@@ -25,6 +25,8 @@ def get_parser():
                     help="Directory to store results in")
     ap.add_argument("--index", type=int, default=time.time_ns())
     ap.add_argument("--krylov_dim", type=int, default=200)
+    ap.add_argument("--no_calc_110", action='store_true', default=False)
+    ap.add_argument("--no_calc_111", action='store_true', default=False)
 
     return ap
 
@@ -130,7 +132,8 @@ if __name__ == "__main__":
 
     for sector in rfh.sectors:
         print("SECTOR: " + str(sector))
-
+        if a.no_calc_111:
+            break
         print("111 field:")
         for x in tqdm(x_list):
             for sign in [-1, 1]:
@@ -155,6 +158,10 @@ if __name__ == "__main__":
                 cursor.close()
                 con.commit()
 
+    for sector in rfh.sectors:
+        print("SECTOR: " + str(sector))
+        if a.no_calc_110:
+            break
         print("110 field:")
         for x in tqdm(x_list):
             for sign in [-1, 1]:

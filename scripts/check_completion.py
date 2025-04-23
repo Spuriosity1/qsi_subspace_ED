@@ -84,6 +84,11 @@ if a.verbosity >= 1:
 
 with open(a.output_file, 'w') as f:
     for idx in damaged_sectors:
+        if idx not in counts_111:
+            counts_111[idx] = 0
+        if idx not in counts_110:
+            counts_110[idx] = 0
+
         if counts_111[idx] == 0 or counts_110[idx] == 0:
             print( "\033[91m",end="")
         print(f"Sector {idx}: {counts_111[idx]} 111 records, {counts_110[idx]} 110 records")

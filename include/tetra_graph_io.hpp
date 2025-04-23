@@ -1,4 +1,5 @@
 #pragma once
+#include <fstream>
 #include <nlohmann/json.hpp>
 #include <vector>
 #include <array>
@@ -53,6 +54,18 @@ struct lattice {
 	
 	private:
 	void _register_spins();
+};
+
+
+namespace tetra_graph_io {
+
+inline lattice read_latfile_json(const std::string& file){
+	std::ifstream ifs(file);
+	nlohmann::json data = nlohmann::json::parse(ifs);
+	ifs.close();
+	return lattice(file);
+}
+
 };
 
 

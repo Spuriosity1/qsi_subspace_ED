@@ -6,7 +6,9 @@ __pycache__
 *.db-wal
 *.db-shm
 lattice_files
+test/tmp
 vendor/*
+*.ipynb
 hpc_driver/track
 basis_partitions
 .DS_Store
