@@ -5,19 +5,23 @@ if [ ! -e "./.git" ]; then
 fi
 
 # Check if the user provided an input file
-if [ "$#" -ne 3 ]; then
-	echo "Usage: $0 <database> <latfile> <plan_file.plan>"
+if [ "$#" -lt 3 ]; then
+	echo "Usage: $0 <database> <latfile> <plan_file.plan> <rotation=I,X,Y,Z>"
     exit 1
 fi
 
 database="$1"
 latfile="$2"
 planfile="$3"
-
+if [ "$#" -ge 4 ]; then
+	rot="$4"
+else
+	rot="I"
+fi
 
 MISSING_FILE=$(mktemp)
 
-python3 scripts/check_completion.py $database $latfile --output_file $MISSING_FILE
+python3 scripts/check_completion.py $database $latfile --output_file $MISSING_FILE --rotation $rot
 
 i=1
 rerun_planfile="$planfile.rerun$i"

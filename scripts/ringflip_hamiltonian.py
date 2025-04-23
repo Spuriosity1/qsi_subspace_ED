@@ -169,8 +169,7 @@ class RingflipHamiltonian:
     @property
     def basisfile_loc(self):
         name = self.lattice.shape_hash()
-        N = self.lattice.num_atoms
-        return f"lattice_files/pyro{N}_"+name+".0.basis.csv"
+        return f"lattice_files/pyro_"+name+".0.basis.csv"
 
     @property
     def basis_dim(self):
