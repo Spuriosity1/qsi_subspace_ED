@@ -2,7 +2,7 @@
 
 # Check if the user provided an input file
 if [ "$#" -lt 4 ]; then
-    echo "Usage: $0 <latspec> <initial_index> <rotation=IXYZ> <db_repo=../../ed_data/>"
+    echo "Usage: $0 <latspec> <initial_index> <rotation=IXYZ> <name> <db_repo=../../ed_data/>"
     exit 1
 fi
 
@@ -20,12 +20,13 @@ sector_list=`ls $sector_decomp`;
 
 latfile="../lattice_files/$lattice.json"
 ROTATION="${3}"
+NAME="${4}"
 
-DB_REPO="${4:=../../ed_data/}"
+DB_REPO="${5:=../../ed_data/}"
 
 if [ ! -d "${DB_REPO}" ]; then
     echo "Error: specified db repo does not exist. Create?"
-    read -p "Continue (y/n)?" choice
+    read -p "Continue \(y/n\)?" choice
     case "$choice" in 
       y|Y ) echo "yes"; mkdir -p "${DB_REPO}";;
       n|N ) echo "no"; exit 1;;
@@ -33,12 +34,10 @@ if [ ! -d "${DB_REPO}" ]; then
     esac
 fi
 
-
 index=$2
-for p in $sector_list; do 
-	BASE_CMD="python3 ../scripts/phase_dia.py $latfile --db_repo ${DB_REPO} --basis_file ../basis_partitions/$lattice/$p --rotation $ROTATION --no_calc_110"
-       	echo $BASE_CMD -x -3 -X 0 -d 0.1 --index $index
-        let index+=1
-       	echo $BASE_CMD -x -0.1 -X 3 -d 0.1 --index $index
-        let index+=1
+for p in $sector_list; do
+	for x in `seq -2 0.2 0`; do
+		echo "python3 ../scripts/phasedia_micro.py $latfile $x --db_file ${DB_REPO}/data${NAME}_$index.db --basis_file ../basis_partitions/$lattice/$p --rotation $ROTATION"
+		let index+=1
+	done
 done
