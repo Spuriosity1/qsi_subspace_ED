@@ -11,9 +11,9 @@
 #! 3380 MiB of memory per CPU.
 #SBATCH --ntasks=1
 #! How much wallclock time will be required?
-#SBATCH --time=12:00:00
+#SBATCH --time=2:00:00
 #! What types of email messages do you wish to receive?
-#SBATCH --mail-type=END,TIME_LIMIT_80
+#SBATCH --mail-type=START,END
 #SBATCH --output=track/phasedia_detail.%A_%a.out
 #SBATCH --error=track/phasedia_detail.%A_%a.error
 

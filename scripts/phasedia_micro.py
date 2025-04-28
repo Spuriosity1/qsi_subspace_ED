@@ -2,6 +2,7 @@ from ringflip_hamiltonian import RingflipHamiltonian, build_matrix
 from ringflip_hamiltonian import ring_exp_values, calc_polarisation
 import scipy.sparse.linalg as sLA
 import pyrochlore
+import sys
 import numpy.linalg as LA
 import numpy as np
 from tqdm import tqdm
@@ -11,84 +12,26 @@ import os
 from phasedia_impl import calc_spectrum, calc_ring_exp_vals
 import time
 
+
+from phase_dia import g_111_dict, g_110_dict, has_110_entry, has_111_entry
+
+
 def get_parser():
     ap = argparse.ArgumentParser(prog="PHASE_DIA")
     ap.add_argument("lattice_file", type=str)
-    ap.add_argument("--min_x", '-x', type=float, default=-2)
-    ap.add_argument("--max_x", '-X', type=float, default=2)
-    ap.add_argument("--x_step", '-d', type=float, default=0.01)
+    ap.add_argument('x', type=float)
     ap.add_argument("--basis_file", type=str, default=None)
     ap.add_argument("--rotation", type=str, choices='I X Y Z '.split(), default='I',
                     help="Rotates lattice relative to magnetic field")
-    ap.add_argument("--spacing", choices=["linear", "log", "tanh"], default="linear")
-    ap.add_argument("--db_repo", type=str, default="./",
-                    help="Directory to store results in")
-    ap.add_argument("--index", type=int, default=time.time_ns())
+    ap.add_argument("--db_file", type=str, default=None,
+                    help="Database to store results in")
+    ap.add_argument("--dont_edit_existing", action='store_true', default=False,
+                    help='If false, refuses to modify an existing db')
     ap.add_argument("--krylov_dim", type=int, default=200)
     ap.add_argument("--no_calc_110", action='store_true', default=False)
     ap.add_argument("--no_calc_111", action='store_true', default=False)
 
     return ap
-
-
-g_111_dict = {
-        'I': lambda x : np.array([x, 1, 1, 1]),
-        'X': lambda x : np.array([1, x, 1, 1]),
-        'Y': lambda x : np.array([1, 1, x, 1]),
-        'Z': lambda x : np.array([1, 1, 1, x])
-        }
-
-
-g_110_dict = {
-        'I': lambda x : np.array([x, x, 1, 1]),
-        'X': lambda x : np.array([x, x, 1, 1]),
-        'Y': lambda x : np.array([1, 1, x, x]),
-        'Z': lambda x : np.array([1, 1, x, x])
-        }
-
-
-
-def calc_x_list(args):
-    n_points = int(np.ceil((args.max_x - args.min_x) / args.x_step))
-
-    SPACINGS = {
-        "linear": np.arange(args.min_x, args.max_x, args.x_step),
-        "log": np.logspace(args.min_x, args.max_x, n_points),
-        "tanh": np.tan(
-             np.linspace(np.atan(args.min_x), np.atan(args.max_x), n_points)
-            )
-        }
-
-
-    return SPACINGS[args.spacing]
-
-
-tol=1e-4
-
-
-def has_111_entry(con, x, sign, latvecs, sector):
-    cursor = con.cursor()
-    cursor.execute("""SELECT g0_g123 FROM field_111 WHERE
-                    g0_g123 BETWEEN ? AND ?
-                   AND g123_sign=? AND latvecs=? AND sector=?
-    """, (x-tol, x+tol, sign, latvecs, str(sector))
-    )
-    res = (cursor.fetchone() is not None)
-    cursor.close()
-    return res
-
-
-def has_110_entry(con, x, sign, latvecs, sector):
-
-    cursor = con.cursor()
-    cursor.execute("""SELECT g01_g23 FROM field_110 WHERE
-                    g01_g23 BETWEEN ? AND ?
-                   AND g23_sign=? AND latvecs=? AND sector=?
-    """, (x-tol, x+tol, sign, latvecs, str(sector))
-    )
-    res = (cursor.fetchone() is not None)
-    cursor.close()
-    return res
 
 
 if __name__ == "__main__":
@@ -100,7 +43,7 @@ if __name__ == "__main__":
     g_111 = g_111_dict[a.rotation]
     g_110 = g_110_dict[a.rotation]
 
-
+    # ugly hack to keep the rotated versions distinct
     latvecs = rotation_matrices[a.rotation] @ np.array(lat.lattice_vectors)
 
     rfh = RingflipHamiltonian(lat)
@@ -111,32 +54,32 @@ if __name__ == "__main__":
         bfile = a.basis_file
     rfh.load_basis(bfile, sectorfunc=calc_polarisation)
 
-    DB_FILE = os.path.join(a.db_repo, f"results_{a.index}.db")
+    DB_FILE = a.db_file
 
     initialise=True
     if os.path.isfile(DB_FILE):
         print("WARN: db already exists!")
-        initialise=False
+        if a.dont_edit_existing: 
+            sys.exit(1)
+        else:
+            initialise=False
 
+    
     con = connect_npsql(DB_FILE, timeout=60)
     if initialise:
         init_db(con)
 
-    x_list = calc_x_list(a)
-    print(x_list)
-
     for sector in rfh.sectors:
         print("SECTOR: " + str(sector))
-        if a.no_calc_111:
-            break
-        print("111 field:")
-        for x in tqdm(x_list):
+        if not a.no_calc_111:
+            print("111 field:")
             for sign in [-1, 1]:
-                if has_111_entry(con, x, sign, latvecs, sector):
-                    print(f"WARN: duplicate found at {x}")
+                if has_111_entry(con, a.x, sign, latvecs, sector):
+                    print(f"WARN: duplicate found at {a.x}")
                     continue
 
-                e, reO, imO = calc_ring_exp_vals(rfh, g=sign*g_111(x),
+    
+                e, reO, imO = calc_ring_exp_vals(rfh, g=sign*g_111(a.x),
                                           sector=sector, krylov_dim=a.krylov_dim,)
                 cursor = con.cursor()
                 cursor.execute("""INSERT INTO field_111 (g0_g123, g123_sign, latvecs, sector,
@@ -148,22 +91,18 @@ if __name__ == "__main__":
                                        ?,
                                        ?,?,?,?,
                                        ?,?,?,?);""", 
-                               (x, sign, latvecs, str(sector), np.real(e), *reO.values(), *imO.values() ))
+                               (a.x, sign, latvecs, str(sector), np.real(e), *reO.values(), *imO.values() ))
                 cursor.close()
                 con.commit()
 
-    for sector in rfh.sectors:
-        print("SECTOR: " + str(sector))
-        if a.no_calc_110:
-            break
-        print("110 field:")
-        for x in tqdm(x_list):
+        if not a.no_calc_110:
+            print("110 field:")
             for sign in [-1, 1]:
-                if has_110_entry(con, x,sign,latvecs,sector):
-                    print(f"WARN: skipping duplicate at g01_g23={x}")
+                if has_110_entry(con, a.x,sign,latvecs,sector):
+                    print(f"WARN: skipping duplicate at g01_g23={a.x}")
                     continue
 
-                e, reO, imO = calc_ring_exp_vals(rfh, g=sign*g_110(x),
+                e, reO, imO = calc_ring_exp_vals(rfh, g=sign*g_110(a.x),
                                           sector=sector, krylov_dim = a.krylov_dim)
 
                 cursor = con.cursor()
@@ -177,11 +116,12 @@ if __name__ == "__main__":
                                        ?,?,?,?,
                                        ?,?,?,?);""",
 
-                               (x, sign, latvecs, str(sector), np.real(e), *reO.values(), *imO.values() ))
+                               (a.x, sign, latvecs, str(sector), np.real(e), *reO.values(), *imO.values() ))
 
 
                 cursor.close()
                 con.commit()
 
                 # save the data
+
 
