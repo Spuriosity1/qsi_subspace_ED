@@ -1,4 +1,5 @@
-from ringflip_hamiltonian import RingflipHamiltonian, build_matrix, ring_exp_values
+from ringflip_hamiltonian import RingflipHamiltonian, build_matrix
+from ringflip_hamiltonian import ring_exp_values, build_symmetric_basis
 import scipy.sparse.linalg as sLA
 import pyrochlore
 import numpy.linalg as LA
@@ -6,16 +7,14 @@ import numpy as np
 
 
 def calc_spectrum(g, full_lat: RingflipHamiltonian):
-    results = {}
-    for s in full_lat.sectors:
-        H = build_matrix(full_lat, g=g, sector=s)
+    H = build_matrix(full_lat, g=g)
 
-        if H.shape[0] < 1000:
-            e, v = np.linalg.eigh(H.todense())
-            results[s] = (e, v)
-        else:
-            e, v = sLA.eigs(H, k=np.min(100,H.shape[0]), which='SR')
-            results[s] = (e, v)
+    if H.shape[0] < 1000:
+        e, v = np.linalg.eigh(H.todense())
+        results = (e, v)
+    else:
+        e, v = sLA.eigs(H, k=np.min(100,H.shape[0]), which='SR')
+        results = (e, v)
     return results
 
 
@@ -35,12 +34,24 @@ def eigs_retry(hh, krylov_dim):
 
 
 
-def calc_ring_exp_vals(rfh: RingflipHamiltonian, g, sector, algo='sparse',
-                       krylov_dim=200):
-    # calculates the rimg expectation values o nthe four sublats, including
-    # degeneracies
-    H = build_matrix(rfh, sector=sector, g=g)
 
+
+
+def calc_ring_exp_vals(rfh: RingflipHamiltonian, g, algo='sparse',
+                       krylov_dim=200, irrep_label=None):
+    '''calculates the ring expectation values on the four sublats, including
+    degeneracies
+    @param rfh -> the ringflip Hamiltonian
+    @param g -> one, four, or len(h.ringxc_ops) real g values
+    @param algo -> one of  {'sparse', 'dense'} 
+        (note that 'dense' is automatically selected if the Hilbert space is small)
+    @param krylov_dim -> Maximum number of eigenvalues to store (dense provlems are trucnated to this)
+    @param k_sector -> None, or a three-tuple of integers specifying a k sector
+    '''
+    H = build_matrix(rfh, g=g, k_basis=None) 
+    #H = build_matrix(rfh, g=g, k_basis=build_symmetric_basis( rfh.basis, irrep_label))
+
+    # force dense algorithm for small problems
     if H.shape[0] - 2 < krylov_dim*2:
         algo = 'dense'
 
@@ -59,7 +70,7 @@ def calc_ring_exp_vals(rfh: RingflipHamiltonian, g, sector, algo='sparse',
     degen_energy = e[mask]
     degen_psi = v[:, mask]
     # print(f"degeneracy: {degen_energy.shape[0]}")
-    rO_list, iO_list = ring_exp_values(rfh, sector, degen_psi, include_imag=True)
+    rO_list, iO_list = ring_exp_values(rfh, degen_psi, include_imag=True)
 
     sum_reO = {}
     sum_imO = {}

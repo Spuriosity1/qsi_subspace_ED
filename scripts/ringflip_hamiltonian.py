@@ -1,16 +1,11 @@
-from lattice import Lattice, get_transl_generators
+from lattice import Lattice
 import pyrochlore
-import itertools
-import tqdm
-import os
 from bisect import bisect_left
 import numpy as np
-import subprocess
-import time
 import scipy.sparse as sp
 from bit_tools import bitperm, make_state, as_mask
-from scipy.optimize import curve_fit
 import h5py
+
 
 def all_unique(ll: list):
     return len(set(ll)) == len(ll)
@@ -37,66 +32,6 @@ def search_sorted(basis_set, state):
     return J
 
 
-class BasisBenchmarker:
-    def __init__(self):
-        self.test_latfile_dir = "test/data"
-        self._popt = None
-
-    def run(self, N, nthread):
-        lengths = list(range(1,N))
-        times = [self._time_test_sim(L, nthread) for L in lengths]
-
-        self.measured = {}
-        for L, t in zip(lengths, times):
-            print(f"{L:3d} -> {t:.4f} seconds")
-            self.measured[(1, 1, L)] = t
-
-        def _model(L, A, t0):
-            return t0 + A*np.exp(L)
-
-        popt, pcov = curve_fit(_model, lengths, times,
-                               (0.1, 0.001),
-                               bounds=((0, 0), (1, np.inf))
-                               )
-        self._popt = popt
-        self._pcov = pcov
-
-
-    def estimated_runtime(self, bravais_vectors):
-        n_cells = np.abs(np.linalg.det(np.array(bravais_vectors,dtype=np.float64)))
-        A, t0 = self._popt
-        sigma_A = np.sqrt(self._pcov[0,0])
-        sigma_t0 = np.sqrt(self._pcov[1,1])
-        return (
-                A*np.exp(n_cells) + t0,
-                (A-sigma_A)*np.exp(n_cells) + t0-sigma_t0,
-                (A+sigma_A)*np.exp(n_cells) + t0+sigma_t0
-                )
-
-
-
-    def _time_test_sim(self, L, nthread):
-        latfile_loc = os.path.join(
-                self.test_latfile_dir,
-                f"testlat_1_1_{L}.json"
-                )
-        lattice = Lattice(
-            bravais_vectors=[[1, 0, 0], [0, 1, 0], [0, 0, L]],
-            primitive_suggestion=pyrochlore.primitive,
-            populate=True)
-        pyrochlore.export_json(lattice, latfile_loc)
-
-        t1 = time.time()
-        subprocess.run(
-            ["build/gen_spinon_basis_parallel",
-             latfile_loc,
-             str(nthread)])
-
-        t2 = time.time()
-
-        return t2 - t1
-
-
 class RingflipHamiltonian:
     """
     Responsible for storing the ringflips and the spinon-free basis.
@@ -120,71 +55,50 @@ class RingflipHamiltonian:
 
     def _assert_basis(self):
         if self.basis is None:
-            raise AttributeError("basis is None, run `calc_basis` first")
+            raise AttributeError("basis is None, load a basis first")
 
-    def save_basis(self, filename: str = None):
-        if filename is None:
-            filename = "basis_"+self.lattice.shape_hash()+".csv"
-        self._assert_basis()
-        with open(filename, 'w') as f:
-            for sector in self.basis:
-                for b in self.basis[sector]:
-                    f.write('0x%08x\n' % b)
-
-
-    def _load_basis_csv(self, fname, sectorfunc, print_every=100):
-        self.basis = {}
+    def _load_basis_csv(self, fname, print_every=100):
+        self.basis = []
         line_no = 0
         with open(fname, 'r') as f:
             for line in f:
                 if not line.startswith("0x"):
                     continue
                 if (line_no % print_every == 0):
-                    print(f"\r{len(self.basis)} sectors | line {line_no}", end='')
+                    print(f" line {line_no}", end='')
                 state = int(line, 16)
-                sector = sectorfunc(self.lattice, state)
-                if sector in self.basis:
-                    self.basis[sector].append(state)
-                else:
-                    self.basis[sector] = [state]
-
+                self.basis.append(state)
                 line_no += 1
 
 
-    def _load_basis_h5(self, fname, sectorfunc, print_every=100):
-        self.basis = {}
+    def _load_basis_h5(self, fname, print_every=100):
+        self.basis = []
         with h5py.File(fname, 'r') as f:
             data = f["basis"][:]  # Read full dataset
 
         if data.shape[1] != 2:
             raise ValueError("Dataset shape must be (N,2) for Uint128 storage.")
-        
+
         # Convert (N,2) uint64 array to (N,) uint128 array
         uint128_array = (data[:, 1].astype(np.uint128) << 64) | data[:, 0].astype(np.uint128)
-        
+
         for line_no in range(data.shape[0]):
             if (line_no % print_every == 0):
-                print(f"\r{len(self.basis)} sectors | line {line_no}", end='')
-            sector = sectorfunc(self.lattice, uint128_array[line_no])
-            self.basis[sector].append(uint128_array[line_no])
+                print(f" line {line_no}", end='')
+            self.basis.append(uint128_array[line_no])
 
 
 
-    def load_basis(self, fname, sectorfunc=None, print_every=100, sort=False):
+    def load_basis(self, fname, print_every=100, sort=False):
         """
         loads the basis from file
         @param fname: the filename to load, in CSV format
-        @param sectorfunc: a funciton taking two arguments (lat and state)
-            returning an immutable type. The basis is stored as a dict
-            with the outputs of sectorfunc treated as keys.
         """
-        if sectorfunc is None:
-            def sectorfunc(lat, state): return 0
         print("Loading basis...\n")
         if fname.endswith('.csv'):
-            self._load_basis_csv(fname, sectorfunc, print_every)
+            self._load_basis_csv(fname, print_every)
         elif fname.endswith('.h5'):
-            self._load_basis_h5(fname, sectorfunc, print_every)
+            self._load_basis_h5( fname, print_every)
         else:
             raise ValueError("Basis file must be either h5 or csv")
 
@@ -194,47 +108,11 @@ class RingflipHamiltonian:
             for k in self.basis:
                 self.basis[k].sort()
 
-    @property
-    def latfile_loc(self):
-        name = self.lattice.shape_hash()
-        return f"lattice_files/pyro_"+name+".json"
-
-    @property
-    def basisfile_loc(self):
-        name = self.lattice.shape_hash()
-        return f"lattice_files/pyro_"+name+".0.basis.csv"
 
     @property
     def basis_dim(self):
         return sum(len(b) for b in self.basis.values())
 
-    def generate_basis_file(self, nthread):
-        subprocess.run(
-            ["build/gen_spinon_basis_parallel",
-             self.latfile_loc,
-             str(nthread)])
-
-    def calc_basis(self, nthread=1, recalc=True, force_recalc=False,
-                   sectorfunc=None):
-        pyrochlore.export_json(self.lattice, self.latfile_loc)
-
-        if recalc is True:
-            if os.path.exists(self.basisfile_loc):
-                print("Basis file already generated.")
-            else:
-                print("Generating basis...")
-                self.generate_basis_file(nthread)
-
-        if os.path.exists(self.basisfile_loc):
-                print(f"Importing {self.basisfile_loc}...")
-        else:
-            raise Exception(
-                "No basis file found (expected " +
-                self.basisfile_loc + "). run with recalc=True to generate")
-
-        self.load_basis(self.basisfile_loc, sectorfunc)
-
-        print(f"Basis stats: {len(self.basis)} sectors, total dim {self.basis_dim}")
 
     def flip_state(self, state):
         return state ^ (2**self.lattice.num_atoms - 1)
@@ -250,10 +128,6 @@ class RingflipHamiltonian:
             if not all_unique(r.members):
                 return False
         return True
-
-    @property
-    def sectors(self):
-        return self.basis.keys()
 
 # "private" utility funcitons, do not use these directly
 
@@ -302,21 +176,21 @@ class RingflipHamiltonian:
                            ).tocsr()
         return opL
 
-    def build_ringops(self, sector):
+    def build_ringops(self):
 
         ringxc_ops = []  # ring exchange
         ring_L_ops = []  # chiral ring-flip only
 
         for r in self.ringflips:
-            ringL = self._build_ringop(r, self.basis[sector])
+            ringL = self._build_ringop(r, self.basis)
 
             ring_L_ops.append(ringL)
             ringxc_ops.append(ringL + ringL.T)
 
         return ringxc_ops, ring_L_ops
 
-    def build_operator(self, sector, opstring: str, sites: list):
-        basis_set = self.basis[sector]
+    def build_operator(self, opstring: str, sites: list):
+        basis_set = self.basis
         assert len(set(sites)) == len(sites), "sites must not repeat"
 
         coeffs = []
@@ -359,7 +233,45 @@ class RingflipHamiltonian:
 
 
 
-def build_matrix(h: RingflipHamiltonian, g, sector, nk=None, k_basis=None):
+def build_symmetric_basis(basis, group_perms, characters):
+    '''
+    @param basis -> a list of int understood as basis elements in the e.g. Sz basis
+    @param group_perms -> a list of np arrays undersood as bit permutations
+    '''
+    num_states = len(basis)
+    seen = set()
+    sym_basis = []
+
+    for psi in basis:
+        if psi in seen:
+            continue
+
+        orbit = set()
+        coeff_dict = {}
+
+        for c, g in zip(characters, group_perms):
+            orb_state = bitperm(g, psi)
+            orbit.add(orb_state)
+            idx = search_sorted(basis, orb_state)
+            if idx is None:
+                raise ValueError("Basis does not repect the symmetry.")
+
+        for s in orbit:
+            seen.add(s)
+
+        if coeff_dict:
+            idxs, vals = zip(*coeff_dict.items())
+            vals = np.array(vals)
+            norm = np.linalg.norm(vals)
+            if norm > 1e-12:
+                vec = sp.csr_matrix((vals / norm, ([0]*len(idxs), idxs)),
+                                    shape=(1, num_states))
+                sym_basis.append(vec)
+
+    return np.vstack(sym_basis)
+
+
+def build_matrix(h: RingflipHamiltonian, g, k_basis=None):
     """
     Builds a matrix representation of the ringflip Hamiltonian
     with respect to the basis stored in h, with ringflip coefficients g.
@@ -368,8 +280,7 @@ def build_matrix(h: RingflipHamiltonian, g, sector, nk=None, k_basis=None):
     2. A four-member list (the four sublattices)
     3. A list of length len(h.ringxc_ops) (general)
 
-    @param sector -> a key to the internal 'sector' disctionary.
-    @param nk -> the point in k-space, specified as three integers (in physical units, k_real = 2pi nk_j b^_j/L_j)
+    @param k_basis -> a (dim_k, dim_h) shaped matrix of the k-adapted basis vectors
     """
     exchange_consts = np.ones(len(h.ringflips), dtype=np.float64)
     # g can be float or list of float
@@ -392,20 +303,31 @@ y_ring_ham needs to be changed otherwise"
         exchange_consts = g * np.ones(len(h.ringflips),
                                       dtype=np.float64)
 
-    ringxc_ops, _ = h.build_ringops(sector)
-    assert len(ringxc_ops) == len(exchange_consts)
+    if k_basis is None:
 
-    if nk is None:
+        ringxc_ops, _ = h.build_ringops()
+        assert len(ringxc_ops) == len(exchange_consts)
         return sum(gi * O for gi, O in zip(exchange_consts, ringxc_ops))
     else:
+        # Transform the full Hamiltonian into the k-basis: H_k = V @ H @ V†
+        dim_k = k_basis.shape[0]
+        dim = k_basis.shape[1]
 
-        raise NotImplementedError("I haven't written this")
-        # Job 1: build symmetry adapted exchange operators
-        assert len(g) == 4, "Cannot k-space diagonalise when translation symmetry is broken"
+        # Initialize Hamiltonian in momentum basis
+        H_k = sp.csr_matrix((dim_k, dim_k), dtype=np.complex128)
+
+        for gi, O in zip(exchange_consts, ringxc_ops):
+            # O is dim x dim, real sparse matrix in position basis
+            # k_basis is dim_k x dim (unitary matrix-like, real or complex)
+            # Transform: V H V† = k_basis @ O @ k_basis.conj().T
+            Hk_piece = k_basis @ (O @ k_basis.conj().T)
+            H_k += gi * Hk_piece
+
+        return H_k
 
 
 
-def ring_exp_values(H: RingflipHamiltonian, sector, psi, include_imag=False):
+def ring_exp_values(H: RingflipHamiltonian, psi, include_imag=False):
     """
     calculates <psi| O + Odag |psi> for all ringflips involved
     psi is one or several wavefunctions.
@@ -414,7 +336,7 @@ def ring_exp_values(H: RingflipHamiltonian, sector, psi, include_imag=False):
     tallies_im = []
 
 
-    for ring_O, ring_L in zip(*H.build_ringops(sector)):
+    for ring_O, ring_L in zip(*H.build_ringops()):
         tallies.append(psi.conj().T @ ring_O @ psi)
         if include_imag:
             tallies_im.append(1j*psi.conj().T @ (ring_L-ring_L.T) @ psi)

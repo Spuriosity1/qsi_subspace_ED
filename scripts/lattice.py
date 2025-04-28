@@ -8,6 +8,7 @@ from sympy.functions.elementary.integers import floor
 from sympy.matrices.dense import diag
 import numpy as np
 import itertools
+import spglib
 
 ########################################
 ########################################
@@ -429,6 +430,7 @@ class Lattice:
                 self.atom_lookup[J_raw] -= 1
 
         self.shape_hash_str += f'd{idx}'
+        return self
 
     def hash_tuple(self, cell_idx, sl_idx):
         N = self.periodicity
@@ -525,74 +527,103 @@ def from_dict(data: dict, primitive_spec: PrimitiveCell):
     return lat
 
 
-# SYMMETRY OPERATIONS
-def get_transl_generators(lat: Lattice):
-    """
-    Returns a list of gnerators for the three obvious translational
-    symmetries
-    """
-    d = lat.lattice_vectors.shape[0]  # ndim
-
-    retval = []
-
-    for i in range(d):
-        perm = []
-        for (orig_idx, a) in enumerate(lat.atoms):
-            transl_idx = lat.as_linear_idx(
-                a.xyz + lat.primitive.lattice_vectors[:, i])
-            perm.append(transl_idx)
-
-        retval.append(perm)
-
-    return retval
-
-
-def get_inversion_perm(lat: Lattice, inversion_centre_xyz):
-    """
-    Uses a hand-fed inversion centre to generate an inversion permutation
-    """
-    inv_xyz = Matrix(inversion_centre_xyz)
+## SYMMETRY OPERATIONS
+def spg_op_as_perm(lat: Lattice, rotation, translation):
+    '''
+    Applies x -> Rx + t and returns the corresponding translation
+    Assumes that both are in reduced units
+    '''
     perm = []
+    rotation = Matrix(rotation)
+    translation = Matrix(translation)
     for (orig_idx, a) in enumerate(lat.atoms):
-        dx = a.xyz-inv_xyz
-        transl_idx = lat.as_linear_idx(inv_xyz - dx)
+        transl_idx = lat.as_linear_idx(lat.lattice_vectors * (rotation * lat.lattice_vectors.inv() * a.xyz + translation))
         perm.append(transl_idx)
+    return np.array(perm)
 
-    return perm
+def get_symmetry(lat: Lattice):
+    cell_dbl = np.array(lat.lattice_vectors, dtype=np.float64).T
+    atom_positions = np.array([
+        [float(xx) for xx in (lat.lattice_vectors.inv() * a.xyz)]
+        for a in lat.atoms], dtype=np.float64)
+    return spglib.get_symmetry((cell_dbl, atom_positions, np.ones(lat.num_atoms)))
 
-def get_refl_perm(lat:Lattice, origin: Matrix, direction: Matrix):
-    """
-    Returns a permutation corresponding to (possibly trivial) reflection
-    in the planes normal to 'direction' passing
-    through 'origin'
-    """
 
-    perm = []
+def all_spg_perms(lat: Lattice):
+    dataset = get_symmetry(lat)
+    ops = []
+    for r, t in zip(dataset['rotations'], dataset['translations']):
+        ops.append(spg_op_as_perm(lat, r, t))
 
-    unit_direction = direction / direction.norm()
-    for (orig_idx, a) in enumerate(lat.atoms):
-        relpos = a.xyz - origin
-        # project on to direction
-        delta = relpos.dot(unit_direction) * unit_direction
-        transl_idx = lat.as_linear_idx(
-            a.xyz - 2*delta)
-        perm.append(transl_idx)
+    return np.unique(ops, axis=0)
 
-    return perm
 
-def get_rot_perm(lat:Lattice, origin: Matrix, rot_mat: Matrix):
-    """
-    Returns the permutation of the site indices associated with a global
-    rotation by 2π/3
-    """
-    perm = []
-
-    for (orig_idx, a) in enumerate(lat.atoms):
-        relpos = a.xyz - origin
-        # project on to direction
-        delta = rot_mat.dot(relpos)
-        transl_idx = lat.as_linear_idx(a.xyz + delta)
-        perm.append(transl_idx)
-
-    return perm
-
+#def get_transl_generators(lat: Lattice):
+#    """
+#    Returns a list of gnerators for the three obvious translational
+#    symmetries
+#    """
+#    d = lat.lattice_vectors.shape[0]  # ndim
+#
+#    retval = []
+#
+#    for i in range(d):
+#        perm = []
+#        for (orig_idx, a) in enumerate(lat.atoms):
+#            transl_idx = lat.as_linear_idx(
+#                a.xyz + lat.primitive.lattice_vectors[:, i])
+#            perm.append(transl_idx)
+#
+#        retval.append(perm)
+#
+#    return retval
+#
+#def get_inversion_perm(lat: Lattice, inversion_centre_xyz):
+#    """
+#    Uses a hand-fed inversion centre to generate an inversion permutation
+#    """
+#    inv_xyz = Matrix(inversion_centre_xyz)
+#    perm = []
+#    for (orig_idx, a) in enumerate(lat.atoms):
+#        dx = a.xyz-inv_xyz
+#        transl_idx = lat.as_linear_idx(inv_xyz - dx)
+#        perm.append(transl_idx)
+#
+#    return perm
+#
+#def get_refl_perm(lat:Lattice, origin: Matrix, direction: Matrix):
+#    """
+#    Returns a permutation corresponding to (possibly trivial) reflection
+#    in the planes normal to 'direction' passing
+#    through 'origin'
+#    """
+#
+#    perm = []
+#
+#    unit_direction = direction / direction.norm()
+#    for (orig_idx, a) in enumerate(lat.atoms):
+#        relpos = a.xyz - origin
+#        # project on to direction
+#        delta = relpos.dot(unit_direction) * unit_direction
+#        transl_idx = lat.as_linear_idx(
+#            a.xyz - 2*delta)
+#        perm.append(transl_idx)
+#
+#    return perm
+#
+#def get_rot_perm(lat:Lattice, origin: Matrix, rot_mat: Matrix):
+#    """
+#    Returns the permutation of the site indices associated with a global
+#    rotation by 2π/3
+#    """
+#    perm = []
+#
+#    for (orig_idx, a) in enumerate(lat.atoms):
+#        relpos = a.xyz - origin
+#        # project on to direction
+#        delta = rot_mat.dot(relpos)
+#        transl_idx = lat.as_linear_idx(a.xyz + delta)
+#        perm.append(transl_idx)
+#
+#    return perm
+#

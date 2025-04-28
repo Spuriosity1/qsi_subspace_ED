@@ -92,7 +92,6 @@ def has_110_entry(con, x, sign, latvecs, sector):
 
 
 if __name__ == "__main__":
-
     ap = get_parser()
     a = ap.parse_args()
 
@@ -106,10 +105,10 @@ if __name__ == "__main__":
     rfh = RingflipHamiltonian(lat)
     print("Setting up basis...")
     if a.basis_file is None:
-        bfile = rfh.basisfile_loc
+        bfile = a.lattice_file.replace('.json', '.0.basis.csv')
     else:
         bfile = a.basis_file
-    rfh.load_basis(bfile, sectorfunc=calc_polarisation)
+    rfh.load_basis(bfile)
 
     DB_FILE = os.path.join(a.db_repo, f"results_{a.index}.db")
 
@@ -125,10 +124,16 @@ if __name__ == "__main__":
     x_list = calc_x_list(a)
     print(x_list)
 
-    for sector in rfh.sectors:
-        print("SECTOR: " + str(sector))
-        if a.no_calc_111:
+    sector = calc_polarisation(rfh.lattice, rfh.basis[0])
+    for b in rfh.basis:
+        s2 = calc_polarisation(rfh.lattice, b)
+        if sector != s2:
+            print("WARN: basis is not polarization-defined")
+            sector = None
             break
+
+    print("SECTOR: " + str(sector))
+    if not a.no_calc_111:
         print("111 field:")
         for x in tqdm(x_list):
             for sign in [-1, 1]:
@@ -137,7 +142,7 @@ if __name__ == "__main__":
                     continue
 
                 e, reO, imO = calc_ring_exp_vals(rfh, g=sign*g_111(x),
-                                          sector=sector, krylov_dim=a.krylov_dim,)
+                                         krylov_dim=a.krylov_dim,)
                 cursor = con.cursor()
                 cursor.execute("""INSERT INTO field_111 (g0_g123, g123_sign, latvecs, sector,
                                                          edata,
@@ -152,10 +157,7 @@ if __name__ == "__main__":
                 cursor.close()
                 con.commit()
 
-    for sector in rfh.sectors:
-        print("SECTOR: " + str(sector))
-        if a.no_calc_110:
-            break
+    if not a.no_calc_110:
         print("110 field:")
         for x in tqdm(x_list):
             for sign in [-1, 1]:
@@ -164,7 +166,7 @@ if __name__ == "__main__":
                     continue
 
                 e, reO, imO = calc_ring_exp_vals(rfh, g=sign*g_110(x),
-                                          sector=sector, krylov_dim = a.krylov_dim)
+                                           krylov_dim = a.krylov_dim)
 
                 cursor = con.cursor()
                 cursor.execute("""INSERT INTO field_110 (g01_g23, g23_sign, latvecs, sector,
