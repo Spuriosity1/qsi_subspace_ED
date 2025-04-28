@@ -73,38 +73,13 @@ def find_groundstate_impl(con, lat, sign, x_name, table_name, sign_name):
         """,
         (lat, sign)).fetchall())[:,0]
 
-    # best_sectors = []
-    # sector_energies = []
-    
-    # for x in x_list:
-    #     res = c.execute(f"""
-    #         SELECT edata, sector FROM {table_name}
-    #         WHERE {x_name} = ? AND latvecs = ? AND {sign_name} = ?""",
-    #                     (x,lat, sign) )
-    #     gse = np.inf
-    #     best_sec = None
-        
-    #     for e, sec in res:
-    #         curr_gse = convert_array(e)[0]
-    #         if  curr_gse < gse:
-    #             gse = curr_gse
-    #             best_sec = sec
-                
-        
-        
-            
-        
-
-
-    # c.close()
-
 
     sectors = list(get_sector_list(con, lat).keys())
 
     energy_list = []
     
     for sector in sectors:
-        
+        print(sector+"                ", end="\r")
         
         res = c.execute(f"""
         SELECT {x_name}, edata FROM {table_name}
