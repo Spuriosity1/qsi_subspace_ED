@@ -1,8 +1,8 @@
 #!/bin/bash
 
 # Check if the user provided an input file
-if [ "$#" -lt 4 ]; then
-    echo "Usage: $0 <latspec> <initial_index> <rotation=IXYZ> <name> <db_repo=../../ed_data/>"
+if [ "$#" -lt 5 ]; then
+    echo "Usage: $0 <latspec> <initial_index> <rotation=IXYZ> <name> <db_repo>"
     exit 1
 fi
 
@@ -22,7 +22,7 @@ latfile="../lattice_files/$lattice.json"
 ROTATION="${3}"
 NAME="${4}"
 
-DB_REPO="${5:=../../ed_data/}"
+DB_REPO="${5}"
 
 if [ ! -d "${DB_REPO}" ]; then
     echo "Error: specified db repo does not exist. Create?"
@@ -34,10 +34,23 @@ if [ ! -d "${DB_REPO}" ]; then
     esac
 fi
 
+echoerr() { echo "$@" 1>&2; }
+
+start=0.2
+stop=2
+step=0.2
+
 index=$2
 for p in $sector_list; do
-	for x in `seq -2 0.2 0`; do
-		echo "python3 ../scripts/phasedia_micro.py $latfile $x --db_file ${DB_REPO}/data${NAME}_$index.db --basis_file ../basis_partitions/$lattice/$p --rotation $ROTATION"
+	bfile="../basis_partitions/$lattice/$p"
+	for x in `seq $start $step $stop`; do
+
+		cmd="python3 ../scripts/phasedia_micro.py $latfile $x --db_file ${DB_REPO}/data${NAME}_$index.db --basis_file $bfile --rotation $ROTATION"
+		if [[ `wc -l $bfile | sed -re 's/([0-9]+).*/\1/'` -lt 100000 ]]; then
+			echo $cmd
+		else
+			echoerr $cmd
+		fi
 		let index+=1
 	done
 done

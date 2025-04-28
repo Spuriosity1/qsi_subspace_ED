@@ -25,7 +25,7 @@ def get_parser():
                     help="Rotates lattice relative to magnetic field")
     ap.add_argument("--db_file", type=str, default=None,
                     help="Database to store results in")
-    ap.add_argument("--edit_existing", action='store_true', default=False,
+    ap.add_argument("--dont_edit_existing", action='store_true', default=False,
                     help='If false, refuses to modify an existing db')
     ap.add_argument("--krylov_dim", type=int, default=200)
     ap.add_argument("--no_calc_110", action='store_true', default=False)
@@ -59,10 +59,10 @@ if __name__ == "__main__":
     initialise=True
     if os.path.isfile(DB_FILE):
         print("WARN: db already exists!")
-        if a.edit_existing:
-            initialise=False
-        else:
+        if a.dont_edit_existing: 
             sys.exit(1)
+        else:
+            initialise=False
 
     
     con = connect_npsql(DB_FILE, timeout=60)
