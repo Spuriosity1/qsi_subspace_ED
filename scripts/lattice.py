@@ -558,25 +558,25 @@ def all_spg_perms(lat: Lattice):
     return np.unique(ops, axis=0)
 
 
-#def get_transl_generators(lat: Lattice):
-#    """
-#    Returns a list of gnerators for the three obvious translational
-#    symmetries
-#    """
-#    d = lat.lattice_vectors.shape[0]  # ndim
-#
-#    retval = []
-#
-#    for i in range(d):
-#        perm = []
-#        for (orig_idx, a) in enumerate(lat.atoms):
-#            transl_idx = lat.as_linear_idx(
-#                a.xyz + lat.primitive.lattice_vectors[:, i])
-#            perm.append(transl_idx)
-#
-#        retval.append(perm)
-#
-#    return retval
+def get_transl_generators(lat: Lattice):
+    """
+    Returns a list of gnerators for the three obvious translational
+    symmetries
+    """
+    d = lat.lattice_vectors.shape[0]  # ndim
+
+    retval = []
+
+    for i in range(d):
+        perm = []
+        for (orig_idx, a) in enumerate(lat.atoms):
+            transl_idx = lat.as_linear_idx(
+                a.xyz + lat.primitive.lattice_vectors[:, i])
+            perm.append(transl_idx)
+
+        retval.append(perm)
+
+    return retval
 #
 #def get_inversion_perm(lat: Lattice, inversion_centre_xyz):
 #    """

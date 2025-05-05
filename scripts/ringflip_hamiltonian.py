@@ -1,10 +1,12 @@
-from lattice import Lattice
+from lattice import Lattice, get_transl_generators
 import pyrochlore
 from bisect import bisect_left
 import numpy as np
 import scipy.sparse as sp
 from bit_tools import bitperm, make_state, as_mask
 import h5py
+from itertools import product
+from sympy.combinatorics import Permutation
 
 
 def all_unique(ll: list):
@@ -65,7 +67,7 @@ class RingflipHamiltonian:
                 if not line.startswith("0x"):
                     continue
                 if (line_no % print_every == 0):
-                    print(f" line {line_no}", end='')
+                    print(f" line {line_no}\r", end='')
                 state = int(line, 16)
                 self.basis.append(state)
                 line_no += 1
@@ -189,72 +191,53 @@ class RingflipHamiltonian:
 
         return ringxc_ops, ring_L_ops
 
-    def build_operator(self, opstring: str, sites: list):
-        basis_set = self.basis
-        assert len(set(sites)) == len(sites), "sites must not repeat"
 
-        coeffs = []
-        from_idx = []
-        to_idx = []
+def get_group_characters(l: Lattice):
+    # Returns a list of all allowable k-tuples
+    T = [Permutation(t) for t in get_transl_generators(l)]
+    BZ_size = 1
+    for t in T:
+        BZ_size *= t.order()
 
-        for J, psi in enumerate(basis_set):
-            new_state = psi
-            coeff = 1.0
-            for j, op in zip(sites, opstring):
-                if op == 'Z':
-                    coeff *= 1 if (psi & (1 << j)) else -1
-                elif op == 'X':
-                    new_state ^= (1 << j)  # Flip spin at site j
-                elif op == 'Y':
-                    new_state ^= (1 << j)
-                    coeff *= 1j if (psi & (1 << j)) else -1j
-                elif op == '+':  # Raising operator S^+
-                    if not (psi & (1 << j)):
-                        new_state ^= (1 << j)
-                    else:
-                        coeff = 0
-                        break
-                elif op == '-':  # Lowering operator S^-
-                    if psi & (1 << j):
-                        new_state ^= (1 << j)
-                    else:
-                        coeff = 0
-                        break
-
-            to_id = search_sorted(basis_set, new_state)
-            if abs(coeff) > 1e-11 and to_id is not None:
-                coeffs.append(coeff)
-                from_idx.append(J)
-                to_idx.append(to_id)
-
-        dim = len(basis_set)
-
-        return sp.coo_array((coeffs, (from_idx, to_idx)),shape=(dim,dim)).tocsr()
+    kk = [
+            2.0j*np.pi*np.array(I) / BZ_size
+            for I in product(*(range(t.order()) for t in T))
+            ]
+    return kk
 
 
-
-def build_symmetric_basis(basis, group_perms, characters):
+def build_k_basis(rfh:RingflipHamiltonian, k):
     '''
-    @param basis -> a list of int understood as basis elements in the e.g. Sz basis
-    @param group_perms -> a list of np arrays undersood as bit permutations
+    @param basis
+    @param k a three-tuple of integers indexing k sectors
+
+    Returns basis vectors (written wrt the original Sz basis) for a particular rep
     '''
-    num_states = len(basis)
+    num_states = len(rfh.basis)
     seen = set()
     sym_basis = []
 
-    for psi in basis:
+    T = [Permutation(t) for t in get_transl_generators(rfh.lattice)]
+
+    row=0 # indexes which k-vector we are on
+
+    for psi in rfh.basis:
         if psi in seen:
             continue
 
         orbit = set()
         coeff_dict = {}
 
-        for c, g in zip(characters, group_perms):
-            orb_state = bitperm(g, psi)
+        for I in product(*(range(t.order()) for t in T)):
+
+            perm = T[0]**I[0] * T[1]**I[1] * T[2]**I[2]
+            orb_state = bitperm(list(perm), psi)
             orbit.add(orb_state)
-            idx = search_sorted(basis, orb_state)
+
+            idx = search_sorted(rfh.basis, orb_state)
             if idx is None:
                 raise ValueError("Basis does not repect the symmetry.")
+            coeff_dict[idx] += np.exp(np.dot(I,k))
 
         for s in orbit:
             seen.add(s)
@@ -268,7 +251,47 @@ def build_symmetric_basis(basis, group_perms, characters):
                                     shape=(1, num_states))
                 sym_basis.append(vec)
 
-    return np.vstack(sym_basis)
+    return sp.vstack(sym_basis)
+
+
+#def build_symmetric_basis(basis, group_perms, characters):
+#    '''
+#    @param basis -> a list of int understood as basis elements in the e.g. Sz basis
+#    @param group_perms -> a list of np arrays undersood as bit permutations
+#
+#    Returns basis vectors (written wrt the original Sz basis) for a particular rep
+#    '''
+#    num_states = len(basis)
+#    seen = set()
+#    sym_basis = []
+#
+#    for psi in basis:
+#        if psi in seen:
+#            continue
+#
+#        orbit = set()
+#        coeff_dict = {}
+#
+#        for c, g in zip(characters, group_perms):
+#            orb_state = bitperm(g, psi)
+#            orbit.add(orb_state)
+#            idx = search_sorted(basis, orb_state)
+#            if idx is None:
+#                raise ValueError("Basis does not repect the symmetry.")
+#
+#        for s in orbit:
+#            seen.add(s)
+#
+#        if coeff_dict:
+#            idxs, vals = zip(*coeff_dict.items())
+#            vals = np.array(vals)
+#            norm = np.linalg.norm(vals)
+#            if norm > 1e-12:
+#                vec = sp.csr_matrix((vals / norm, ([0]*len(idxs), idxs)),
+#                                    shape=(1, num_states))
+#                sym_basis.append(vec)
+#
+#    return np.vstack(sym_basis)
 
 
 def build_matrix(h: RingflipHamiltonian, g, k_basis=None):
@@ -285,8 +308,6 @@ def build_matrix(h: RingflipHamiltonian, g, k_basis=None):
     exchange_consts = np.ones(len(h.ringflips), dtype=np.float64)
     # g can be float or list of float
     if hasattr(g, "__len__"):
-        assert not any(np.iscomplex(g)), "only real exchanges are supported\
-y_ring_ham needs to be changed otherwise"
         if len(g) == len(h.ringflips):
             exchange_consts = g
         elif len(g) == 4:
@@ -305,43 +326,37 @@ y_ring_ham needs to be changed otherwise"
 
     if k_basis is None:
 
-        ringxc_ops, _ = h.build_ringops()
-        assert len(ringxc_ops) == len(exchange_consts)
-        return sum(gi * O for gi, O in zip(exchange_consts, ringxc_ops))
+        _, ringL_ops = h.build_ringops()
+        assert len(ringL_ops) == len(exchange_consts)
+        H1 = sum(gi * O for gi, O in zip(exchange_consts, ringL_ops))
+        return H1 + H1.conj().T
     else:
         # Transform the full Hamiltonian into the k-basis: H_k = V @ H @ V†
         dim_k = k_basis.shape[0]
-        dim = k_basis.shape[1]
+        # dim = k_basis.shape[1]
 
         # Initialize Hamiltonian in momentum basis
         H_k = sp.csr_matrix((dim_k, dim_k), dtype=np.complex128)
 
-        for gi, O in zip(exchange_consts, ringxc_ops):
+        for gi, O in zip(exchange_consts, ringL_ops):
             # O is dim x dim, real sparse matrix in position basis
             # k_basis is dim_k x dim (unitary matrix-like, real or complex)
             # Transform: V H V† = k_basis @ O @ k_basis.conj().T
             Hk_piece = k_basis @ (O @ k_basis.conj().T)
             H_k += gi * Hk_piece
 
-        return H_k
+        return H_k + H_k.conj().T
 
 
 
-def ring_exp_values(H: RingflipHamiltonian, psi, include_imag=False):
+def ring_exp_values(H: RingflipHamiltonian, psi):
     """
     calculates <psi| O + Odag |psi> for all ringflips involved
     psi is one or several wavefunctions.
     """
     tallies = []
-    tallies_im = []
-
 
     for ring_O, ring_L in zip(*H.build_ringops()):
-        tallies.append(psi.conj().T @ ring_O @ psi)
-        if include_imag:
-            tallies_im.append(1j*psi.conj().T @ (ring_L-ring_L.T) @ psi)
+        tallies.append(psi.conj().T @ ring_L @ psi)
 
-    if include_imag:
-        return tallies, tallies_im
-    else:
-        return tallies
+    return tallies

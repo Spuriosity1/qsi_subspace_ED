@@ -50,16 +50,15 @@ def init_db(con):
         create table field_110 ( g01_g23 REAL, g23_sign INTEGER,
                 edata BLOB,
                 reO0 BLOB, reO1 BLOB, reO2 BLOB, reO3 BLOB,
-                imO0 BLOB, imO1 BLOB, imO2 BLOB, imO3 BLOB,
-                latvecs BLOB, sector BLOB
+                latvecs BLOB, sector BLOB, kx FLOAT, ky FLOAT, kz FLOAT
                 )
                 """)
     con.execute("""
 create table field_111 ( g0_g123 REAL, g123_sign INTEGER,
                         edata BLOB,
                 reO0 BLOB, reO1 BLOB, reO2 BLOB, reO3 BLOB,
-                imO0 BLOB, imO1 BLOB, imO2 BLOB, imO3 BLOB,
-                latvecs BLOB, sector BLOB)
+                latvecs BLOB, sector BLOB, kx FLOAT, ky FLOAT, kz FLOAT
+                        )
                 """)
 
 

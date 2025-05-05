@@ -1,16 +1,11 @@
-from ringflip_hamiltonian import RingflipHamiltonian, build_matrix 
-from ringflip_hamiltonian import ring_exp_values, calc_polarisation
-import scipy.sparse.linalg as sLA
+from ringflip_hamiltonian import RingflipHamiltonian, calc_polarisation, get_group_characters
 import pyrochlore
 import sys
-import numpy.linalg as LA
 import numpy as np
-from tqdm import tqdm
 import argparse
 from db import connect_npsql, init_db, rotation_matrices
 import os
-from phasedia_impl import calc_spectrum, calc_ring_exp_vals
-import time
+from phasedia_impl import calc_ring_exp_vals
 
 
 from phase_dia import g_111_dict, g_110_dict, has_110_entry, has_111_entry
@@ -32,6 +27,15 @@ def get_parser():
     ap.add_argument("--no_calc_111", action='store_true', default=False)
 
     return ap
+
+
+def assert_unif_sector(rfh):
+    sector = calc_polarisation(rfh.lattice, rfh.basis[0])
+    if not all(calc_polarisation(rfh.lattice, b) == sector for b in rfh.basis):
+        print("WARN: basis is not polarization-split")
+        sector = None
+    print("SECTOR: " + str(sector))
+    return sector
 
 
 if __name__ == "__main__":
@@ -56,76 +60,59 @@ if __name__ == "__main__":
 
     DB_FILE = a.db_file
 
-    initialise=True
+    initialise = True
     if os.path.isfile(DB_FILE):
         print("WARN: db already exists!")
         if a.edit_existing:
-            initialise=False
+            initialise = False
         else:
             sys.exit(1)
 
-    
     con = connect_npsql(DB_FILE, timeout=60)
     if initialise:
         init_db(con)
 
+    k_sectors = get_group_characters(rfh.lattice)
 
-    sector = calc_polarisation(rfh.lattice, rfh.basis[0])
-    for b in rfh.basis:
-        s2 = calc_polarisation(rfh.lattice, b)
-        if sector != s2:
-            print("WARN: basis is not polarization-defined")
-            sector = None
-            break
-
-    print("SECTOR: " + str(sector))
+    sector = assert_unif_sector(rfh)
+        
     if not a.no_calc_111:
         print("111 field:")
         for sign in [-1, 1]:
-            if has_111_entry(con, a.x, sign, latvecs, sector):
-                print(f"WARN: duplicate found at {a.x}")
-                continue
 
-
-            e, reO, imO = calc_ring_exp_vals(rfh, g=sign*g_111(a.x),
-                                      sector=sector, krylov_dim=a.krylov_dim,)
-            cursor = con.cursor()
-            cursor.execute("""INSERT INTO field_111 (g0_g123, g123_sign, latvecs, sector,
-                                                     edata,
-                                                     reO0, reO1, reO2, reO3,
-                                                     imO0, imO1, imO2, imO3
-                                                     )
-                           VALUES (?,?,?,?,
-                                   ?,
-                                   ?,?,?,?,
-                                   ?,?,?,?);""", 
-                           (a.x, sign, latvecs, str(sector), np.real(e), *reO.values(), *imO.values() ))
+            for K in k_sectors:
+                e, O = calc_ring_exp_vals(rfh, g=sign*g_111(a.x),
+                                          krylov_dim=a.krylov_dim,k_sector=K)
+                cursor = con.cursor()
+                cursor.execute("""INSERT INTO field_111 (g0_g123, g123_sign, latvecs, sector,
+                                                         kx, ky, kz, edata,
+                                                         O0, O1, O2, O3,
+                                                         )
+                               VALUES (?,?,?,?,
+                                       ?,?,?,?,
+                                       ?,?,?,?
+                                       );""",
+                               (a.x, sign, latvecs, K[0], K[1], K[2], str(sector), np.real(e), *O.values() ))
             cursor.close()
             con.commit()
 
     if not a.no_calc_110:
         print("110 field:")
         for sign in [-1, 1]:
-            if has_110_entry(con, a.x,sign,latvecs,sector):
-                print(f"WARN: skipping duplicate at g01_g23={a.x}")
-                continue
-
-            e, reO, imO = calc_ring_exp_vals(rfh, g=sign*g_110(a.x),
-                                      sector=sector, krylov_dim = a.krylov_dim)
+            e, O = calc_ring_exp_vals(rfh, g=sign*g_110(a.x),
+                                      krylov_dim=a.krylov_dim)
 
             cursor = con.cursor()
+
             cursor.execute("""INSERT INTO field_110 (g01_g23, g23_sign, latvecs, sector,
-                                                     edata,
-                                                     reO0, reO1, reO2, reO3,
-                                                     imO0, imO1, imO2, imO3
-                                                     )
-                           VALUES (?,?,?,?,
-                                   ?,
-                                   ?,?,?,?,
-                                   ?,?,?,?);""",
-
-                           (a.x, sign, latvecs, str(sector), np.real(e), *reO.values(), *imO.values() ))
-
+                                                         kx, ky, kz, edata,
+                                                         O0, O1, O2, O3,
+                                                         )
+                               VALUES (?,?,?,?,
+                                       ?,?,?,?,
+                                       ?,?,?,?
+                                       );""",
+                               (a.x, sign, latvecs, K[0], K[1], K[2], str(sector), np.real(e), *O.values() ))
 
             cursor.close()
             con.commit()

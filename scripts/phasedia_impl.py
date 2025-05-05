@@ -1,7 +1,6 @@
 from ringflip_hamiltonian import RingflipHamiltonian, build_matrix
-from ringflip_hamiltonian import ring_exp_values, build_symmetric_basis
+from ringflip_hamiltonian import ring_exp_values, build_k_basis
 import scipy.sparse.linalg as sLA
-import pyrochlore
 import numpy.linalg as LA
 import numpy as np
 
@@ -38,7 +37,7 @@ def eigs_retry(hh, krylov_dim):
 
 
 def calc_ring_exp_vals(rfh: RingflipHamiltonian, g, algo='sparse',
-                       krylov_dim=200, irrep_label=None):
+                       krylov_dim=200, k_sector=None):
     '''calculates the ring expectation values on the four sublats, including
     degeneracies
     @param rfh -> the ringflip Hamiltonian
@@ -48,15 +47,17 @@ def calc_ring_exp_vals(rfh: RingflipHamiltonian, g, algo='sparse',
     @param krylov_dim -> Maximum number of eigenvalues to store (dense provlems are trucnated to this)
     @param k_sector -> None, or a three-tuple of integers specifying a k sector
     '''
-    H = build_matrix(rfh, g=g, k_basis=None) 
-    #H = build_matrix(rfh, g=g, k_basis=build_symmetric_basis( rfh.basis, irrep_label))
+    if k_sector is None:
+        H = build_matrix(rfh, g=g, k_basis=None)
+    else:
+        H = build_matrix(rfh, g=g, k_basis=build_k_basis( rfh, k_sector))
 
     # force dense algorithm for small problems
     if H.shape[0] - 2 < krylov_dim*2:
         algo = 'dense'
 
     alg_opts = {
-            'sparse': lambda hh: eigs_retry(hh, krylov_dim),
+        'sparse': lambda hh: eigs_retry(hh, krylov_dim),
         'dense': lambda hh: LA.eigh(hh.todense())
     }
 
@@ -70,27 +71,23 @@ def calc_ring_exp_vals(rfh: RingflipHamiltonian, g, algo='sparse',
     degen_energy = e[mask]
     degen_psi = v[:, mask]
     # print(f"degeneracy: {degen_energy.shape[0]}")
-    rO_list, iO_list = ring_exp_values(rfh, degen_psi, include_imag=True)
+    O_list = ring_exp_values(rfh, degen_psi)
 
-    sum_reO = {}
-    sum_imO = {}
+    sum_O = {}
     num_entries = {}
     for ring in rfh.ringflips:
-        sum_reO[ring.sl] = 0.
-        sum_imO[ring.sl] = 0.
+        sum_O[ring.sl] = 0.
         num_entries[ring.sl] = 0
 
-    for ring, reO, imO in zip(rfh.ringflips, rO_list, iO_list):
-        sum_reO[ring.sl] += np.real(reO)
-        sum_imO[ring.sl] += np.real(imO)
+    for ring, O in zip(rfh.ringflips, O_list):
+        sum_O[ring.sl] += O
         num_entries[ring.sl] += 1
 
-    for k in sum_reO:
+    for k in sum_O:
         if num_entries[k] > 0:
-            sum_reO[k] /= num_entries[k]
-            sum_imO[k] /= num_entries[k]
+            sum_O[k] /= num_entries[k]
 
-    return e, sum_reO, sum_imO  # , degen_energy.shape[0]
+    return e, sum_O # , degen_energy.shape[0]
 
 
 
