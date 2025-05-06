@@ -2,10 +2,11 @@ from lattice import Lattice, get_transl_generators
 import pyrochlore
 from bisect import bisect_left
 import numpy as np
+import numpy
 import scipy.sparse as sp
 from bit_tools import bitperm, make_state, as_mask
 import h5py
-from itertools import product
+import itertools
 from sympy.combinatorics import Permutation
 
 
@@ -195,14 +196,15 @@ class RingflipHamiltonian:
 def get_group_characters(l: Lattice):
     # Returns a list of all allowable k-tuples
     T = [Permutation(t) for t in get_transl_generators(l)]
-    BZ_size = 1
+    BZ_size = 1.0
     for t in T:
-        BZ_size *= t.order()
+        BZ_size *= np.float64(t.order())
 
     kk = [
-            2.0j*np.pi*np.array(I) / BZ_size
-            for I in product(*(range(t.order()) for t in T))
+            2.0*np.pi*np.array(m, dtype=np.float64) / BZ_size
+            for m in itertools.product(*(range(t.order()) for t in T))
             ]
+    
     return kk
 
 
@@ -219,7 +221,6 @@ def build_k_basis(rfh:RingflipHamiltonian, k):
 
     T = [Permutation(t) for t in get_transl_generators(rfh.lattice)]
 
-    row=0 # indexes which k-vector we are on
 
     for psi in rfh.basis:
         if psi in seen:
@@ -228,16 +229,17 @@ def build_k_basis(rfh:RingflipHamiltonian, k):
         orbit = set()
         coeff_dict = {}
 
-        for I in product(*(range(t.order()) for t in T)):
+        for m in itertools.product(*(range(t.order()) for t in T)):
+            m = np.array(m)
 
-            perm = T[0]**I[0] * T[1]**I[1] * T[2]**I[2]
+            perm = T[0]**m[0] * T[1]**m[1] * T[2]**m[2]
             orb_state = bitperm(list(perm), psi)
             orbit.add(orb_state)
 
             idx = search_sorted(rfh.basis, orb_state)
             if idx is None:
                 raise ValueError("Basis does not repect the symmetry.")
-            coeff_dict[idx] += np.exp(np.dot(I,k))
+            coeff_dict[idx] = np.exp(1.0j*np.dot(m, k))
 
         for s in orbit:
             seen.add(s)
@@ -324,10 +326,10 @@ def build_matrix(h: RingflipHamiltonian, g, k_basis=None):
         exchange_consts = g * np.ones(len(h.ringflips),
                                       dtype=np.float64)
 
-    if k_basis is None:
 
-        _, ringL_ops = h.build_ringops()
-        assert len(ringL_ops) == len(exchange_consts)
+    _, ringL_ops = h.build_ringops()
+    assert len(ringL_ops) == len(exchange_consts)
+    if k_basis is None:
         H1 = sum(gi * O for gi, O in zip(exchange_consts, ringL_ops))
         return H1 + H1.conj().T
     else:
@@ -349,14 +351,19 @@ def build_matrix(h: RingflipHamiltonian, g, k_basis=None):
 
 
 
-def ring_exp_values(H: RingflipHamiltonian, psi):
+def ring_exp_values(H: RingflipHamiltonian, psi, k_basis=None):
     """
     calculates <psi| O + Odag |psi> for all ringflips involved
     psi is one or several wavefunctions.
+    k_basis is a (n_k by dimH) basis spec
     """
     tallies = []
-
-    for ring_O, ring_L in zip(*H.build_ringops()):
-        tallies.append(psi.conj().T @ ring_L @ psi)
+    
+    if k_basis is None:
+        for ring_O, ring_L in zip(*H.build_ringops()):
+            tallies.append(psi.conj().T @ ring_L @ psi)
+    else:
+        for ring_O, ring_L in zip(*H.build_ringops()):
+            tallies.append(psi.conj().T @ k_basis @ ring_L @ k_basis.conj().T @ psi)
 
     return tallies

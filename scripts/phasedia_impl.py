@@ -47,10 +47,13 @@ def calc_ring_exp_vals(rfh: RingflipHamiltonian, g, algo='sparse',
     @param krylov_dim -> Maximum number of eigenvalues to store (dense provlems are trucnated to this)
     @param k_sector -> None, or a three-tuple of integers specifying a k sector
     '''
+
     if k_sector is None:
+        k_basis = None
         H = build_matrix(rfh, g=g, k_basis=None)
     else:
-        H = build_matrix(rfh, g=g, k_basis=build_k_basis( rfh, k_sector))
+        k_basis =build_k_basis( rfh, np.array(k_sector))
+        H = build_matrix(rfh, g=g, k_basis=k_basis)
 
     # force dense algorithm for small problems
     if H.shape[0] - 2 < krylov_dim*2:
@@ -71,7 +74,7 @@ def calc_ring_exp_vals(rfh: RingflipHamiltonian, g, algo='sparse',
     degen_energy = e[mask]
     degen_psi = v[:, mask]
     # print(f"degeneracy: {degen_energy.shape[0]}")
-    O_list = ring_exp_values(rfh, degen_psi)
+    O_list = ring_exp_values(rfh, degen_psi, k_basis)
 
     sum_O = {}
     num_entries = {}

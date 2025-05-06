@@ -75,48 +75,51 @@ if __name__ == "__main__":
     k_sectors = get_group_characters(rfh.lattice)
 
     sector = assert_unif_sector(rfh)
-        
+
+
     if not a.no_calc_111:
         print("111 field:")
         for sign in [-1, 1]:
-
             for K in k_sectors:
                 e, O = calc_ring_exp_vals(rfh, g=sign*g_111(a.x),
                                           krylov_dim=a.krylov_dim,k_sector=K)
                 cursor = con.cursor()
-                cursor.execute("""INSERT INTO field_111 (g0_g123, g123_sign, latvecs, sector,
+                cursor.execute("""INSERT INTO field_111 (g0_g123, g123_sign, latvecs,
+                                                         sector,
                                                          kx, ky, kz, edata,
-                                                         O0, O1, O2, O3,
+                                                         O0, O1, O2, O3
                                                          )
                                VALUES (?,?,?,?,
                                        ?,?,?,?,
                                        ?,?,?,?
                                        );""",
-                               (a.x, sign, latvecs, K[0], K[1], K[2], str(sector), np.real(e), *O.values() ))
+                               (a.x, sign, latvecs, str(sector), K[0], K[1], K[2], np.real(e), *O.values() ))
             cursor.close()
             con.commit()
 
     if not a.no_calc_110:
         print("110 field:")
         for sign in [-1, 1]:
-            e, O = calc_ring_exp_vals(rfh, g=sign*g_110(a.x),
-                                      krylov_dim=a.krylov_dim)
+            for K in k_sectors:
+                e, O = calc_ring_exp_vals(rfh, g=sign*g_110(a.x),
+                                          krylov_dim=a.krylov_dim, k_sector=K)
 
-            cursor = con.cursor()
+                cursor = con.cursor()
 
-            cursor.execute("""INSERT INTO field_110 (g01_g23, g23_sign, latvecs, sector,
-                                                         kx, ky, kz, edata,
-                                                         O0, O1, O2, O3,
-                                                         )
-                               VALUES (?,?,?,?,
-                                       ?,?,?,?,
-                                       ?,?,?,?
-                                       );""",
-                               (a.x, sign, latvecs, K[0], K[1], K[2], str(sector), np.real(e), *O.values() ))
+                cursor.execute("""INSERT INTO field_110 (g01_g23, g23_sign, latvecs, sector,
+                                                             kx, ky, kz, edata,
+                                                             O0, O1, O2, O3
+                                                             )
+                                   VALUES (?,?,?,?,
+                                           ?,?,?,?,
+                                           ?,?,?,?
+                                           );""",
+                               (a.x, sign, latvecs, str(sector), K[0], K[1], K[2], np.real(e), *O.values() )
+                               )
 
-            cursor.close()
-            con.commit()
+                cursor.close()
+                con.commit()
 
-            # save the data
+                # save the data
 
 
