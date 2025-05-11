@@ -12,6 +12,11 @@ from bit_tools import bitperm, make_state, as_mask
 from scipy.optimize import curve_fit
 import h5py
 
+uint128 = np.dtype([
+  ('hi', 'i8'), 
+  ('lo', 'i8'),
+])
+
 def all_unique(ll: list):
     return len(set(ll)) == len(ll)
 
@@ -160,7 +165,7 @@ class RingflipHamiltonian:
             raise ValueError("Dataset shape must be (N,2) for Uint128 storage.")
         
         # Convert (N,2) uint64 array to (N,) uint128 array
-        uint128_array = (data[:, 1].astype(np.uint128) << 64) | data[:, 0].astype(np.uint128)
+        uint128_array = (data[:, 1].astype(uint128) << 64) | data[:, 0].astype(uint128)
         
         for line_no in range(data.shape[0]):
             if (line_no % print_every == 0):

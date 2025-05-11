@@ -20,10 +20,10 @@ def get_parser():
     ap = argparse.ArgumentParser(prog="PHASE_DIA")
     ap.add_argument("lattice_file", type=str)
     ap.add_argument('x', type=float)
-    ap.add_argument("--basis_file", type=str, default=None)
-    ap.add_argument("--rotation", type=str, choices='I X Y Z '.split(), default='I',
+    ap.add_argument("--basis_file", "-b", type=str, required=True)
+    ap.add_argument("--rotation", "-r", type=str, choices='I X Y Z '.split(), default='I',
                     help="Rotates lattice relative to magnetic field")
-    ap.add_argument("--db_file", type=str, default=None,
+    ap.add_argument("--db_file",type=str, default=None,
                     help="Database to store results in")
     ap.add_argument("--dont_edit_existing", action='store_true', default=False,
                     help='If false, refuses to modify an existing db')
