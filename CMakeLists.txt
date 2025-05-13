@@ -36,7 +36,6 @@ set(THREADS_PREFER_PTHREAD_FLAG ON)
 
 
 
-add_subdirectory("python_uint128")
 
 # In case dependencies were installed by a package manager, we need to let CMake know
 # where to look for the modules.

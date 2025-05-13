@@ -10,9 +10,6 @@ import itertools
 from sympy.combinatorics import Permutation
 
 
-from uint128 import UInt128
-
-
 def all_unique(ll: list):
     return len(set(ll)) == len(ll)
 
@@ -20,7 +17,7 @@ def all_unique(ll: list):
 def calc_polarisation(lat: Lattice, state):
     polarisations = [0, 0, 0, 0]
     for i, a in enumerate(lat.atoms):
-        if (state & (UInt128(1) << i)) != 0:
+        if (state & (1 << i)) != 0:
             polarisations[int(a.sl_name)] += 1
 
     return tuple(polarisations)
@@ -74,8 +71,7 @@ class RingflipHamiltonian:
                     continue
                 if (line_no % print_every == 5):
                     print(f" line {line_no}", end='\r')
-                # state = int(line, 16)
-                state = UInt128(line.strip())
+                state = int(line, 16)
                 self.basis.append(state)
                 line_no += 1
         print()
@@ -101,7 +97,7 @@ class RingflipHamiltonian:
 
             # Create bitarray from binary string (as in CSV)
             # state = bitarray(val.to_bytes(16, 'big'))
-            self.basis.append(UInt128(val))
+            self.basis.append(val)
 
         print()
 
@@ -161,7 +157,7 @@ class RingflipHamiltonian:
 
             mask = as_mask(r.members)
 
-            loc_state_l = UInt128(0)
+            loc_state_l = 0
             for ij, j in enumerate(r.signs):
                 loc_state_l |= (UInt128(j+1) >> 1) << ij
 
