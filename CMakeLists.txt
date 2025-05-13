@@ -63,10 +63,6 @@ set(THREADS_PREFER_PTHREAD_FLAG ON)
 find_package(HDF5 REQUIRED COMPONENTS C CXX)
 
 
-# Debugging output
-message(STATUS "HDF5 Include Dirs: ${HDF5_INCLUDE_DIRS}")
-message(STATUS "HDF5 Libraries: ${HDF5_LIBRARIES} ${HDF5_CXX_LIBRARIES}")
-
 # Ensure we use the correct libraries in case imported targets are missing
 set(HDF5_C_LIBS "")
 set(HDF5_CXX_LIBS "")
@@ -96,6 +92,9 @@ add_executable(gen_spinon_basis_parallel
     src/pyro_tree.cpp
 )
 
+
+add_subdirectory("test")
+
 #add_executable(csv_to_h5
 #    src/csv_to_h5.cpp
 #)
@@ -114,8 +113,6 @@ add_executable(gen_spinon_basis_parallel
 find_package(nlohmann_json 3.11.0 REQUIRED)
 target_link_libraries(gen_spinon_basis PRIVATE nlohmann_json::nlohmann_json)
 target_link_libraries(gen_spinon_basis_parallel PRIVATE nlohmann_json::nlohmann_json)
-
-
 
 target_include_directories(gen_spinon_basis PRIVATE ${HDF5_INCLUDE_DIRS})
 target_link_libraries(gen_spinon_basis PRIVATE ${HDF5_C_LIBS} ${HDF5_CXX_LIBS})

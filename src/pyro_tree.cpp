@@ -98,7 +98,7 @@ void lat_container::fork_state(std::queue<vtree_node_t>& to_examine) {
 }
 
 
-void pyro_vtree::build_state_tree(){
+void basis_tree_builder::build_state_tree(){
 	std::stack<vtree_node_t> to_examine;
 	// seed the root node
 	to_examine.push(vtree_node_t({0,0}));
@@ -123,14 +123,14 @@ void pyro_vtree::build_state_tree(){
 	}
 }
 
-void pyro_vtree::sort(){
+void basis_tree_builder::sort(){
 	if (this->is_sorted) return;
 	std::sort(state_list.begin(), state_list.end());
 	this->is_sorted = true;
 }
 
 
-void pyro_vtree_parallel::sort(){	
+void basis_tree_builder_parallel::sort(){	
 	if (this->is_sorted) return;
 	// step 1: move everything into state_set[0]
 	auto& state_list = state_set[0];
@@ -146,7 +146,7 @@ void pyro_vtree_parallel::sort(){
 	this->is_sorted = true;
 }
 
-void pyro_vtree_parallel::
+void basis_tree_builder_parallel::
 _build_state_bfs(std::queue<vtree_node_t>& node_stack, 
 		unsigned long max_queue_len){
 	if (state_set.size() == 0){ state_set.resize(1); }
@@ -160,7 +160,7 @@ _build_state_bfs(std::queue<vtree_node_t>& node_stack,
 	}
 }
 
-void pyro_vtree_parallel::
+void basis_tree_builder_parallel::
 _build_state_dfs(std::stack<vtree_node_t>& node_stack, 
 		unsigned thread_id, 
 		unsigned long max_queue_len){
@@ -180,7 +180,7 @@ _build_state_dfs(std::stack<vtree_node_t>& node_stack,
 	}
 }
 
-void pyro_vtree_parallel::
+void basis_tree_builder_parallel::
 build_state_tree(){
 	// strategy: fork nodes until we exceed the thread pool	
 	// BFS to keep the layer of all threads roughly the same
@@ -220,12 +220,12 @@ build_state_tree(){
 
 // IO
 
-void pyro_vtree::write_basis_csv(const std::string &outfilename) {
+void basis_tree_builder::write_basis_csv(const std::string &outfilename) {
 	this->sort();
 	basis_io::write_basis_csv(state_list, outfilename);
 }
 
-void pyro_vtree_parallel::write_basis_csv(const std::string& outfilename)
+void basis_tree_builder_parallel::write_basis_csv(const std::string& outfilename)
 {
 	this->sort();
 	for (size_t i=1; i<state_set.size(); i++){
@@ -236,13 +236,13 @@ void pyro_vtree_parallel::write_basis_csv(const std::string& outfilename)
 	basis_io::write_basis_csv(state_set[0], outfilename);
 }
 
-void pyro_vtree::write_basis_hdf5(const std::string& outfilename){
+void basis_tree_builder::write_basis_hdf5(const std::string& outfilename){
 	this->sort();
 	basis_io::write_basis_hdf5(this->state_list, outfilename);
 }
 
 
-void pyro_vtree_parallel::write_basis_hdf5(const std::string& outfilename){
+void basis_tree_builder_parallel::write_basis_hdf5(const std::string& outfilename){
 	this->sort();
 	basis_io::write_basis_hdf5(this->state_set[0], outfilename);
 }

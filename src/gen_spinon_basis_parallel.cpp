@@ -28,7 +28,7 @@ int main (int argc, char *argv[]) {
 	json data = json::parse(ifs);
 	ifs.close();
 
-	pyro_vtree_parallel L(data, num_spinon_pairs, atoi(argv[2]));
+	basis_tree_builder_parallel L(data, num_spinon_pairs, atoi(argv[2]));
 	
 	printf("Building state tree...\n");
 	L.build_state_tree();

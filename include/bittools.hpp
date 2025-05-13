@@ -1,7 +1,7 @@
 #pragma once
 #include <cstdint>
-#include <cstdio>
-#include <string>
+#include <ostream>
+#include <iomanip>
 
 union Uint128 {
     __uint128_t uint128;
@@ -91,3 +91,14 @@ inline Uint128 make_mask(T idx){
     return res;
 }
 
+// Vanity
+//
+inline std::ostream& operator<<(std::ostream& os, const Uint128& val) {
+    std::ios_base::fmtflags f(os.flags());  // Save current format flags
+    os << "0x"
+       << std::hex << std::setfill('0')
+       << std::setw(16) << val.uint64[1]
+       << std::setw(16) << val.uint64[0];
+    os.flags(f);  // Restore original flags
+    return os;
+}

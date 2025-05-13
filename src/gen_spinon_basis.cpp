@@ -29,7 +29,7 @@ int main (int argc, char *argv[]) {
 	json data = json::parse(ifs);
 	ifs.close();
 
-	pyro_vtree L(data, num_spinon_pairs);
+	basis_tree_builder L(data, num_spinon_pairs);
 	
 	printf("Building state tree...\n");
 	L.build_state_tree();

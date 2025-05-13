@@ -53,8 +53,8 @@ struct lat_container {
 
 };
 
-struct pyro_vtree : public lat_container {
-	pyro_vtree(const nlohmann::json&data, unsigned num_spinon_pairs) :
+struct basis_tree_builder : public lat_container {
+	basis_tree_builder(const nlohmann::json&data, unsigned num_spinon_pairs) :
 		lat_container(data, num_spinon_pairs) {
 			is_sorted = false;
 		}
@@ -64,6 +64,7 @@ struct pyro_vtree : public lat_container {
 
 	void write_basis_csv(const std::string &outfilename); 
     void write_basis_hdf5(const std::string& outfile);
+
 	protected:
 	void save_state(const Uint128& state) {
 			state_list.push_back(state);
@@ -78,8 +79,8 @@ struct pyro_vtree : public lat_container {
 	unsigned counter = 0;
 };
 
-struct pyro_vtree_parallel : public lat_container {
-	pyro_vtree_parallel(const nlohmann::json &data, unsigned num_spinon_pairs, 
+struct basis_tree_builder_parallel : public lat_container {
+	basis_tree_builder_parallel(const nlohmann::json &data, unsigned num_spinon_pairs, 
 			unsigned n_threads = 1)
 		: lat_container(data, num_spinon_pairs), n_threads(n_threads) {
 		is_sorted = false;
