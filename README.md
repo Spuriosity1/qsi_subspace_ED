@@ -1,5 +1,12 @@
 # QSI subspace ED
 
+## Project Structure
+
+- `src` Source for a C++ project that efficiently calculates spinon free bases.
+- `python_uint128` A small wrapper for 128-bit integers (needed for memory reasons)
+- `scripts` All python scripts needed to completely generate the required lattices.
+
+
 ## Basic description of the algorithm
 The C++ part is designed to efficiently enumerate ice states. 
 
@@ -26,8 +33,11 @@ For completeness, BFS was also implemented in order to generate a set of balance
 
 
 ## Obtaining and Compiling
+This project includes a custom wrapper for C UInt128's, which it will by default lodge in your `site-packages`. Make sure you are already in a venv or similar **before** invoking `cmake`. 
+
 From the root directory:
 ```bash
+source /path/to/your/venv/bin/activate # optional, but you might have to grant root priveliges if not in a venv
 git clone https://github.com/Spuriosity1/qsi_subspace_ED.git
 cd qsi_subspace_ED
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release

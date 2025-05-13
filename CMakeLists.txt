@@ -36,6 +36,8 @@ set(THREADS_PREFER_PTHREAD_FLAG ON)
 
 
 
+add_subdirectory("python_uint128")
+
 # In case dependencies were installed by a package manager, we need to let CMake know
 # where to look for the modules.
 #set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} ${CMAKE_SOURCE_DIR}/cmake/modules)
@@ -107,8 +109,6 @@ add_executable(gen_spinon_basis_parallel
 #target_include_directories(build_hamiltonian PUBLIC ARPACK::ARPACK)
 #target_link_libraries(build_hamiltonian ARPACK::ARPACK superlu::superlu)
 #
-
-
 
 
 

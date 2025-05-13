@@ -10,6 +10,9 @@ import itertools
 from sympy.combinatorics import Permutation
 
 
+from uint128 import UInt128
+
+
 def all_unique(ll: list):
     return len(set(ll)) == len(ll)
 
@@ -17,7 +20,7 @@ def all_unique(ll: list):
 def calc_polarisation(lat: Lattice, state):
     polarisations = [0, 0, 0, 0]
     for i, a in enumerate(lat.atoms):
-        if (state & (1 << i)) != 0:
+        if (state & (UInt128(1) << i)) != 0:
             polarisations[int(a.sl_name)] += 1
 
     return tuple(polarisations)
@@ -64,15 +67,18 @@ class RingflipHamiltonian:
     def _load_basis_csv(self, fname, print_every=100):
         self.basis = []
         line_no = 0
+        n_spins = self.lattice.num_atoms
         with open(fname, 'r') as f:
             for line in f:
                 if not line.startswith("0x"):
                     continue
-                if (line_no % print_every == 0):
-                    print(f" line {line_no}\r", end='')
-                state = int(line, 16)
+                if (line_no % print_every == 5):
+                    print(f" line {line_no}", end='\r')
+                # state = int(line, 16)
+                state = UInt128(line.strip())
                 self.basis.append(state)
                 line_no += 1
+        print()
 
 
     def _load_basis_h5(self, fname, print_every=100):
@@ -83,14 +89,21 @@ class RingflipHamiltonian:
         if data.shape[1] != 2:
             raise ValueError("Dataset shape must be (N,2) for Uint128 storage.")
 
-        # Convert (N,2) uint64 array to (N,) uint128 array
-        uint128_array = (data[:, 1].astype(np.uint128) << 64) | data[:, 0].astype(np.uint128)
 
         for line_no in range(data.shape[0]):
             if (line_no % print_every == 0):
-                print(f" line {line_no}", end='')
-            self.basis.append(uint128_array[line_no])
+                print(f" line {line_no}", end='\r')
 
+            low  = int(data[line_no, 0])  # LSB
+            high = int(data[line_no, 1])  # MSB
+
+            val = (high << 64) | low  # full 128-bit value
+
+            # Create bitarray from binary string (as in CSV)
+            # state = bitarray(val.to_bytes(16, 'big'))
+            self.basis.append(UInt128(val))
+
+        print()
 
 
     def load_basis(self, fname, print_every=100, sort=False):
@@ -109,8 +122,7 @@ class RingflipHamiltonian:
 
         if sort:
             print("\n Sorting...")
-            for k in self.basis:
-                self.basis[k].sort()
+            self.basis.sort()
 
 
     @property
@@ -119,7 +131,7 @@ class RingflipHamiltonian:
 
 
     def flip_state(self, state):
-        return state ^ (2**self.lattice.num_atoms - 1)
+        return state ^ UInt128(2**self.lattice.num_atoms - 1)
 
     @property
     def Hilbert_dim(self):
@@ -149,9 +161,9 @@ class RingflipHamiltonian:
 
             mask = as_mask(r.members)
 
-            loc_state_l = 0
+            loc_state_l = UInt128(0)
             for ij, j in enumerate(r.signs):
-                loc_state_l |= ((j+1) >> 1) << ij
+                loc_state_l |= (UInt128(j+1) >> 1) << ij
 
             state_l = make_state(r.members, loc_state_l)
             state_r = mask ^ state_l
@@ -359,7 +371,7 @@ def ring_exp_values(H: RingflipHamiltonian, psi, k_basis=None):
     k_basis is a (n_k by dimH) basis spec
     """
     tallies = []
-    
+
     if k_basis is None:
         for ring_O, ring_L in zip(*H.build_ringops()):
             tallies.append(psi.conj().T @ ring_L @ psi)

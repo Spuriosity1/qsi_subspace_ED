@@ -1,7 +1,6 @@
 #include "pyro_tree.hpp"
 #include <algorithm>
 #include <cassert>
-#include <iostream>
 #include <stdexcept>
 #include <thread>
 #include "bittools.hpp"
