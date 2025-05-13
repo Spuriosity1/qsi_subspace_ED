@@ -50,7 +50,7 @@ if __name__ == "__main__":
     # ugly hack to keep the rotated versions distinct
     latvecs = rotation_matrices[a.rotation] @ np.array(lat.lattice_vectors)
 
-    rfh = RingflipHamiltonian(lat)
+    rfh = RingflipHamiltonian(lat, pyrochlore.get_rings)
     print("Setting up basis...")
     if a.basis_file is None:
         bfile = rfh.basisfile_loc

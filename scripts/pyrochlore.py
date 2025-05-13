@@ -71,7 +71,7 @@ class Tetra:
         return f"Tetra at {self.xyz} {self.sl}, members {self.members}"
 
 
-def get_ringflips(lat: lattice.Lattice, sl=None, include_partial=False):
+def get_rings(lat: lattice.Lattice, sl=None, include_partial=False):
     if sl is None:
         sl = [0, 1, 2, 3]
     elif not hasattr(sl, "__iter__"):
@@ -162,7 +162,7 @@ def export_json(lat: lattice.Lattice, filename: str):
         'sl': r.sl,
         'member_spin_idx': r.members,
         'signs': r.signs
-    } for r in get_ringflips(lat, include_partial=True)]
+    } for r in get_rings(lat, include_partial=True)]
 
     with open(filename, 'w') as f:
         json.dump(output, f)

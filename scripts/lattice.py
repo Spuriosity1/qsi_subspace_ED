@@ -29,11 +29,11 @@ class Atom:
     def __init__(self, sl_name: str, xyz):
         for x in xyz:
             if not (type(x) is int or (
-                hasattr(x, 'is_rational') and x.is_rational)
+                hasattr(x, 'is_constant') and x.is_constant())
             ):
                 # exclude floats because of weird rounding
-                raise ValueError(f"Positions must be rational, got '{type(x)}'")
-        self.xyz = Matrix([Rational(x) for x in xyz])
+                raise ValueError(f"Positions must be sympy constants or int, got '{type(x)}'")
+        self.xyz = Matrix([x for x in xyz])
 
         self.sl_name = sl_name
 

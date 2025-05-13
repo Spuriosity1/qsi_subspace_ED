@@ -112,6 +112,7 @@ void pyro_vtree::build_state_tree(){
 		}
 #endif
 #if VERBOSITY > 2
+		auto& curr  = to_examine.top();
 		printf("State %016llx; spin_idx %d, queue size %lu\n", curr.state_thus_far.uint128, curr.curr_spin, to_examine.size());
 #endif
 		if (to_examine.top().curr_spin == lat.spins.size()){

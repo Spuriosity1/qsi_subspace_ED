@@ -28,7 +28,10 @@ struct spin_set {
 	Uint128 bitmask;
 };
 
-// represects specifically a tetra-like thing
+// Represects a "tetrahedron", i.e. constraint. 
+// Current behaviour: # spins up on any of these is constrained to be between
+// floor(#spins / 2) and ceil(#spins/2), inclusive. Note that there are two
+// allowed charge states if #spins on a constraint is even.
 struct tetra : public spin_set {
 	tetra(const std::vector<int>& spin_ids, int min_spins_up, int max_spins_up) : 
 		spin_set(spin_ids), min_spins_up(min_spins_up), max_spins_up(max_spins_up) {}

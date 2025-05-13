@@ -1,5 +1,5 @@
 from lattice import Lattice, get_transl_generators
-import pyrochlore
+# import pyrochlore
 from bisect import bisect_left
 import numpy as np
 import numpy
@@ -40,17 +40,18 @@ class RingflipHamiltonian:
     Responsible for storing the ringflips and the spinon-free basis.
     """
 
-    def __init__(self, dimensions, include_partial=False):
-        if type(dimensions) is list or isinstance(dimensions, np.ndarray):
-            self.lattice = Lattice(pyrochlore.primitive, dimensions)
-        elif isinstance(dimensions, Lattice):
+    def __init__(self, dimensions, get_rings, include_partial=False):
+        # if type(dimensions) is list or isinstance(dimensions, np.ndarray):
+        #     self.lattice = Lattice(pyrochlore.primitive, dimensions)
+        # el
+        if isinstance(dimensions, Lattice):
             self.lattice = dimensions  # !!!! Note shallow copy!
         else:
             raise TypeError("Must specify either dimensions as a 3x3 int matrix or an explicit lattice")
 
         if any(x == 0 for x in self.lattice.periodicity):
             raise ValueError("Specified cell has zero volume")
-        self.ringflips = pyrochlore.get_ringflips(self.lattice, include_partial=include_partial)
+        self.ringflips = get_rings(self.lattice, include_partial=include_partial)
 
         self.basis = None
 
@@ -114,7 +115,7 @@ class RingflipHamiltonian:
 
     @property
     def basis_dim(self):
-        return sum(len(b) for b in self.basis.values())
+        return len(self.basis)
 
 
     def flip_state(self, state):

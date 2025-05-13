@@ -179,3 +179,30 @@ def plot_cell(ax, p: Lattice):
     plot_bonds(ax, p)
 
     set_axes_equal(ax)
+
+
+
+def plot_2D(lat:Lattice, show_ids=False, sitef=None, bondf=None, ax=None):
+    if ax is None:
+        fig, ax = plt.subplots()
+        
+    if sitef is None:
+        sitef = lambda i : dict(color='k')
+
+    if bondf is None:
+        bondf = lambda i, j : dict(color='k')
+    
+        
+    for b in lat.bonds:
+        x0 = lat.atoms[b.from_idx].xyz
+        x1 = x0 + b.bond_delta
+        ax.plot([x0[0],x1[0]],[x0[1],x1[1]], '-', **bondf(b.from_idx, b.to_idx))
+
+    
+    for ia, a in enumerate(lat.atoms):
+        ax.plot(a.xyz[0], a.xyz[1], 'o', **sitef(ia))
+        if show_ids:
+            ax.text(a.xyz[0], a.xyz[1], f'{ia}', color='red')
+
+    ax.axis('equal')
+    return ax

@@ -134,8 +134,8 @@ target_link_libraries(gen_spinon_basis_parallel PRIVATE ${HDF5_C_LIBS} ${HDF5_CX
 
 if(CMAKE_BUILD_TYPE STREQUAL "Debug")
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wpedantic -g -O0 -D_GLIBCXX_USE_CXX11_ABI=1")
-    target_compile_definitions(gen_spinon_basis_parallel PRIVATE VERBOSITY=2)
-    target_compile_definitions(gen_spinon_basis PRIVATE VERBOSITY=2)
+    target_compile_definitions(gen_spinon_basis_parallel PRIVATE VERBOSITY=3)
+    target_compile_definitions(gen_spinon_basis PRIVATE VERBOSITY=3)
 else()
 	set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DNDEBUG -Ofast")
 endif()
