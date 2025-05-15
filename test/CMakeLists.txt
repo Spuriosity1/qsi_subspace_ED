@@ -7,6 +7,9 @@ add_executable(test_basis_io
 )
 
 
+# add_executable(test_operator)
+
+
 # Find HDF5 (both C and C++ versions)
 find_package(HDF5 REQUIRED COMPONENTS C CXX)
 
@@ -33,3 +36,6 @@ find_package(nlohmann_json 3.11.0 REQUIRED)
 target_link_libraries(     test_basis_io PRIVATE nlohmann_json::nlohmann_json)
 target_include_directories(test_basis_io PRIVATE ${HDF5_INCLUDE_DIRS})
 target_link_libraries(     test_basis_io PRIVATE ${HDF5_C_LIBS} ${HDF5_CXX_LIBS})
+
+
+# target_link_libraries(     test_operator PRIVATE Spectra)

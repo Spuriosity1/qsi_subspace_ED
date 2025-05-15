@@ -30,8 +30,8 @@ inline void write_basis_csv(const std::vector<Uint128>& state_list,
 	std::fclose(outfile);
 }
 
-inline std::vector<Uint128> read_basis_csv(const std::string& outfile) {
-	std::vector<Uint128> v;
+
+inline void read_basis_csv(const std::string& outfile, std::vector<Uint128> v ) {	
 	FILE *infile = std::fopen((outfile + ".csv").c_str(), "r");
 	if (!infile) {
 		throw std::runtime_error("Failed to open file for reading: " + outfile + ".csv");
@@ -43,6 +43,11 @@ inline std::vector<Uint128> read_basis_csv(const std::string& outfile) {
 	}
 
 	std::fclose(infile);
+}
+
+inline std::vector<Uint128> read_basis_csv(const std::string& outfile) {
+	std::vector<Uint128> v;
+	read_basis_csv(outfile, v);
 	return v;
 }
 
@@ -91,10 +96,10 @@ inline void write_basis_hdf5(const std::vector<Uint128>& state_list, const std::
 }
 
 
-
-inline std::vector<Uint128> read_basis_hdf5(const std::string& infile) {
+inline void read_basis_hdf5(const std::string& infile, 
+		std::vector<Uint128>& result) {
+    
     // Result vector to store the loaded data
-    std::vector<Uint128> result;
     
     // HDF5 identifiers
     hid_t file_id = -1, dataset_id = -1, dataspace_id = -1;
@@ -133,7 +138,6 @@ inline std::vector<Uint128> read_basis_hdf5(const std::string& infile) {
         H5Dclose(dataset_id);
         H5Fclose(file_id);
         
-        return result;
     }
     catch (const std::exception& e) {
         // Clean up in case of error
@@ -142,6 +146,14 @@ inline std::vector<Uint128> read_basis_hdf5(const std::string& infile) {
         if (file_id >= 0) H5Fclose(file_id);
         throw; // Rethrow the exception
     }
+}
+
+
+inline std::vector<Uint128> read_basis_hdf5(const std::string& infile) {
+	std::vector<Uint128> result;
+	read_basis_hdf5(infile, result);
+
+	return result;
 }
 
 

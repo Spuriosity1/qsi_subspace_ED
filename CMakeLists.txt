@@ -34,31 +34,6 @@ set(CMAKE_USE_WIN32_THREADS_INIT 0)
 set(CMAKE_USE_PTHREADS_INIT 1)
 set(THREADS_PREFER_PTHREAD_FLAG ON)
 
-
-
-
-# In case dependencies were installed by a package manager, we need to let CMake know
-# where to look for the modules.
-#set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} ${CMAKE_SOURCE_DIR}/cmake/modules)
-
-
-#find_package_custom(arpackng ARPACK::ARPACK)
-#find_package_custom(superlu superlu::superlu)
-#find_package(arpackng)
-
-# the tests
-# add_executable(benchmark_uints test/benchmark_uints.cpp)
-
-#add_executable(test_arpack test/test_arpack.cpp)
-#target_include_directories(test_arpack PUBLIC ARPACK::ARPACK)
-#target_link_libraries(test_arpack ARPACK::ARPACK superlu::superlu)
-#
-#
-#add_executable(test_arpack_SLU test/test_arpack_SLU.cpp)
-#target_include_directories(test_arpack_SLU PUBLIC ARPACK::ARPACK)
-#target_link_libraries(test_arpack_SLU ARPACK::ARPACK superlu::superlu)
-
-
 # Find HDF5 (both C and C++ versions)
 find_package(HDF5 REQUIRED COMPONENTS C CXX)
 
@@ -95,37 +70,21 @@ add_executable(gen_spinon_basis_parallel
 
 add_subdirectory("test")
 
-#add_executable(csv_to_h5
-#    src/csv_to_h5.cpp
-#)
-
-#add_executable(build_hamiltonian
-#    src/build_hamiltonian.cpp
-#    src/tetra_graph_io.cpp
-#)
-#
-#target_include_directories(build_hamiltonian PUBLIC ARPACK::ARPACK)
-#target_link_libraries(build_hamiltonian ARPACK::ARPACK superlu::superlu)
-#
-
-
-
 find_package(nlohmann_json 3.11.0 REQUIRED)
-target_link_libraries(gen_spinon_basis PRIVATE nlohmann_json::nlohmann_json)
-target_link_libraries(gen_spinon_basis_parallel PRIVATE nlohmann_json::nlohmann_json)
+find_package(Eigen3 3.3 REQUIRED NO_MODULE)
+find_package(Spectra 1.1.0 REQUIRED)
 
+
+# Basis building
+target_link_libraries(gen_spinon_basis PRIVATE nlohmann_json::nlohmann_json)
 target_include_directories(gen_spinon_basis PRIVATE ${HDF5_INCLUDE_DIRS})
 target_link_libraries(gen_spinon_basis PRIVATE ${HDF5_C_LIBS} ${HDF5_CXX_LIBS})
 
 target_include_directories(gen_spinon_basis_parallel PRIVATE ${HDF5_INCLUDE_DIRS})
 target_link_libraries(gen_spinon_basis_parallel PRIVATE ${HDF5_C_LIBS} ${HDF5_CXX_LIBS})
+target_link_libraries(gen_spinon_basis_parallel PRIVATE nlohmann_json::nlohmann_json)
 
-
-
-# TARGET_INCLUDE_DIRECTORIES(build_hamiltonian PUBLIC PARPACK::PARPACK)
-# TARGET_LINK_LIBRARIES(build_hamiltonian::PARPACK)
-# TARGET_INCLUDE_DIRECTORIES(build_hamiltonian PUBLIC MPI::MPI_Fortran)
-# TARGET_LINK_LIBRARIES(build_hamiltonian MPI::MPI_Fortran)
+# Hamiltonian building and operator classes
 
 
 if(CMAKE_BUILD_TYPE STREQUAL "Debug")

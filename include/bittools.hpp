@@ -28,9 +28,8 @@ union Uint128 {
 
 static inline   int   popcnt_u128 (const Uint128& n)
 {
-    const int  cnt_hi  = __builtin_popcountll(n.uint64[1]);
-    const int  cnt_lo  = __builtin_popcountll(n.uint64[0]);
-    const int  cnt     = cnt_hi + cnt_lo;
+    int  cnt  = __builtin_popcountll(n.uint64[1]);
+    cnt  += __builtin_popcountll(n.uint64[0]);
 
     return  cnt;
 }
