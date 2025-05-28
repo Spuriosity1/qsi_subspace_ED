@@ -19,9 +19,12 @@ def calc_spectrum(g, full_lat: RingflipHamiltonian):
     return results
 
 
-def eigs_retry(hh, krylov_dim):
+def eigs_retry(hh, krylov_dim, ncv=None):
     n = hh.shape[0]
-    ncv = min(n, max(2*krylov_dim + 1, 20))
+    if ncv is None:
+        max(2*krylov_dim + 1, 20) 
+    ncv = min(n, ncv)
+    
     while True:
         if n < ncv*2:
             return LA.eigh(hh.todense())
@@ -36,7 +39,7 @@ def eigs_retry(hh, krylov_dim):
 
 
 def calc_ring_exp_vals(rfh: RingflipHamiltonian, g, sector, algo='sparse',
-                       krylov_dim=200):
+                       krylov_dim=200, ncv=200):
     # calculates the rimg expectation values o nthe four sublats, including
     # degeneracies
     H = build_matrix(rfh, sector=sector, g=g)
@@ -45,7 +48,7 @@ def calc_ring_exp_vals(rfh: RingflipHamiltonian, g, sector, algo='sparse',
         algo = 'dense'
 
     alg_opts = {
-            'sparse': lambda hh: eigs_retry(hh, krylov_dim),
+            'sparse': lambda hh: eigs_retry(hh, krylov_dim, ncv=ncv),
         'dense': lambda hh: LA.eigh(hh.todense())
     }
 

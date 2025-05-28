@@ -20,14 +20,15 @@ def get_parser():
     ap = argparse.ArgumentParser(prog="PHASE_DIA")
     ap.add_argument("lattice_file", type=str)
     ap.add_argument('x', type=float)
-    ap.add_argument("--basis_file", type=str, default=None)
-    ap.add_argument("--rotation", type=str, choices='I X Y Z '.split(), default='I',
+    ap.add_argument("--basis_file", "-b", type=str, required=True)
+    ap.add_argument("--rotation", "-r", type=str, choices='I X Y Z '.split(), default='I',
                     help="Rotates lattice relative to magnetic field")
-    ap.add_argument("--db_file", type=str, default=None,
+    ap.add_argument("--db_file",type=str, default=None,
                     help="Database to store results in")
-    ap.add_argument("--edit_existing", action='store_true', default=False,
+    ap.add_argument("--dont_edit_existing", action='store_true', default=False,
                     help='If false, refuses to modify an existing db')
     ap.add_argument("--krylov_dim", type=int, default=200)
+    ap.add_argument("--ncv", type=int, default=500, help="NCV parameter to aarpack (should be above Krylov dim)")
     ap.add_argument("--no_calc_110", action='store_true', default=False)
     ap.add_argument("--no_calc_111", action='store_true', default=False)
 
@@ -52,6 +53,8 @@ if __name__ == "__main__":
         bfile = rfh.basisfile_loc
     else:
         bfile = a.basis_file
+
+    print("Importing from " + bfile)
     rfh.load_basis(bfile, sectorfunc=calc_polarisation)
 
     DB_FILE = a.db_file
@@ -59,10 +62,10 @@ if __name__ == "__main__":
     initialise=True
     if os.path.isfile(DB_FILE):
         print("WARN: db already exists!")
-        if a.edit_existing:
-            initialise=False
-        else:
+        if a.dont_edit_existing: 
             sys.exit(1)
+        else:
+            initialise=False
 
     
     con = connect_npsql(DB_FILE, timeout=60)
@@ -80,7 +83,8 @@ if __name__ == "__main__":
 
     
                 e, reO, imO = calc_ring_exp_vals(rfh, g=sign*g_111(a.x),
-                                          sector=sector, krylov_dim=a.krylov_dim,)
+                                          sector=sector, krylov_dim=a.krylov_dim,
+                                                 ncv=a.ncv)
                 cursor = con.cursor()
                 cursor.execute("""INSERT INTO field_111 (g0_g123, g123_sign, latvecs, sector,
                                                          edata,
@@ -103,7 +107,8 @@ if __name__ == "__main__":
                     continue
 
                 e, reO, imO = calc_ring_exp_vals(rfh, g=sign*g_110(a.x),
-                                          sector=sector, krylov_dim = a.krylov_dim)
+                                          sector=sector, krylov_dim = a.krylov_dim,
+                                                 ncv=a.ncv)
 
                 cursor = con.cursor()
                 cursor.execute("""INSERT INTO field_110 (g01_g23, g23_sign, latvecs, sector,

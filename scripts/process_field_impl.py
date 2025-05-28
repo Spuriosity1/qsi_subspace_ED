@@ -73,38 +73,13 @@ def find_groundstate_impl(con, lat, sign, x_name, table_name, sign_name):
         """,
         (lat, sign)).fetchall())[:,0]
 
-    # best_sectors = []
-    # sector_energies = []
-    
-    # for x in x_list:
-    #     res = c.execute(f"""
-    #         SELECT edata, sector FROM {table_name}
-    #         WHERE {x_name} = ? AND latvecs = ? AND {sign_name} = ?""",
-    #                     (x,lat, sign) )
-    #     gse = np.inf
-    #     best_sec = None
-        
-    #     for e, sec in res:
-    #         curr_gse = convert_array(e)[0]
-    #         if  curr_gse < gse:
-    #             gse = curr_gse
-    #             best_sec = sec
-                
-        
-        
-            
-        
-
-
-    # c.close()
-
 
     sectors = list(get_sector_list(con, lat).keys())
 
     energy_list = []
     
     for sector in sectors:
-        
+        print(sector+"                ", end="\r")
         
         res = c.execute(f"""
         SELECT {x_name}, edata FROM {table_name}
@@ -158,20 +133,25 @@ def process_expO(raw):
     ]
     
 
+def process_expO(raw):
+    return [
+        [O[sl][0,0] for O in raw]
+        for sl in range(4)
+    ]
+
 
 class RingInterpolator:
     def __init__(self, data_importer, interpolation_f=CubicSpline, n_energies=5):
+        
+        x_list_plus, E_list_plus, reO_list_plus, imO_list_plus = data_importer(1)
+        reO_series_plus = process_expO(reO_list_plus)
+        imO_series_plus = process_expO(imO_list_plus)
+    
+        x_list_minus, E_list_minus, reO_list_minus, imO_list_minus = data_importer(-1)
+        reO_series_minus = process_expO(reO_list_minus)
+        imO_series_minus = process_expO(imO_list_minus)
 
-        x_list_plus, E_list_plus, re_expO_list_plus, im_expO_list_plus = data_importer(1)
-        re_expO_series_plus = process_expO(re_expO_list_plus)
-        im_expO_series_plus = process_expO(im_expO_list_plus)
-
-        x_list_minus, E_list_minus, re_expO_list_minus, im_expO_list_minus = data_importer(
-            -1)
-        re_expO_series_minus = process_expO(re_expO_list_minus)
-        im_expO_series_minus = process_expO(im_expO_list_minus)
-
-
+    
         mask_plus = np.diff(np.hstack((x_list_plus,np.inf))) > 1e-10
         mask_minus = np.diff(np.hstack((x_list_minus,np.inf))) > 1e-10
 
@@ -184,11 +164,8 @@ class RingInterpolator:
         E_list_minus = np.array(E_list_minus)[mask_minus, :]
         
         for sl in range(4):
-            re_expO_series_minus[sl] = np.array(re_expO_series_minus[sl])[mask_minus]
-            im_expO_series_minus[sl] = np.array(im_expO_series_minus[sl])[mask_minus]
-            
-            re_expO_series_plus[sl] = np.array(re_expO_series_plus[sl])[mask_plus]
-            im_expO_series_plus[sl] = np.array(im_expO_series_plus[sl])[mask_plus]
+            reO_series_minus[sl] = np.array(reO_series_minus[sl])[mask_minus]
+            reO_series_plus[sl] = np.array(reO_series_plus[sl])[mask_plus]
 
         
 
@@ -196,8 +173,8 @@ class RingInterpolator:
         E_list_minus = np.sort(E_list_minus, axis=-1)
     
         self.ring_interpolators = {
-            1: [ (lambda x : interpolation_f(x_list_plus, re_expO_series_plus[sl])(x) + 1.0j*interpolation_f(x_list_plus, im_expO_series_plus[sl])(x) ) for sl in range(4)],
-           -1: [ (lambda x : interpolation_f(x_list_minus, re_expO_series_minus[sl])(x) + 1.0j*interpolation_f(x_list_minus, im_expO_series_minus[sl])(x) ) for sl in range(4)]
+             1: [ interpolation_f(x_list_plus, reO_series_plus[sl]) for sl in range(4)],
+            -1: [ interpolation_f(x_list_minus, reO_series_minus[sl]) for sl in range(4)]
         }
 
         self.E_interpolators = [{
@@ -207,30 +184,29 @@ class RingInterpolator:
 
         self.x_list = {1: x_list_plus, -1:x_list_minus}
         self.E_list = {1: E_list_plus, -1:E_list_minus}
-        self.expO_series = {
-                1: re_expO_series_plus + 1.0j* im_expO_series_plus,
-                -1: re_expO_series_minus + 1.0j*im_expO_series_minus
-                }
-
+        self.reO_series = {1: reO_series_plus, -1: reO_series_minus}
+    
+        
+            
     def interpolate_ring(self, sign, x, check=True):
         if x > np.max(self.x_list[sign]):
             if check:
                 return [np.nan, np.nan, np.nan, np.nan]
-            return self.expO_series[-1]
+            return self.reO_series[-1]
         elif x < np.min(self.x_list[sign]):
             if check:
                 return [np.nan, np.nan, np.nan, np.nan]
-            return self.expO_series[0]
-
+            return self.reO_series[0]
+            
         return [self.ring_interpolators[sign][j](x) for j in range(4)]
 
     def check_g_compatible(self, g):
         raise NotImplementedError()
-
+    
     def O(self, g, check=True):
         self.check_g_compatible(g)
         x = g[0] / g[3]
-
+        
         if g[3] >= 0:
             return self.interpolate_ring(1, x, check)
         else:
@@ -259,6 +235,8 @@ class RingInterpolator:
         e1 *= np.abs(g[3])
         e0 *= np.abs(g[3])
         return e1 - e0
+
+
 
 
 def close(x,y,tol=1e-10):
