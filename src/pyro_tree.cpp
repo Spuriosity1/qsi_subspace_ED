@@ -102,7 +102,7 @@ void lat_container::fork_state(std::queue<vtree_node_t>& to_examine) {
 void pyro_vtree::build_state_tree(){
 	std::stack<vtree_node_t> to_examine;
 	// seed the root node
-	to_examine.push(vtree_node_t({0,0}));
+	to_examine.push(vtree_node_t({0,0,0}));
 
 	while(!to_examine.empty()){
 #if VERBOSITY > 1

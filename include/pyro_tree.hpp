@@ -14,7 +14,6 @@
 struct vtree_node_t {
 	Uint128 state_thus_far;
 	unsigned curr_spin;
-
 	unsigned num_spinon_pairs;
 	// curr_spin is the bit ID of the rightmost unknown spin
 	// i.e. (1<<curr_spin) & state_thus_far is guaranteed to be 0
