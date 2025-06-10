@@ -28,11 +28,12 @@ char lat_container::possible_spin_states(const vtree_node_t& curr) const {
 	char res=0b11;
 
 	Uint128 state_new = state; // new spin is already a 0
-#ifndef NDEBUG
+#ifdef DEBUG
 	assert( !readbit(state, idx) );
 	assert( idx < lat.spins.size() );
 #endif
-	const auto known_mask = make_mask(idx);
+	//const auto known_mask = make_mask(idx);
+	const auto& known_mask = this->masks[idx];
 
 	// iterate over the two possible states of state&(1<<idx)
 	for (__uint128_t updown=0; updown<2; updown++){
@@ -40,7 +41,7 @@ char lat_container::possible_spin_states(const vtree_node_t& curr) const {
 			or_bit(state_new, idx);
 		}
 
-		for (auto t : lat.spins[idx].tetra_neighbours){
+		auto t = lat.spins[idx].tetra_neighbours[0];
 			// calculate the partial tetra charges
 			// NOTE: state_new is all zeros for bits > idx
 			int Q = popcnt_u128( state_new & t->bitmask );
@@ -53,10 +54,24 @@ char lat_container::possible_spin_states(const vtree_node_t& curr) const {
 			if (Q + num_unknown_spins < t->min_spins_up || Q > t->max_spins_up){
 				// Q is inconsistent with an ice rule
 				res &= ~(1<<updown);
-				break; // no point checking anything else
+				continue; // no point checking the other tetra
 			}
-		}
 
+
+		t = lat.spins[idx].tetra_neighbours[1];
+			// calculate the partial tetra charges
+			// NOTE: state_new is all zeros for bits > idx
+			Q = popcnt_u128( state_new & t->bitmask );
+			// we know the state of all previous bits, and the one we just set
+			num_known_spins = popcnt_u128( t->bitmask & known_mask )+1;
+
+			num_spins = t->member_spin_ids.size();
+			num_unknown_spins = num_spins - num_known_spins;
+
+			if (Q + num_unknown_spins < t->min_spins_up || Q > t->max_spins_up){
+				// Q is inconsistent with an ice rule
+				res &= ~(1<<updown);
+			}
 	}
 	return res;
 }

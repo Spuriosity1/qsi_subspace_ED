@@ -23,11 +23,16 @@ struct vtree_node_t {
 typedef std::array<int, 4> global_sz_sector_t;
 
 struct lat_container {
-	lat_container(const nlohmann::json& data, unsigned num_spinon_pairs) : 
-		 num_spinon_pairs(num_spinon_pairs), lat(data) {}
+	lat_container(const nlohmann::json &data, unsigned num_spinon_pairs)
+		: num_spinon_pairs(num_spinon_pairs), lat(data) {
+			auto natoms = data.at("atoms").size();
+			masks.resize(natoms+1);
+			for (size_t i = 0; i < natoms+1; i++) {
+				masks[i] = make_mask(i);
+			}
+		}
 
-
-	// state is only initialised up to (but not including) bit 1<<idx
+        // state is only initialised up to (but not including) bit 1<<idx
 	// returns possible states of state&(1<<idx)
 
 	// return values:
@@ -41,6 +46,7 @@ struct lat_container {
 	const unsigned num_spinon_pairs;
 	protected:
 	//global_sz_sector_t global_sz_sector;
+	std::vector<Uint128> masks; // bitmasks filled by make_mask
 
 	template <typename Container>
 	void fork_state_impl(Container& to_examine, vtree_node_t curr); 
@@ -48,8 +54,6 @@ struct lat_container {
 	void fork_state(std::stack<vtree_node_t>& to_examine);
 	void fork_state(std::queue<vtree_node_t>& to_examine);
 	lattice lat;
-
-
 };
 
 struct pyro_vtree : public lat_container {
@@ -86,7 +90,8 @@ struct pyro_vtree_parallel : public lat_container {
 
 	void build_state_tree();
 	void sort();
-	void write_basis_csv(const std::string& outfilename); 	void write_basis_hdf5(const std::string& outfile);
+	void write_basis_csv(const std::string& outfilename);
+	void write_basis_hdf5(const std::string& outfile);
 
 
 protected:

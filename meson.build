@@ -27,3 +27,11 @@ g_deps = [
 
 subdir('src')
 
+gen_spinon_basis = executable('gen_spinon_basis', spinon_basis_sources, 
+  dependencies: g_deps,
+  include_directories:inc)
+
+gen_spinon_basis_parallel = executable('gen_spinon_basis_parallel',spinon_basis_parallel_sources, 
+  dependencies: g_deps,
+  include_directories:inc)
+
