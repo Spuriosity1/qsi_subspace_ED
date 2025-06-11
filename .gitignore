@@ -9,6 +9,7 @@ lattice_files
 test/tmp
 vendor/*
 *.ipynb
+*.swp
 hpc_driver/track
 basis_partitions
 .DS_Store

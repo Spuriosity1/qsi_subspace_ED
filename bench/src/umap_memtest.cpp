@@ -6,18 +6,6 @@
 
 using namespace std;
 
-// Hash function for Uint128 to use in unordered_map
-struct Uint128Hash {
-	std::size_t operator()(const Uint128& b) const {
-		return std::hash<uint64_t>()(b.uint64[0]) ^ std::hash<uint64_t>()(b.uint64[1]);
-	}
-};
-
-struct Uint128Eq {
-	bool operator()(const Uint128& a, const Uint128& b) const {
-		return (a.uint64[0] == b.uint64[0]) && (a.uint64[1] == b.uint64[1]);
-	}
-};
 
 
 int main (int argc, char *argv[]) {

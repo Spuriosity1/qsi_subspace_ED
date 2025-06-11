@@ -1,8 +1,10 @@
 #include "Spectra/Util/CompInfo.h"
 #include "bittools.hpp"
 #include <stdexcept>
+#ifdef __APPLE__ // patch broken NEON optimization
 #define EIGEN_DONT_VECTORIZE
 #define EIGEN_DISABLE_NEON
+#endif
 #include <Eigen/Core>
 #include <Eigen/Sparse>
 #include <Spectra/SymEigsSolver.h>
@@ -28,11 +30,11 @@ int main(int argc, char* argv[]) {
 
 	// Step 1: Load basis from CSV
 	std::vector<Uint128> basis_states = basis_io::read_basis_csv(base + ".csv");
-	const size_t N = basis_states.size();
+	const int N = basis_states.size();
 
 	// Map basis element to index
 	std::unordered_map<Uint128, int, Uint128Hash, Uint128Eq> state_to_index;
-	for (size_t i = 0; i < N; ++i)
+	for (int i = 0; i < N; ++i)
 		state_to_index[basis_states[i]] = i;
 
 	// Step 2: Load ring data from JSON
