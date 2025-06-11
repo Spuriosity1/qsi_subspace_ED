@@ -5,17 +5,16 @@ import numpy.linalg as LA
 import numpy as np
 
 
-def calc_spectrum(g, full_lat: RingflipHamiltonian):
+def calc_spectrum(g, full_lat: RingflipHamiltonian, krylov_dim=100):
     results = {}
-    for s in full_lat.sectors:
-        H = build_matrix(full_lat, g=g, sector=s)
+    H = build_matrix(full_lat, g=g)
 
-        if H.shape[0] < 1000:
-            e, v = np.linalg.eigh(H.todense())
-            results[s] = (e, v)
-        else:
-            e, v = sLA.eigs(H, k=np.min(100,H.shape[0]), which='SR')
-            results[s] = (e, v)
+    if H.shape[0] < 1000:
+        e, v = np.linalg.eigh(H.todense())
+        results = (e, v)
+    else:
+        e, v = sLA.eigs(H, k=krylov_dim, which='SR')
+        results = (e, v)
     return results
 
 
@@ -38,11 +37,11 @@ def eigs_retry(hh, krylov_dim, ncv=None):
 
 
 
-def calc_ring_exp_vals(rfh: RingflipHamiltonian, g, sector, algo='sparse',
+def calc_ring_exp_vals(rfh: RingflipHamiltonian, g, algo='sparse',
                        krylov_dim=200, ncv=200):
     # calculates the rimg expectation values o nthe four sublats, including
     # degeneracies
-    H = build_matrix(rfh, sector=sector, g=g)
+    H = build_matrix(rfh, g=g)
 
     if H.shape[0] - 2 < krylov_dim*2:
         algo = 'dense'
@@ -62,7 +61,7 @@ def calc_ring_exp_vals(rfh: RingflipHamiltonian, g, sector, algo='sparse',
     degen_energy = e[mask]
     degen_psi = v[:, mask]
     # print(f"degeneracy: {degen_energy.shape[0]}")
-    rO_list, iO_list = ring_exp_values(rfh, sector, degen_psi, include_imag=True)
+    rO_list, iO_list = ring_exp_values(rfh, degen_psi, include_imag=True)
 
     sum_reO = {}
     sum_imO = {}

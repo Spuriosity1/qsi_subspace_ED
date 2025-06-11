@@ -583,16 +583,17 @@ def get_refl_perm(lat:Lattice, origin: Matrix, direction: Matrix):
 def get_rot_perm(lat:Lattice, origin: Matrix, rot_mat: Matrix):
     """
     Returns the permutation of the site indices associated with a global
-    rotation by 2π/3
+    rotation by specified matrix
     """
     perm = []
 
     for (orig_idx, a) in enumerate(lat.atoms):
         relpos = a.xyz - origin
+        
         # project on to direction
-        delta = rot_mat.dot(relpos)
-        transl_idx = lat.as_linear_idx(a.xyz + delta)
+        delta = rot_mat * (relpos)
+        # print(a.xyz,' -> ', delta + origin)
+        transl_idx = lat.as_linear_idx( delta + origin)
         perm.append(transl_idx)
 
     return perm
-

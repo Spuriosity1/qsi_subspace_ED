@@ -43,3 +43,5 @@ gen_spinon_basis_parallel = executable('gen_spinon_basis_parallel',spinon_basis_
   dependencies: g_deps,
   include_directories:inc)
 
+
+subdir('bench')
