@@ -1,4 +1,5 @@
 #pragma once
+#include <concepts>
 #include <cstdint>
 #include <cstdio>
 #include <string>
@@ -26,6 +27,21 @@ union Uint128 {
     }
 };
 
+
+// Hash function for Uint128 to use in unordered_map
+struct Uint128Hash {
+	std::size_t operator()(const Uint128& b) const {
+		return std::hash<uint64_t>()(b.uint64[0]) ^ std::hash<uint64_t>()(b.uint64[1]);
+	}
+};
+
+struct Uint128Eq {
+	bool operator()(const Uint128& a, const Uint128& b) const {
+		return (a.uint64[0] == b.uint64[0]) && (a.uint64[1] == b.uint64[1]);
+	}
+};
+
+
 static inline   int   popcnt_u128 (const Uint128& n)
 {
     const int  cnt_hi  = __builtin_popcountll(n.uint64[1]);
@@ -36,8 +52,9 @@ static inline   int   popcnt_u128 (const Uint128& n)
 }
 
 template<typename T>
-inline void or_bit(Uint128& x, T i, __uint128_t l=1){
-    l <<= i;
+inline void or_bit(Uint128& x, T i){	
+    __uint128_t l=1;
+	l <<= i;
     x.uint128 |= l;
 }
 
@@ -72,8 +89,16 @@ inline Uint128 operator>>(Uint128 x, T idx){
     return res;
 }
 
+inline Uint128 operator|(Uint128 x, const Uint128& y){
+	x.uint64[0] |= y.uint64[0];
+	x.uint64[1] |= y.uint64[1];
+	return x;
+}
+	
+
 
 template <typename T>
+requires std::convertible_to<T, int>
 inline Uint128 operator<<(Uint128 x, T idx){
     Uint128 res(x);
     res.uint128 = res.uint128 << idx;
