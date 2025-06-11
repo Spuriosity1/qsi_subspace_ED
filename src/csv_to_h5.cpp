@@ -45,20 +45,6 @@ error:
     throw HDF5Error(file_id, dataspace_id, dataset_id, "read_basis");
 }
 
-inline std::vector<Uint128> read_basis_csv(const std::string &infilename) {
-	FILE *infile = std::fopen((infilename + ".csv").c_str(), "r");
-	if (!infile) {
-		throw std::runtime_error("Failed to open file: " + infilename + ".csv");
-	}
-	std::vector<Uint128> state_list;
-	Uint128 b;
-	while (read_line(infile, b)) {
-		state_list.emplace_back(b);
-	}
-
-	std::fclose(infile);
-	return state_list;
-}
 };
 
 
