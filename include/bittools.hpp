@@ -4,8 +4,16 @@
 #include <cstdio>
 #include <string>
 
+#if defined(__x86_64__) || defined(_M_X64)
+#include <emmintrin.h>
+typedef __m128i uint128_t;
+#else
+typedef __uint128_t uint128_t;
+#endif
+
+
 union Uint128 {
-    __uint128_t uint128;
+    uint128_t uint128;
     uint64_t uint64[2];
     Uint128(){}
     template<typename T>
