@@ -1,6 +1,6 @@
 #include <iostream>
 #include <cstdint>
-#include <map>
+#include <ankerl/unordered_dense.h>
 #include "bittools.hpp"
 
 using namespace std;
@@ -13,7 +13,7 @@ int main (int argc, char *argv[]) {
 
 	uint64_t N = atoi(argv[1]);
 
-	std::map<Uint128, size_t> m;
+	ankerl::unordered_dense::map<Uint128, size_t, Uint128Hash, Uint128Eq> m;
 	for (uint64_t i=0; i<N; ++i){
 		m[i] = i;
 	}

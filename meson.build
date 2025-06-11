@@ -15,7 +15,7 @@ hdf5_dep = dependency('hdf5',
 
 json_dep = dependency('nlohmann_json', required: true)
 
-eigen_dep = dependency('eigen3', required: true)
+eigen_dep = dependency('Eigen3', method: 'cmake',  modules: ['Eigen3::Eigen'])
 
 spectra_dep = dependency('spectra', method: 'cmake', required: true)
 
