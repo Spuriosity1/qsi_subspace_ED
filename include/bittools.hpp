@@ -118,6 +118,7 @@ inline Uint128 operator<<(Uint128 x, T idx){
 template <typename T>
 inline Uint128 make_mask(T idx){
     // returns all ones up to (but excluding) idx
+	// DOES NOT work for idx >= 128 (deliberate omission -- avoid branches)
     Uint128 res;
     res.uint128 = 1;
     res.uint128 <<= idx;

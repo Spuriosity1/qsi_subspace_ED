@@ -4,6 +4,11 @@ project('projected_ed', ['cpp', 'c'],
   default_options : [ 'warning_level=3', 'buildtype=release', 'cpp_std=c++2a' ]
 )
 
+
+# Compiler flags for 128-bit integer support
+cpp_compiler = meson.get_compiler('cpp')
+add_project_arguments('-DUINT128_AVAILABLE', language : 'cpp')
+
 if get_option('buildtype') == 'release'
   add_project_arguments('-Ofast', language : 'cpp')
 endif
