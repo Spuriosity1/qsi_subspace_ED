@@ -17,10 +17,10 @@ union Uint128 {
     uint128_t uint128;
     uint64_t uint64[2];
     Uint128(){}
-    template<typename T>
-        Uint128(T x){
-            uint128 = x;
-        }
+    template<typename T=__uint128_t>
+	Uint128(T x){
+		uint128 = x;
+	}
     Uint128(uint64_t x1, uint64_t x0){
         uint64[0] = x0;
         uint64[1] = x1;

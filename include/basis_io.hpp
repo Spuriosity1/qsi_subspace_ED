@@ -85,7 +85,7 @@ inline std::vector<Uint128> read_basis_hdf5(const std::string& infile) {
     
     try {
         // Open the HDF5 file for reading
-        file_id = H5Fopen((infile + ".h5").c_str(), H5F_ACC_RDONLY, H5P_DEFAULT);
+        file_id = H5Fopen((infile).c_str(), H5F_ACC_RDONLY, H5P_DEFAULT);
         if (file_id < 0) throw HDF5Error(file_id, -1, -1, "read_basis: Failed to open file");
         
         // Open the dataset
@@ -129,7 +129,7 @@ inline std::vector<Uint128> read_basis_hdf5(const std::string& infile) {
 
 
 inline std::vector<Uint128> read_basis_csv(const std::string &infilename) {
-	FILE *infile = std::fopen((infilename + ".csv").c_str(), "r");
+	FILE *infile = std::fopen((infilename).c_str(), "r");
 	if (!infile) {
 		throw std::runtime_error("Failed to open file: " + infilename + ".csv");
 	}

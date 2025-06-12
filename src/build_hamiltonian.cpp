@@ -1,44 +1,119 @@
+#include <argparse/argparse.hpp>
+
 #include "Spectra/Util/CompInfo.h"
-#include "bittools.hpp"
-#include <stdexcept>
-#ifdef __APPLE__ // patch broken NEON optimization
-#define EIGEN_DONT_VECTORIZE
-#define EIGEN_DISABLE_NEON
-#endif
-#include <Eigen/Core>
-#include <Eigen/Sparse>
 #include <Spectra/SymEigsSolver.h>
+#include <Spectra/SymEigsShiftSolver.h>
+#include <Spectra/GenEigsSolver.h>
 #include <Spectra/MatOp/SparseSymMatProd.h>
+#include <Spectra/MatOp/SparseGenMatProd.h>
+
 #include <fstream>
 #include <iostream>
-#include <unordered_map>
-#include <unordered_set>
 #include <nlohmann/json.hpp>
-#include "bittools.hpp"
-#include "admin.hpp"
-#include "basis_io.hpp"
+#include <stdexcept>
+#include <vector>
+
+
+#include "Spectra/Util/SelectionRule.h"
+#include "operator.hpp"
+
+#include <unsupported/Eigen/SparseExtra>
 
 using namespace Eigen;
 using json = nlohmann::json;
 
-int main(int argc, char* argv[]) {
-	if (argc != 2) {
-		std::cerr << "Usage: " << std::string(argv[0]) << " <basename>\n";
-		return 1;
+std::string get_basis_file(const argparse::ArgumentParser& prog){
+// Determine basis_file default if not set
+	std::string basis_file;
+	if (prog.is_used("--basis_file")) {
+		basis_file = prog.get<std::string>("--basis_file");
+	} else {
+		// Replace extension
+		fs::path path(prog.get<std::string>("lattice_file"));
+		if (path.extension() == ".json") {
+			path.replace_extension(".0.basis.h5");
+		} else {
+			// fallback if extension isn't ".json"
+			path += ".0.basis.h5";
+		}
+		basis_file = path.string();
 	}
-	std::string base = argv[1];
+	return basis_file;
+}
+
+template <typename T>
+struct is_sym_solver : std::false_type {};
+
+template <typename OpType>
+struct is_sym_solver<Spectra::SymEigsSolver<OpType>> : std::true_type {};
+
+template <typename T>
+struct is_gen_solver : std::false_type {};
+
+template <typename OpType>
+struct is_gen_solver<Spectra::GenEigsSolver<OpType>> : std::true_type {};
+
+template <typename SolverT>
+constexpr Spectra::SortRule default_sort_rule() {
+    if constexpr (is_sym_solver<SolverT>::value) {
+        return Spectra::SortRule::SmallestAlge;
+    } else if constexpr (is_gen_solver<SolverT>::value) {
+        return Spectra::SortRule::SmallestReal;
+    } else {
+        static_assert([]{ return false; }(), "Unsupported solver type");
+    }
+}
+
+int main(int argc, char* argv[]) {
+	argparse::ArgumentParser prog("build_ham");
+	prog.add_argument("lattice_file");
+	prog.add_argument("-b", "--basis_file");
+	prog.add_argument("-g")
+		.help("ring exchange constants (H = sum g [O + O'])")
+        .nargs(1,4)
+		.default_value(std::vector<double>{1.0})
+		.scan<'g', double>();
+	prog.add_argument("--ncv", "-k")
+		.help("Krylov dimension, shoufl be > 2*n_eigvals")
+		.default_value(15)
+		.scan<'i', int>();
+	prog.add_argument("--n_eigvals", "-n")
+		.help("Number of eigenvlaues to compute")
+		.default_value(5)
+		.scan<'i', int>();
+	prog.add_argument("--save_matrix")
+		.help("Flag to get the solver to export a rep of the matrix")
+		.default_value(false)
+		.implicit_value(true);
+	prog.add_argument("--sigma")
+		.help("sigma for shift-invert solving.\
+Make this your best guess of the ground state energy").scan<'g',double>();
+		
+    try {
+        prog.parse_args(argc, argv);
+    } catch (const std::exception& err){
+		std::cerr << err.what() << std::endl;
+		std::cerr << prog;
+        std::exit(1);
+    }
+
+	auto g = prog.get<std::vector<double>>("-g");
+	if (g.size() < 4){
+		std::cout<< "Assuming uniform g...\n";
+		g.resize(4);
+		for (int i=1; i<4; i++) {
+			g[i] = g[0];
+		}
+	}
+			
+
 
 	// Step 1: Load basis from CSV
-	std::vector<Uint128> basis_states = basis_io::read_basis_csv(base + ".csv");
-	const int N = basis_states.size();
-
-	// Map basis element to index
-	std::unordered_map<Uint128, int, Uint128Hash, Uint128Eq> state_to_index;
-	for (int i = 0; i < N; ++i)
-		state_to_index[basis_states[i]] = i;
+	ZBasis basis;
+	basis.load_from_file(get_basis_file(prog));
 
 	// Step 2: Load ring data from JSON
-	std::ifstream jfile(base + ".json");
+	std::ifstream jfile(prog.get<std::string>("lattice_file"));
 	if (!jfile) {
 		std::cerr << "Failed to open JSON file\n";
 		return 1;
@@ -46,61 +121,82 @@ int main(int argc, char* argv[]) {
 	json jdata;
 	jfile >> jdata;
 
-	// Step 3: Build Hamiltonian
-	using T = double;
-	std::vector<Triplet<T>> triplets;
 
-	for (const auto& ring : jdata["rings"]) {
-		std::vector<int> spins = ring["member_spin_idx"];
-		std::vector<int> signs = ring["signs"];
-		if (spins.size() != signs.size()) {
-			std::cerr << "Inconsistent ring format\n";
-			continue;
+	using T=double;
+	SymbolicOpSum<T> H_sym;
+
+	try {
+		auto version=jdata.at("__version__");
+		if ( atof(version.get<std::string>().c_str()) < 1.0 ){
+			throw std::runtime_error("JSON file is old, API version 1.0 is required");
 		}
+	} catch (const json::out_of_range& e){
+		throw std::runtime_error("__version__ field missing, suspect an old file");
+	} 	
 
-		auto state_L = Uint128(0);
-		auto state_R = Uint128(0);
-		auto mask = Uint128(0);
+	for (const auto& ring : jdata.at("rings")) {
+		std::vector<int> spins = ring.at("member_spin_idx");
 
-		for (size_t i = 0; i < signs.size(); ++i) {
-			if (signs[i] == 1){
-				or_bit(state_L, spins[i]); 
-			} else {
-				or_bit(state_R, spins[i]);
-			}
+		std::vector<char> ops;
+		std::vector<char> conj_ops;
+		for (auto s : ring.at("signs")){
+			ops.push_back( s == 1 ? '+' : '-');
+			conj_ops.push_back( s == 1 ? '-' : '+');
 		}
-		mask = state_L | state_R;
-
-		// Apply ring term to each basis state
-		for (int i = 0; i < N; ++i) {
-			Uint128 b = basis_states[i] & mask;
-			if (b != state_L && b != state_R) {
-				continue; // not flippable; nothing to do
-			}
-			auto it = state_to_index.find(b ^ mask);
-			if (it == state_to_index.end()) {
-				throw std::logic_error("Basis incomplete");
-			} 
-
-			int j = it->second;
-			// H is Hermitian, add both (i,j) and (j,i)
-			triplets.emplace_back(i, j, 1.0);
-			assert(i != j);	
-		}
+		
+		int sl = ring.at("sl").get<int>();
+		auto O   = SymbolicPMROperator(     ops, spins);
+		auto O_h = SymbolicPMROperator(conj_ops, spins);
+		H_sym.add_term(g[sl], O);
+		H_sym.add_term(g[sl], O_h);
 	}
 
-	SparseMatrix<T> H(N, N);
-	H.setFromTriplets(triplets.begin(), triplets.end());
+	auto H = LazyOpSum(basis, H_sym);	
+
+	// materialise
+	auto H_sparsemat = H.toSparseMatrix();
+
+	if (prog.get<bool>("--save_matrix")){
+		Eigen::saveMarket(H_sparsemat, "H.mtx");
+		std::cout<<"Saved to H.mtx"<<std::endl;
+	}
 
 	// Step 4: Diagonalize with Spectra
-	using OpType=Spectra::SparseSymMatProd<T>;
+	using OpType = LazyOpSumProd<double>;
 	OpType op(H);
-	Spectra::SymEigsSolver<OpType> eigs(op, 6, std::min(20, N));
+
+	//using OpType = Spectra::SparseSymMatProd<double>;	
+	//OpType op(H_sparsemat);
+
+	using Solver = Spectra::SymEigsSolver<OpType>;
+	//using Solver = Spectra::GenEigsSolver<OpType>;
+
+	
+	size_t n_eigvals = prog.get<int>("--n_eigvals");
+	size_t ncv = prog.get<int>("--ncv");
+	if (ncv < 2*n_eigvals){
+		std::cout<<"Warning: ncv is very small, recommend at leaast 2*n_eigvals";
+	}
+
+	ncv = std::min(ncv, basis.dim());
+	n_eigvals = std::min(ncv-1, n_eigvals );
+
+	std::cout << "Using ncv="<<ncv<<" n_eigvals="<<n_eigvals<<std::endl;
+	Solver eigs(op, n_eigvals, ncv
+			//prog.get<double>("--sigma")
+			);
 	eigs.init();
-	int nconv = eigs.compute();
+	Spectra::SortRule sortrule = default_sort_rule<Solver>();
+	int nconv = eigs.compute(
+			sortrule,
+			1000, /*maxit*/
+			1e-10, /*tol*/
+			sortrule
+			);
+	
 
 	if (eigs.info() == Spectra::CompInfo::Successful) {
-		VectorXd evals = eigs.eigenvalues();
+		VectorXd evals = eigs.eigenvalues().real();
 		std::cout << "Eigenvalues:\n" << evals.head(nconv) << "\n";
 	} else {
 		std::cerr << "Spectra failed\n";
