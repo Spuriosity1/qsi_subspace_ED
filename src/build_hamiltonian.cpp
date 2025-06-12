@@ -85,9 +85,6 @@ int main(int argc, char* argv[]) {
 		.help("Flag to get the solver to export a rep of the matrix")
 		.default_value(false)
 		.implicit_value(true);
-	prog.add_argument("--sigma")
-		.help("sigma for shift-invert solving.\
-Make this your best guess of the ground state energy").scan<'g',double>();
 		
     try {
         prog.parse_args(argc, argv);
@@ -182,9 +179,7 @@ Make this your best guess of the ground state energy").scan<'g',double>();
 	n_eigvals = std::min(ncv-1, n_eigvals );
 
 	std::cout << "Using ncv="<<ncv<<" n_eigvals="<<n_eigvals<<std::endl;
-	Solver eigs(op, n_eigvals, ncv
-			//prog.get<double>("--sigma")
-			);
+	Solver eigs(op, n_eigvals, ncv);
 	eigs.init();
 	Spectra::SortRule sortrule = default_sort_rule<Solver>();
 	int nconv = eigs.compute(

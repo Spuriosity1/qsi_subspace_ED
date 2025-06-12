@@ -45,3 +45,4 @@ gen_spinon_basis_parallel = executable('gen_spinon_basis_parallel',spinon_basis_
 
 
 subdir('bench')
+subdir('test')

@@ -5,12 +5,12 @@
 #include <cstdio>
 #include <string>
 
-#if defined(__x86_64__) || defined(_M_X64)
-#include <emmintrin.h>
-typedef __m128i uint128_t;
-#else
+//#if defined(__x86_64__) || defined(_M_X64)
+//#include <emmintrin.h>
+//typedef __m128i uint128_t;
+//#else
 typedef __uint128_t uint128_t;
-#endif
+//#endif
 
 
 union Uint128 {
