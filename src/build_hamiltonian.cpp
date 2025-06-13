@@ -1,5 +1,7 @@
 #include <argparse/argparse.hpp>
 
+#include <Eigen/Eigenvalues>
+
 #include "Spectra/Util/CompInfo.h"
 #include <Spectra/SymEigsSolver.h>
 #include <Spectra/SymEigsShiftSolver.h>
@@ -64,6 +66,67 @@ constexpr Spectra::SortRule default_sort_rule() {
     }
 }
 
+
+template<typename OpType, typename T>
+void compute_spectrum_iterative(const T ham, VectorXd& evals, MatrixXcd evecs, const argparse::ArgumentParser& settings)
+{
+    OpType op(ham);
+
+    // parse ncv and n_eigvals
+	size_t n_eigvals = settings.get<int>("--n_eigvals");
+	size_t ncv = settings.get<int>("--ncv");
+	if (ncv < 2*n_eigvals){
+		std::cout<<"Warning: ncv is very small, recommend at leaast 2*n_eigvals";
+	}
+
+	ncv = std::min(ncv, static_cast<decltype(ncv)>(ham.rows()));
+	n_eigvals = std::min(ncv-1, n_eigvals );
+
+    auto max_it = settings.get<int>("--max_iters");
+    auto tol    = settings.get<double>("--tol");
+
+	std::cout << "Using ncv="<<ncv<<" n_eigvals="<<n_eigvals<<std::endl;
+    using Solver = Spectra::SymEigsSolver<OpType>;
+    Solver eigs(op, n_eigvals, ncv);
+    eigs.init();
+    Spectra::SortRule sortrule = default_sort_rule<Solver>();
+    auto nconv = eigs.compute(
+            sortrule,
+            max_it, /*maxit*/
+            tol, /*tol*/
+            sortrule
+            );
+
+    if (eigs.info() == Spectra::CompInfo::Successful) {
+        evals = eigs.eigenvalues().head(nconv);
+        evecs = eigs.eigenvectors(nconv);
+    } else {
+        std::cerr << "Spectra failed\n";
+        throw std::runtime_error("Eigenvalue decomposition failed");
+    }
+}
+
+
+void compute_eigenspectrum_dense(const MatrixXd& ham, Eigen::VectorXd& e, Eigen::MatrixXd& v,
+    const argparse::ArgumentParser& settings)
+{
+	size_t n_eigvals = settings.get<int>("--n_eigvals");
+	n_eigvals = std::min(static_cast<decltype(n_eigvals)>(ham.rows()), n_eigvals );
+
+    SelfAdjointEigenSolver<Eigen::MatrixXd> eigs(ham);
+    // truncate to # requested eigvals
+
+
+    if (eigs.info() == ComputationInfo::Success) {
+        e = eigs.eigenvalues().head(n_eigvals);
+        v = eigs.eigenvectors().leftCols(n_eigvals);
+    } else {
+        std::cerr << "Spectra failed\n";
+        throw std::runtime_error("Eigenvalue decomposition failed");
+    }
+}
+
+
 int main(int argc, char* argv[]) {
 	argparse::ArgumentParser prog("build_ham");
 	prog.add_argument("lattice_file");
@@ -85,6 +148,19 @@ int main(int argc, char* argv[]) {
 		.help("Flag to get the solver to export a rep of the matrix")
 		.default_value(false)
 		.implicit_value(true);
+    prog.add_argument("--max_iters")
+        .help("Max steps for iterative solver")
+        .default_value(1000)
+        .scan<'i', int>();
+    prog.add_argument("--tol")
+        .help("Tolerance iterative solver")
+        .default_value(1e-10)
+        .scan<'g', double>();
+
+    prog.add_argument("--algorithm", "-a")
+        .choices("dense","sparse","mfsparse")
+        .default_value("sparse")
+        .help("Variant of ED algorithm to run. dense is best for small problems, mfsparse is a matrix free method that trades off speed for memory.");
 		
     try {
         prog.parse_args(argc, argv);
@@ -106,8 +182,10 @@ int main(int argc, char* argv[]) {
 
 
 	// Step 1: Load basis from CSV
+    std::cout<<"Loading basis..."<<std::endl;
 	ZBasis basis;
 	basis.load_from_file(get_basis_file(prog));
+    std::cout<<"Done!"<<std::endl;
 
 	// Step 2: Load ring data from JSON
 	std::ifstream jfile(prog.get<std::string>("lattice_file"));
@@ -150,53 +228,46 @@ int main(int argc, char* argv[]) {
 
 	auto H = LazyOpSum(basis, H_sym);	
 
-	// materialise
-	auto H_sparsemat = H.toSparseMatrix();
 
-	if (prog.get<bool>("--save_matrix")){
-		Eigen::saveMarket(H_sparsemat, "H.mtx");
-		std::cout<<"Saved to H.mtx"<<std::endl;
-	}
 
-	// Step 4: Diagonalize with Spectra
-	using OpType = LazyOpSumProd<double>;
-	OpType op(H);
 
-	//using OpType = Spectra::SparseSymMatProd<double>;	
-	//OpType op(H_sparsemat);
+    ////////////////////////////////////////
+    // Do the diagonalisation
 
-	using Solver = Spectra::SymEigsSolver<OpType>;
-	//using Solver = Spectra::GenEigsSolver<OpType>;
+    VectorXd eigvals;
+    MatrixXd eigvecs;
+
+    if (prog.get<std::string>("--algorithm") == "dense") {
+
+        // materialise
+        std::cout<<"Materialising dense matrix..."<<std::endl;
+        auto H_densemat = H.toSparseMatrix();
+        std::cout<<"Done!"<<std::endl;
+
+       compute_eigenspectrum_dense(H_densemat, eigvals, eigvecs, prog);
+    } else if (prog.get<std::string>("--algorithm") == "sparse") {
+        
+        // materialise
+        std::cout<<"Materialising sparse matrix..."<<std::endl;
+        auto H_sparsemat = H.toSparseMatrix();
+        std::cout<<"Done!"<<std::endl;
+
+        compute_spectrum_iterative< Spectra::SparseSymMatProd<double>>(H_sparsemat, eigvals, eigvecs, prog);
+
+        if (prog.get<bool>("--save_matrix")){
+            Eigen::saveMarket(H.toSparseMatrix(), "H.mtx");
+            std::cout<<"Saved to H.mtx"<<std::endl;
+        }
+    } else if (prog.get<std::string>("--algorithm") == "mfsparse"){
+        compute_spectrum_iterative< LazyOpSumProd<double> >(H, eigvals, eigvecs, prog);
+    }
+
+
+    std::cout << "Eigenvalues:\n" << eigvals << "\n";
 
 	
-	size_t n_eigvals = prog.get<int>("--n_eigvals");
-	size_t ncv = prog.get<int>("--ncv");
-	if (ncv < 2*n_eigvals){
-		std::cout<<"Warning: ncv is very small, recommend at leaast 2*n_eigvals";
-	}
 
-	ncv = std::min(ncv, basis.dim());
-	n_eigvals = std::min(ncv-1, n_eigvals );
-
-	std::cout << "Using ncv="<<ncv<<" n_eigvals="<<n_eigvals<<std::endl;
-	Solver eigs(op, n_eigvals, ncv);
-	eigs.init();
-	Spectra::SortRule sortrule = default_sort_rule<Solver>();
-	int nconv = eigs.compute(
-			sortrule,
-			1000, /*maxit*/
-			1e-10, /*tol*/
-			sortrule
-			);
-	
-
-	if (eigs.info() == Spectra::CompInfo::Successful) {
-		VectorXd evals = eigs.eigenvalues().real();
-		std::cout << "Eigenvalues:\n" << evals.head(nconv) << "\n";
-	} else {
-		std::cerr << "Spectra failed\n";
-		return 1;
-	}
 
 	return 0;
 }
+

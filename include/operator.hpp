@@ -156,6 +156,10 @@ struct SymbolicPMROperator {
 				}
 			}
 		}
+
+
+   // int applyIndex(const ZBasis& basis
+    
 	
 	// Apply this operator to an input vector `in` and store result in `out`
 	template <typename Orig, typename Dest>

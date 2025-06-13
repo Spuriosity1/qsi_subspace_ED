@@ -10,7 +10,7 @@ cpp_compiler = meson.get_compiler('cpp')
 add_project_arguments('-DUINT128_AVAILABLE', language : 'cpp')
 
 if get_option('buildtype') == 'release'
-  add_project_arguments('-Ofast', language : 'cpp')
+  add_project_arguments('-msse2', language : 'cpp')
 endif
 
 hdf5_dep = dependency('hdf5',
