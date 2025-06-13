@@ -157,14 +157,29 @@ struct SymbolicPMROperator {
 			}
 		}
 
+    // returns sign of only possibly-nonzero entry, modifies J to its index
+    int applyIndex(const ZBasis& basis, idx_t& J) const {
+        comp_basis_state_t state = basis[J];
 
-   // int applyIndex(const ZBasis& basis
+        const auto s = state.uint128;
+        const auto d = down_mask.uint128;
+        const auto u = up_mask.uint128;
+
+        if ( (s & d) != 0 ) return 0;
+        if ( (s & u) != u ) return 0;
+        state ^= X_mask;
+        int sign = 1 - 2 * (popcnt_u128(state & Z_mask) % 2);
+        
+        J= basis.idx_of_state(state);
+        return sign;
+    }
     
 	
 	// Apply this operator to an input vector `in` and store result in `out`
 	template <typename Orig, typename Dest>
 	void apply(const ZBasis& basis, const Orig& in, Dest& out) const {	
-		for (std::size_t i = 0; i < basis.dim(); ++i) {
+		for (idx_t i = 0; i < basis.dim(); ++i) {
+            /*
 			comp_basis_state_t state = basis[i];
 
 			const auto s = state.uint128;
@@ -177,6 +192,11 @@ struct SymbolicPMROperator {
 			int sign = 1 - 2 * (popcnt_u128(state & Z_mask) % 2);
 
 			out [ basis.idx_of_state(state) ] = sign * in[i];
+            */
+
+            idx_t J = i;
+            auto c = applyIndex(basis, J) * in[i];
+            out[J] += c;
 		}
 	}
 
@@ -298,10 +318,11 @@ struct LazyOpSum {
 		Eigen::Index N = basis.dim();
 		std::vector<Eigen::Triplet<coeff_t>> triplets;
 
-		Eigen::VectorXd x = Eigen::VectorXd::Zero(N);
-		Eigen::VectorXd y(N);
+		// Eigen::VectorXd x = Eigen::VectorXd::Zero(N);
+		// Eigen::VectorXd y(N);
 
 		for (Eigen::Index j = 0; j < N; ++j) {
+            /*
 			x[j] = coeff_t(1);
 			applyTo(x, y);
 			for (Eigen::Index i = 0; i < N; ++i) {
@@ -309,6 +330,14 @@ struct LazyOpSum {
 					triplets.emplace_back(i, j, y[i]);
 			}
 			x[j] = coeff_t(0);
+            */
+            for (auto& [c, op] : ops.terms){
+                idx_t J = j;
+                coeff_t res = c * op.applyIndex(basis, J);
+                if (std::abs(res) > tol )
+                    triplets.emplace_back(J, j, res);
+            }
+
 		}
 		Eigen::SparseMatrix<coeff_t> S(N, N);
 		S.setFromTriplets(triplets.begin(), triplets.end());
