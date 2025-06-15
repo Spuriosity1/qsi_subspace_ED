@@ -30,7 +30,10 @@ From the root directory:
 ```bash
 git clone https://github.com/Spuriosity1/qsi_subspace_ED.git
 cd qsi_subspace_ED
-cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
-cmake --build build
+meson setup build
+ninja -C build
+ninja -C build test # optional
 ```
+
+This project depends on HDF5 and nlohmann::json.
 

@@ -46,8 +46,8 @@ test_parallel() {
   h5file="${outfile%.csv}.h5"
   rm -f "$outfile" "$h5file"
 
-  echo "[running] gen_spinon_basis_parallel"
-  "${exec_dir}/gen_spinon_basis_parallel" "$infile" 4 0 "$ext_par" --out_format both > "${tmp_dir}/output_par.txt"
+  echo "[running] gen_spinon_basis in parallel mode"
+  "${exec_dir}/gen_spinon_basis" "$infile" 0 --n_threads 4 "$ext_par" --out_format both > "${tmp_dir}/output_par.txt"
 
   if diff "$outfile" "$ref_outfile_csv" > /dev/null; then
     echo -e "\033[32;1m[csv] multi-threaded test passed\033[0m"
@@ -70,11 +70,11 @@ test_spinorder() {
   outfile_default="${tmp_dir}/${stem}.0${ext_default}.h5"
   rm -f "$outfile_rand" "$outfile_default"
 
-  echo "[running] gen_spinon_basis_parallel --order_spins random"
-  "${exec_dir}/gen_spinon_basis_parallel" "$infile" 4 0 "$ext_rand" --order_spins random > "${tmp_dir}/output_rand.txt"
+  echo "[running] gen_spinon_basis --order_spins random"
+  "${exec_dir}/gen_spinon_basis" "$infile" 0 --n_threads 4 "$ext_rand" --order_spins random > "${tmp_dir}/output_rand.txt"
 
-  echo "[running] gen_spinon_basis_parallel --order_spins greedy"
-  "${exec_dir}/gen_spinon_basis_parallel" "$infile" 4 0 "$ext_default" --order_spins greedy > "${tmp_dir}/output_rand.txt"
+  echo "[running] gen_spinon_basis --order_spins greedy"
+  "${exec_dir}/gen_spinon_basis" "$infile" 0 --n_threads 4 "$ext_default" --order_spins greedy > "${tmp_dir}/output_rand.txt"
 
   if h5diff "$outfile_rand" "$outfile_default" > /dev/null; then
     echo -e "\033[32;1mspin order test passed\033[0m"

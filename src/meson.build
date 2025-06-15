@@ -5,8 +5,8 @@ common_sources = [
   ]
 
 
+spinon_basis_st_sources = files(['gen_spinon_basis_st.cpp'] + common_sources) 
 spinon_basis_sources = files(['gen_spinon_basis.cpp'] + common_sources) 
-spinon_basis_parallel_sources = files(['gen_spinon_basis_parallel.cpp'] + common_sources) 
 
 
 build_hamiltonian_sources = files(['build_hamiltonian.cpp'])

@@ -40,7 +40,7 @@ json_dep = dependency('nlohmann_json', required: true)
 
 eigen_dep = dependency('Eigen3', method: 'cmake',  modules: ['Eigen3::Eigen'])
 
-spectra_dep = dependency('spectra', method: 'cmake', required: true)
+spectra_dep = dependency('spectra', method: 'cmake')
 
 # Local include dir for headers like bittools.hpp, admin.hpp, basis_io
 inc = [ include_directories('include') ]
@@ -52,23 +52,34 @@ g_deps = [
 
 subdir('src')
 
-# Add diagonalize_rings
+if not eigen_dep.found()
+  add_project_arguments('-DDONT_USE_HDF5')
+endif
+
+gen_spinon_basis_st = executable('gen_spinon_basis_st', spinon_basis_st_sources, 
+  dependencies: g_deps,
+  include_directories:inc)
+
+
+gen_spinon_basis = executable('gen_spinon_basis',spinon_basis_sources, 
+  dependencies: g_deps,
+  include_directories:inc)
+
+if eigen_dep.found()
+
+gen_projected_basis = executable('gen_projected_basis', files('src/gen_projected_basis.cpp'), 
+  dependencies: [g_deps, eigen_dep],
+  include_directories:inc)
+
+if spectra_dep.found()
+
 build_hamiltonian = executable('build_hamiltonian',
   build_hamiltonian_sources,
   dependencies: [g_deps, eigen_dep, spectra_dep],
   include_directories: inc)
 
-gen_spinon_basis = executable('gen_spinon_basis', spinon_basis_sources, 
-  dependencies: g_deps,
-  include_directories:inc)
-
-gen_spinon_basis_parallel = executable('gen_spinon_basis_parallel',spinon_basis_parallel_sources, 
-  dependencies: g_deps,
-  include_directories:inc)
-
-gen_projected_basis = executable('gen_projected_basis', files('src/gen_projected_basis.cpp'), 
-  dependencies: [g_deps, eigen_dep],
-  include_directories:inc)
+endif 
+endif
 
 
 subdir('bench')

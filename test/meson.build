@@ -1,8 +1,7 @@
 # the important tests
 spinon_tests = find_program('test_spinonfree_222.sh')
-test('gen_spinon_basis_single', spinon_tests, args: ['single'])
+test('gen_spinon_basis_st', spinon_tests, args: ['single'])
 test('gen_spinon_basis_par', spinon_tests, args: ['parallel'])
-test('gen_spinon_basis_hdf5', spinon_tests, args: ['hdf5'])
 test('gen_spinon_basis_spinorder', spinon_tests, args: ['spinorder'])
 
 
