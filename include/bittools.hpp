@@ -125,7 +125,19 @@ inline Uint128 make_mask(T idx){
     Uint128 res;
     res.uint128 = 1;
     res.uint128 <<= idx;
-    res.uint128 --;
+    res.uint128--;
     return res;
 }
 
+template <typename T>
+requires std::convertible_to<T, size_t>
+inline Uint128 permute(const Uint128& x, const std::vector<T>& I) {
+    // Applies the permutation I to the bits of x
+    // such that y & (1 << I[n]) == x & (1 << n)
+    Uint128 y = 0;
+    for (size_t n = 0; n < I.size(); n++) {
+        size_t to = static_cast<size_t>(I[n]);
+        y |= ((x >> n) & 1) << to;
+    }
+    return y;
+}

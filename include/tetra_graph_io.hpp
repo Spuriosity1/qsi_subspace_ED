@@ -2,6 +2,7 @@
 #include <fstream>
 #include <nlohmann/json.hpp>
 #include <vector>
+#include <set>
 #include <array>
 #include "bittools.hpp"
 
@@ -51,9 +52,15 @@ struct lattice {
 	std::vector<spin> spins;
 	std::vector<tetra> tetras;
 	std::vector<spin_set> rings;
-	
+
+	// reshusffles the indices such that 
+	// spins[old_id] = spins[perm[old_id]]
+	void apply_permutation(const std::vector<size_t>& perm);
+
 	private:
 	void _register_spins();
+	void _permute_spins(const std::vector<size_t>& perm);
+	
 };
 
 

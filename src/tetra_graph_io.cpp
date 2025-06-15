@@ -1,4 +1,5 @@
 #include "tetra_graph_io.hpp"
+#include <concepts>
 #include <set>
 
 using json = nlohmann::json;
@@ -45,4 +46,43 @@ void lattice::_register_spins() {
 	}
 }
 
+
+
+
+void lattice::_permute_spins(const std::vector<size_t>& perm){
+	if (perm.size() != spins.size()){
+		throw std::out_of_range("Permutation applied does not match # spins");
+	}
+	std::vector<spin> tmp_spins;
+	std::set<size_t> permuted_ids;
+
+	for (size_t i=0; i< spins.size(); i++){
+		if (permuted_ids.insert(perm[i]).second == false){
+			throw std::out_of_range("Perm is not a permutation");
+		}
+		tmp_spins[i] = spins[perm[i]];
+	}
+	spins = tmp_spins; // pointers inside are still valid
+	
+}
+
+// helper function, applies i-> perm[i] for all ints
+std::vector<int> permute(std::vector<int> v, const std::vector<size_t>& perm){
+	std::vector<int> tmp;
+	for (size_t i=0; i<v.size(); i++){
+		tmp[i] = v[perm[i]];
+	}
+	return tmp;
+}
+
+
+void lattice::apply_permutation(const std::vector<size_t>& perm){
+	_permute_spins(perm); // reorder the spins themselves
+	for (auto& t : tetras){
+		t = tetra(permute(t.member_spin_ids, perm));
+	}
+	for (auto& r : rings){
+		r = spin_set(permute(r.member_spin_ids, perm));
+	}
+}
 
