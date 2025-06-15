@@ -1,6 +1,6 @@
 #include "tetra_graph_io.hpp"
-#include <concepts>
 #include <set>
+#include <unordered_set>
 
 using json = nlohmann::json;
 using namespace std;
@@ -53,7 +53,7 @@ void lattice::_permute_spins(const std::vector<size_t>& perm){
 	if (perm.size() != spins.size()){
 		throw std::out_of_range("Permutation applied does not match # spins");
 	}
-	std::vector<spin> tmp_spins;
+	std::vector<spin> tmp_spins(spins.size());
 	std::set<size_t> permuted_ids;
 
 	for (size_t i=0; i< spins.size(); i++){
@@ -67,22 +67,83 @@ void lattice::_permute_spins(const std::vector<size_t>& perm){
 }
 
 // helper function, applies i-> perm[i] for all ints
-std::vector<int> permute(std::vector<int> v, const std::vector<size_t>& perm){
-	std::vector<int> tmp;
+std::vector<int> perm_v(const std::vector<int>& v, const std::vector<size_t>& perm){
+	std::vector<int> tmp(v.size());
 	for (size_t i=0; i<v.size(); i++){
-		tmp[i] = v[perm[i]];
+		tmp[i] = perm[v[i]];
 	}
 	return tmp;
 }
 
 
 void lattice::apply_permutation(const std::vector<size_t>& perm){
+	auto iperm = invperm(perm);
 	_permute_spins(perm); // reorder the spins themselves
 	for (auto& t : tetras){
-		t = tetra(permute(t.member_spin_ids, perm));
+		for (int& sid : t.member_spin_ids){
+			sid = iperm[sid];
+		}
+		t.recompute_bitmask();
 	}
 	for (auto& r : rings){
-		r = spin_set(permute(r.member_spin_ids, perm));
+		for (int& sid : r.member_spin_ids){
+			sid = iperm[sid];
+		}
+		r.recompute_bitmask();
 	}
 }
+
+// Greedy algorithm -- we try to select an orderign of spins such that a()
+std::vector<size_t> lattice::greedy_spin_ordering(int initial_id) const {
+    const int N = spins.size();
+    std::vector<bool> selected(N, false);
+    std::vector<size_t> ordering;
+
+    ordering.push_back(initial_id);
+    selected[initial_id] = true;
+
+	std::unordered_set<const tetra*> covered_tetras(
+        spins[initial_id].tetra_neighbours.begin(), 
+        spins[initial_id].tetra_neighbours.end()
+    );
+
+	for (int iter = 1; iter < N; ++iter) {
+        int best_spin = -1;
+        int best_overlap = -1;
+
+        for (int i = 0; i < N; ++i) {
+            if (selected[i]) continue;
+
+            int overlap = 0;
+            for (const auto* t : spins[i].tetra_neighbours) {
+                if (covered_tetras.count(t)) ++overlap;
+            }
+
+            if (overlap > best_overlap) {
+                best_overlap = overlap;
+                best_spin = i;
+            }
+        }
+
+        if (best_spin == -1) {
+            // This can happen if disconnected: pick any remaining
+            for (int i = 0; i < N; ++i) {
+                if (!selected[i]) {
+                    best_spin = i;
+                    break;
+                }
+            }
+        }
+
+        selected[best_spin] = true;
+        ordering.push_back(best_spin);
+
+        for (const auto* t : spins[best_spin].tetra_neighbours) {
+            covered_tetras.insert(t);
+        }
+    }
+
+    return ordering;
+}
+
 

@@ -241,17 +241,17 @@ void pyro_vtree::write_basis_csv(const std::string &outfilename) {
 }
 
 
-void pyro_vtree::permute_spins(const std::vector<int>& perm) {
+void pyro_vtree::permute_spins(const std::vector<size_t>& perm) {
 	for (auto& b : this->state_list) {
-		permute(b, perm);
+		b = permute(b, perm);
 	}
 }
 
 
-void pyro_vtree_parallel::permute_spins(const std::vector<int>& perm) {
+void pyro_vtree_parallel::permute_spins(const std::vector<size_t>& perm) {
 	for (auto& state_list : this->state_set) {
 		for (auto& b : state_list) {
-			permute(b, perm);
+			b = permute(b, perm);
 		}
 	}
 }

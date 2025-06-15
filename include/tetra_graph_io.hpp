@@ -19,6 +19,10 @@ struct spin_set {
 	spin_set(const std::vector<int>& spin_ids) : 
 		member_spin_ids(spin_ids)
 	{
+		recompute_bitmask();
+	}
+
+	void recompute_bitmask(){
 		this->bitmask.uint128 = 0;
 		for (auto i : member_spin_ids){
 			or_bit(this->bitmask, i);
@@ -57,6 +61,8 @@ struct lattice {
 	// spins[old_id] = spins[perm[old_id]]
 	void apply_permutation(const std::vector<size_t>& perm);
 
+	std::vector<size_t> greedy_spin_ordering(int initial_id=0) const;
+
 	private:
 	void _register_spins();
 	void _permute_spins(const std::vector<size_t>& perm);
@@ -74,5 +80,20 @@ inline lattice read_latfile_json(const std::string& file){
 }
 
 };
+
+
+
+template<typename T>
+requires std::convertible_to<T, size_t>
+inline std::vector<T> invperm(const std::vector<T>&perm){
+	std::vector<T> iperm(perm.size());
+	for (size_t i=0; i<perm.size(); i++){
+		iperm[perm[i]] = i;
+	}
+	return iperm;
+}
+
+
+
 
 

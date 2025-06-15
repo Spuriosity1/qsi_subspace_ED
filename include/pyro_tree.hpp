@@ -66,7 +66,7 @@ struct pyro_vtree : public lat_container {
 	void build_state_tree();
 	void sort();
 	// Applies bittools::permute to all elements of the basis
-	void permute_spins(const std::vector<int>& perm);
+	void permute_spins(const std::vector<size_t>& perm);
 
 	void write_basis_csv(const std::string &outfilename); 
     void write_basis_hdf5(const std::string& outfile);
@@ -94,7 +94,7 @@ struct pyro_vtree_parallel : public lat_container {
 	void sort();
 
 	// Applies bittools::permute to all elements of the basis
-	void permute_spins(const std::vector<int>& perm);
+	void permute_spins(const std::vector<size_t>& perm);
 
 	void write_basis_csv(const std::string& outfilename);
 	void write_basis_hdf5(const std::string& outfile);
@@ -199,5 +199,3 @@ protected:
 
 };
 */
-
-
