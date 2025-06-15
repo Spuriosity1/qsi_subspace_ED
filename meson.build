@@ -56,11 +56,6 @@ if not eigen_dep.found()
   add_project_arguments('-DDONT_USE_HDF5')
 endif
 
-gen_spinon_basis_st = executable('gen_spinon_basis_st', spinon_basis_st_sources, 
-  dependencies: g_deps,
-  include_directories:inc)
-
-
 gen_spinon_basis = executable('gen_spinon_basis',spinon_basis_sources, 
   dependencies: g_deps,
   include_directories:inc)
