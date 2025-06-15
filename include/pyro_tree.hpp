@@ -1,5 +1,6 @@
 #pragma once
 #include "bittools.hpp"
+#include <iostream>
 #include <nlohmann/json.hpp>
 #include "tetra_graph_io.hpp"
 #include <array>
@@ -8,7 +9,7 @@
 #include <queue>
 #include <stack>
 #include <vector>
-
+#include <mutex>
 
 
 struct vtree_node_t {
@@ -57,6 +58,8 @@ struct lat_container {
 	const lattice& lat;
 };
 
+
+
 struct pyro_vtree : public lat_container {
 	pyro_vtree(const lattice& lat, unsigned num_spinon_pairs) :
 		lat_container(lat, num_spinon_pairs) {
@@ -83,6 +86,170 @@ protected:
 	unsigned counter = 0;
 };
 
+
+
+// Thread-safe work-stealing queue for load balancing
+class WorkStealingQueue {
+private:
+    std::deque<vtree_node_t> deque_;
+    mutable std::mutex mutex_;
+    
+public:
+    // Default constructor
+    WorkStealingQueue() = default;
+    
+    // Move constructor
+    WorkStealingQueue(WorkStealingQueue&& other) noexcept {
+        std::lock_guard<std::mutex> lock(other.mutex_);
+        deque_ = std::move(other.deque_);
+    }
+    
+    // Move assignment
+    WorkStealingQueue& operator=(WorkStealingQueue&& other) noexcept {
+        if (this != &other) {
+            std::lock(mutex_, other.mutex_);
+            std::lock_guard<std::mutex> lock1(mutex_, std::adopt_lock);
+            std::lock_guard<std::mutex> lock2(other.mutex_, std::adopt_lock);
+            deque_ = std::move(other.deque_);
+        }
+        return *this;
+    }
+    
+    // Delete copy constructor and assignment (non-copyable due to mutex)
+    WorkStealingQueue(const WorkStealingQueue&) = delete;
+    WorkStealingQueue& operator=(const WorkStealingQueue&) = delete;
+    void push_back(const vtree_node_t& item) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        deque_.push_back(item);
+    }
+    
+    void push_batch_back(const std::vector<vtree_node_t>& items) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        for (const auto& item : items) {
+            deque_.push_back(item);
+        }
+    }
+    
+    bool try_pop_back(vtree_node_t& item) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (deque_.empty()) {
+            return false;
+        }
+        item = deque_.back();
+        deque_.pop_back();
+        return true;
+    }
+    
+    bool try_steal_front(vtree_node_t& item) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (deque_.empty()) {
+            return false;
+        }
+        item = deque_.front();
+        deque_.pop_front();
+        return true;
+    }
+    
+    size_t try_steal_batch_front(std::vector<vtree_node_t>& items, size_t max_count) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        size_t count = std::min(max_count, deque_.size() / 2); // steal half
+        items.clear();
+        items.reserve(count);
+        
+        for (size_t i = 0; i < count; ++i) {
+            items.push_back(deque_.front());
+            deque_.pop_front();
+        }
+        return count;
+    }
+    
+    size_t size() const {
+        std::lock_guard<std::mutex> lock(mutex_);
+        return deque_.size();
+    }
+    
+    bool empty() const {
+        std::lock_guard<std::mutex> lock(mutex_);
+        return deque_.empty();
+    }
+};
+
+
+struct pyro_vtree_parallel : public lat_container {
+    pyro_vtree_parallel(const lattice &lat, unsigned num_spinon_pairs, 
+                       unsigned n_threads = std::thread::hardware_concurrency())
+        : lat_container(lat, num_spinon_pairs), n_threads(n_threads) {
+        is_sorted = false;
+        if (n_threads == 0) n_threads = 1;
+        
+        // Initialize thread-local storage
+        state_set.resize(n_threads);
+        job_stacks.resize(n_threads);
+        work_stealing_queues.resize(n_threads);
+        work_stealing_queues.resize(n_threads);
+        for (unsigned i = 0; i < n_threads; ++i) {
+            work_stealing_queues[i] = std::make_unique<WorkStealingQueue>();
+        }
+        counters.resize(n_threads, 0);
+        threads.reserve(n_threads);
+        std::cout<<"Parallel mode | " << n_threads << " threads\n";
+    }
+    
+    void build_state_tree();
+    void sort();
+    void permute_spins(const std::vector<size_t>& perm);
+    void write_basis_csv(const std::string& outfilename);
+    void write_basis_hdf5(const std::string& outfile);
+    
+protected:
+    void build_state_dfs(std::stack<vtree_node_t> &node_stack, unsigned thread_id,
+                        unsigned long max_stack_size = (1ul << 40));
+    void build_state_bfs(std::queue<vtree_node_t>& node_stack, 
+                        unsigned long max_queue_len);
+    
+    // Enhanced DFS with work stealing
+    void build_state_dfs_work_stealing(unsigned thread_id, 
+                                     std::atomic<bool>& all_done,
+                                     unsigned long max_stack_size = (1ul << 40));
+    
+    // Work stealing helper functions
+    bool try_steal_work(unsigned thread_id);
+    void share_work_if_needed(unsigned thread_id, size_t threshold = 100);
+    bool has_work_available(unsigned exclude_thread_id) const;
+    
+    unsigned n_threads;
+    bool is_sorted;
+    
+    size_t n_states() const {
+        size_t acc = 0;
+        for (const auto& v : state_set) {
+            acc += v.size();
+        }
+        return acc;
+    }
+    
+    // Thread-local storage for cache-friendliness
+    std::vector<std::vector<Uint128>> state_set;          // first index is thread ID
+    std::vector<std::thread> threads;
+    std::vector<std::stack<vtree_node_t>> job_stacks;     // thread-local work stacks
+    
+    // Work-stealing infrastructure
+    std::vector<std::unique_ptr<WorkStealingQueue>> work_stealing_queues;  // per-thread work-stealing queues
+    
+    // Debug and monitoring
+    std::vector<unsigned> counters;
+    
+    // Constants for work stealing
+    static constexpr size_t WORK_STEAL_THRESHOLD = 100;
+    static constexpr size_t WORK_STEAL_BATCH_SIZE = 20;
+    static constexpr size_t MIN_WORK_TO_SHARE = 50;
+};
+
+
+
+
+
+/*
 struct pyro_vtree_parallel : public lat_container {
 	pyro_vtree_parallel(const lattice &lat, unsigned num_spinon_pairs, 
 			unsigned n_threads = 1)
@@ -125,77 +292,9 @@ protected:
 	// auxiliary, for debug only
 	std::vector<unsigned> counters = {0};
 };
-
-/*
-// older implementation
-struct base_pyro_tree : public lat_container {
-	base_pyro_tree(const nlohmann::json& data) :
-		lat_container(data)
-	{
-		this->root = new node_t;
-		root->spin_idx=0;
-		root->state_thus_far.uint128=0;
-	}
-	base_pyro_tree(base_pyro_tree& other) = delete;
-	base_pyro_tree(base_pyro_tree&& other) = delete;
-
-	~base_pyro_tree();
-
-
-	void print_state_tree() const ;
-
-
-	protected:
-	void _print_node(node_t* n) const;
-
-	// checks if two valid states can be made and makes children if possible
-	void _fork_node(node_t* n);
-
-	node_t* root=nullptr;
-
-};
-
-struct pyro_tree : public base_pyro_tree {
-	pyro_tree(const nlohmann::json& data) :
-		base_pyro_tree(data)
-	{
-	}
-
-	void build_state_tree();
-	void write_basis_csv(FILE* outfile){
-		for (auto b : states_2I2O){
-			std::fprintf(outfile, "0x%016llx%016llx\n", b.uint64[1],b.uint64[0]);
-		}
-	}
-protected:
-	void _build_state_tree(node_t* node);
-
-	// Repository of ice states for perusal
-	std::vector<Uint128> states_2I2O;
-};
-
-struct parallel_pyro_tree : public base_pyro_tree {
-	parallel_pyro_tree(const nlohmann::json& data, unsigned n_threads=1) :
-		base_pyro_tree(data),
-		n_threads(n_threads)
-	{
-		state_set.resize(n_threads);
-	}
-
-	void build_state_tree();
-	void write_basis_csv(FILE* outfile){
-		for (auto states_2I2O : state_set){
-			for (auto b : states_2I2O){
-				std::fprintf(outfile, "0x%016llx%016llx\n", b.uint64[1],b.uint64[0]);
-			}
-		}
-	}
-protected:
-	void _build_state_tree(node_t* node, unsigned tid);
-	// first index is the thread ID
-	std::vector<std::vector<Uint128>> state_set;
-	std::vector<std::thread> threads;
-	const unsigned n_threads;
-
-};
 */
+
+
+
+
+
