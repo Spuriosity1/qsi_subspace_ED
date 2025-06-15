@@ -23,9 +23,10 @@ struct vtree_node_t {
 typedef std::array<int, 4> global_sz_sector_t;
 
 struct lat_container {
-	lat_container(const nlohmann::json &data, unsigned num_spinon_pairs)
-		: num_spinon_pairs(num_spinon_pairs), lat(data) {
-			auto natoms = data.at("atoms").size();
+	lat_container(const lattice& _lat, unsigned num_spinon_pairs)
+		: num_spinon_pairs(num_spinon_pairs), lat(_lat) {
+			//auto natoms = data.at("atoms").size();
+			auto natoms = _lat.spins.size();
 			masks.resize(natoms+1);
 			for (size_t i = 0; i < natoms+1; i++) {
 				masks[i] = make_mask(i);
@@ -53,12 +54,12 @@ struct lat_container {
 
 	void fork_state(std::stack<vtree_node_t>& to_examine);
 	void fork_state(std::queue<vtree_node_t>& to_examine);
-	lattice lat;
+	const lattice& lat;
 };
 
 struct pyro_vtree : public lat_container {
-	pyro_vtree(const nlohmann::json&data, unsigned num_spinon_pairs) :
-		lat_container(data, num_spinon_pairs) {
+	pyro_vtree(const lattice& lat, unsigned num_spinon_pairs) :
+		lat_container(lat, num_spinon_pairs) {
 			is_sorted = false;
 		}
 
@@ -83,9 +84,9 @@ protected:
 };
 
 struct pyro_vtree_parallel : public lat_container {
-	pyro_vtree_parallel(const nlohmann::json &data, unsigned num_spinon_pairs, 
+	pyro_vtree_parallel(const lattice &lat, unsigned num_spinon_pairs, 
 			unsigned n_threads = 1)
-		: lat_container(data, num_spinon_pairs), n_threads(n_threads) {
+		: lat_container(lat, num_spinon_pairs), n_threads(n_threads) {
 		is_sorted = false;
 		}
 

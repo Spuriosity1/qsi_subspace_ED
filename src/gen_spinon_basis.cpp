@@ -29,7 +29,13 @@ int main (int argc, char *argv[]) {
 	json data = json::parse(ifs);
 	ifs.close();
 
-	pyro_vtree L(data, num_spinon_pairs);
+	lattice lat(data);
+
+	//lat.apply_permutation(const std::vector<size_t> &perm)
+
+	pyro_vtree L(lat, num_spinon_pairs);
+
+
 	
 	printf("Building state tree...\n");
 	L.build_state_tree();
