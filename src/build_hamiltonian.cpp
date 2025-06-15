@@ -263,7 +263,7 @@ int main(int argc, char* argv[]) {
     }
 
 
-    std::cout << "Eigenvalues:\n" << eigvals << "\n";
+    std::cout << "Eigenvalues:\n" << eigvals << "\n\n";
 
 	
 

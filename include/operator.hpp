@@ -18,8 +18,6 @@
 					  
 namespace fs = std::filesystem;
 
-typedef Uint128 comp_basis_state_t; // type which stores the computational basis state
-typedef uint64_t idx_t;  // the type to use for the indices themselves
 
 template<typename T>
 concept ScalarLike = std::floating_point<T> ||
@@ -28,6 +26,7 @@ concept ScalarLike = std::floating_point<T> ||
                   std::floating_point<typename T::value_type>);
 
 
+template<typename comp_basis_state_t>
 class state_not_found_error : public std::exception
 {
 	char state_as_c_str[128];
@@ -70,6 +69,11 @@ opstring: %zu, spin_ids: %zu", opstring.size(), spin_ids.size());
 // Wrapper for a std::vector implementing indexable set semantics
 // Represents a set of Sz product states spanning some subspace
 struct ZBasis {
+
+	using state_t = Uint128; // type which stores the computational basis state
+	using idx_t = uint64_t;  // the type to use for the indices themselves
+
+
 	ZBasis(){}
 
 	size_t dim() const {
@@ -77,15 +81,30 @@ struct ZBasis {
 	}
 
 	// returns the index of a particular basis state
-	idx_t idx_of_state(const comp_basis_state_t& state) const {
+	idx_t idx_of_state(const state_t& state) const {
 		auto it = state_to_index.find(state);
 		if (it == state_to_index.end()){
 			throw state_not_found_error(state);
 		}
 		return it->second;
 	}
-	inline comp_basis_state_t operator[](idx_t idx) const {
+	inline state_t operator[](idx_t idx) const {
 		return states[idx];
+	}
+
+	size_t insert_states(const std::vector<state_t>& others,
+			std::vector<state_t>& new_states){
+		new_states.resize(0);
+		size_t n_insertions = 0;
+		for (auto& s : others){
+			// skip if we know about it already
+			if (state_to_index.find(s) != state_to_index.end()) continue;
+			state_to_index[s] = states.size();
+			states.push_back(s);
+			new_states.push_back(s);
+			n_insertions++;
+		}
+		return n_insertions;
 	}
 
 	void load_from_file(const fs::path& bfile){
@@ -104,12 +123,12 @@ struct ZBasis {
 	}
 	
 protected:
-	std::vector<comp_basis_state_t> states;
-	std::unordered_map<comp_basis_state_t, idx_t, Uint128Hash, Uint128Eq> state_to_index;
+	std::vector<state_t> states;
+	std::unordered_map<state_t, idx_t, Uint128Hash, Uint128Eq> state_to_index;
 };
 
 
-inline int highest_set_bit(comp_basis_state_t x) {
+inline int highest_set_bit(ZBasis::state_t x) {
     if (x == 0) return -1;
 
     if (x.uint64[1] != 0) {
@@ -157,10 +176,21 @@ struct SymbolicPMROperator {
 			}
 		}
 
-    // returns sign of only possibly-nonzero entry, modifies J to its index
-    int applyIndex(const ZBasis& basis, idx_t& J) const {
-        comp_basis_state_t state = basis[J];
+	inline int applyState(ZBasis::state_t& state) const {
+        const auto s = state.uint128;
+        const auto d = down_mask.uint128;
+        const auto u = up_mask.uint128;
 
+        if ( (s & d) != 0 ) return 0;
+        if ( (s & u) != u ) return 0;
+        state ^= X_mask;
+        return 1 - 2 * (popcnt_u128(state & Z_mask) % 2); 
+	}
+
+    // returns sign of only possibly-nonzero entry, modifies J to its index
+    int applyIndex(const ZBasis& basis, ZBasis::idx_t& J) const {
+		ZBasis::state_t state = basis[J];
+/*
         const auto s = state.uint128;
         const auto d = down_mask.uint128;
         const auto u = up_mask.uint128;
@@ -169,7 +199,8 @@ struct SymbolicPMROperator {
         if ( (s & u) != u ) return 0;
         state ^= X_mask;
         int sign = 1 - 2 * (popcnt_u128(state & Z_mask) % 2);
-        
+ */
+		int sign = applyState(state);
         J= basis.idx_of_state(state);
         return sign;
     }
@@ -178,7 +209,7 @@ struct SymbolicPMROperator {
 	// Apply this operator to an input vector `in` and store result in `out`
 	template <typename Orig, typename Dest>
 	void apply(const ZBasis& basis, const Orig& in, Dest& out) const {	
-		for (idx_t i = 0; i < basis.dim(); ++i) {
+		for (ZBasis::idx_t i = 0; i < basis.dim(); ++i) {
             /*
 			comp_basis_state_t state = basis[i];
 
@@ -194,22 +225,22 @@ struct SymbolicPMROperator {
 			out [ basis.idx_of_state(state) ] = sign * in[i];
             */
 
-            idx_t J = i;
+			ZBasis::idx_t J = i;
             auto c = applyIndex(basis, J) * in[i];
             out[J] += c;
 		}
 	}
 
-	idx_t highest_set_bit() const {
+	ZBasis::idx_t highest_set_bit() const {
 		return ::highest_set_bit(X_mask | Z_mask | down_mask | up_mask);
 	}
 
 
 protected:
-	comp_basis_state_t X_mask = 0;
-	comp_basis_state_t Z_mask = 0;
-	comp_basis_state_t down_mask = 0; // init_state & down_mask must be zero
-	comp_basis_state_t up_mask = 0; // init_state & up_mask must be == up_mask
+	ZBasis::state_t X_mask = 0;
+	ZBasis::state_t Z_mask = 0;
+	ZBasis::state_t down_mask = 0; // init_state & down_mask must be zero
+	ZBasis::state_t up_mask = 0; // init_state & up_mask must be == up_mask
 };
 
 
@@ -269,7 +300,7 @@ struct LazyOpSum {
 		for (const auto& [c, op_ptr] : ops.terms) {
 			std::fill(tmp, tmp + basis.dim(), coeff_t(0));
 			op_ptr.apply(basis, x, tmp);
-			for (idx_t i = 0; i < basis.dim(); ++i)
+			for (ZBasis::idx_t i = 0; i < basis.dim(); ++i)
 				y[i] += c * tmp[i];
 		}
 	}
@@ -332,7 +363,7 @@ struct LazyOpSum {
 			x[j] = coeff_t(0);
             */
             for (auto& [c, op] : ops.terms){
-                idx_t J = j;
+				ZBasis::idx_t J = j;
                 coeff_t res = c * op.applyIndex(basis, J);
                 if (std::abs(res) > tol )
                     triplets.emplace_back(J, j, res);

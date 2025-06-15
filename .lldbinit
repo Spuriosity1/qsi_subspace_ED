@@ -1,0 +1,2 @@
+type format add --format hex uint64_t
+type format add --format hex __uint128_t

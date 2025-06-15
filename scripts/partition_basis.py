@@ -1,4 +1,4 @@
-from ringflip_hamiltonian import RingflipHamiltonian, build_matrix, ring_exp_values, calc_polarisation
+from ringflip_hamiltonian import calc_polarisation, load_basis_csv
 import scipy.sparse.linalg as sLA
 import pyrochlore
 import numpy as np
@@ -15,20 +15,28 @@ lat = pyrochlore.import_json(latfile)
 
 latvecs = np.array(lat.lattice_vectors)
 
-rfh = RingflipHamiltonian(lat)
 print("Setting up basis...")
-rfh.load_basis(latfile.replace('.json','.0.basis.csv'), sectorfunc=calc_polarisation)
+basis = load_basis_csv(latfile.replace('.json','.0.basis.csv'))
+
+sectors = {}
+for b in basis:
+    pol = calc_polarisation(lat, b)
+    if pol not in sectors:
+        sectors[pol] = []
+
+    sectors[pol].append(b)
+
 
 sector_dir = os.path.join("basis_partitions/",
                           file_name.rsplit( ".", 1 )[ 0 ])
 
 os.mkdir(sector_dir)
 
-for sector in rfh.sectors:
+for sector, bset in sectors.items():
     print("SECTOR: " + str(sector))
     sec_file = os.path.join(sector_dir, "s%d.%d.%d.%d_.csv" % sector)
     with open(sec_file, 'w') as of:
-        for b in rfh.basis[sector]:
-            of.write('0x%08x\n' % b)
+        for b in bset:
+            of.write('0x%032x\n' % b)
 
 

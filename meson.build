@@ -7,10 +7,28 @@ project('projected_ed', ['cpp', 'c'],
 
 # Compiler flags for 128-bit integer support
 cpp_compiler = meson.get_compiler('cpp')
+host_cpu = host_machine.cpu_family()
 add_project_arguments('-DUINT128_AVAILABLE', language : 'cpp')
 
 if get_option('buildtype') == 'release'
-  add_project_arguments('-msse2', language : 'cpp')
+  if host_cpu.startswith('x86')
+    if cpp_compiler.has_argument('-mavx2')
+      add_project_arguments('-mavx2', language : 'cpp')
+    elif cpp_compiler.has_argument('-mavx')
+      add_project_arguments('-mavx', language : 'cpp')
+    elif cpp_compiler.has_argument('-msse2')
+      add_project_arguments('-msse2', language : 'cpp')
+    endif
+  elif host_cpu.startswith('aarch64') or host_cpu.startswith('arm')
+    if cpp_compiler.has_argument('-mfpu=neon')
+      add_project_arguments('-mfpu=neon', language : 'cpp')
+    elif cpp_compiler.has_argument('-march=armv8-a+simd')
+      add_project_arguments('-march=armv8-a+simd', language : 'cpp')
+    endif
+    if cpp_compiler.has_argument('-march=armv8-a+sha3')
+      add_project_arguments('-march=armv8-a+sha3', language : 'cpp')
+    endif
+  endif
 endif
 
 hdf5_dep = dependency('hdf5',
@@ -46,6 +64,10 @@ gen_spinon_basis = executable('gen_spinon_basis', spinon_basis_sources,
 
 gen_spinon_basis_parallel = executable('gen_spinon_basis_parallel',spinon_basis_parallel_sources, 
   dependencies: g_deps,
+  include_directories:inc)
+
+gen_projected_basis = executable('gen_projected_basis', files('src/gen_projected_basis.cpp'), 
+  dependencies: [g_deps, eigen_dep],
   include_directories:inc)
 
 
