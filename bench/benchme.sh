@@ -1,6 +1,6 @@
 #!/bin/bash
 
-for j in `seq 2 10`; do
+for j in `seq 2 8`; do
     start=`perl -MTime::HiRes=time -e 'printf "%.9f\n", time'`
 	build/gen_spinon_basis bench/test_data/pyro_1,0,0_0,2,0_0,0,$j.json > /dev/null
     end=`perl -MTime::HiRes=time -e 'printf "%.9f\n", time'`
