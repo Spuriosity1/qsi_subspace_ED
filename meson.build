@@ -16,7 +16,8 @@ if get_option('buildtype') == 'release'
       add_project_arguments('-mavx2', language : 'cpp')
     elif cpp_compiler.has_argument('-mavx')
       add_project_arguments('-mavx', language : 'cpp')
-    elif cpp_compiler.has_argument('-msse2')
+    endif
+    if cpp_compiler.has_argument('-msse2')
       add_project_arguments('-msse2', language : 'cpp')
     endif
   elif host_cpu.startswith('aarch64') or host_cpu.startswith('arm')
