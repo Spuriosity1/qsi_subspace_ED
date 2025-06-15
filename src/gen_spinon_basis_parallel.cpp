@@ -1,3 +1,4 @@
+#include "argparse/argparse.hpp"
 #include "pyro_tree.hpp"
 #include "vanity.hpp"
 #include <cstdio>
@@ -10,17 +11,39 @@ using json=nlohmann::json;
 
 
 int main (int argc, char *argv[]) {
-	if (argc < 3) {
-		printf("USAGE: %s <latfile: json> <num_threads> (<num_spinon_pairs>=0 <ext>=.basis)\n", argv[0]);
-		return 1;
-	}
+	argparse::ArgumentParser prog("gen_spinon_basis");
+	prog.add_argument("lattice_file")
+		.help("The json-vlaued lattice spec");
+	prog.add_argument("n_threads")
+		.help("Number of threads to distribute across (works best as a power of 2)")
+		.scan<'i', int>();
+	prog.add_argument("n_spinon_pairs")
+		.default_value(0)
+		.scan<'i', int>();
+	prog.add_argument("extension")
+		.default_value(".basis");
+	prog.add_argument("--order_spins")
+		.choices("none", "greedy", "random")
+		.default_value("greedy");
+	prog.add_argument("--out_format")
+		.choices("csv", "h5", "both", "none")
+		.default_value("h5");
 
-	std::string infilename(argv[1]);
-	unsigned num_spinon_pairs=(argc >= 4) ? atoi(argv[3]) : 0;
+    try {
+        prog.parse_args(argc, argv);
+    } catch (const std::exception& err){
+		std::cerr << err.what() << std::endl;
+		std::cerr << prog;
+        std::exit(1);
+    }
+
+	auto infilename = prog.get<std::string>("lattice_file");
+	size_t n_threads = prog.get<int>("n_threads");
+	auto num_spinon_pairs = prog.get<int>("n_spinon_pairs");
 
 	std::string ext = ".";
 	ext += std::to_string(num_spinon_pairs);
-	ext += (argc >= 5) ? argv[4] : ".basis";
+	ext += prog.get<std::string>("extension");
 
 	auto outfilename=as_basis_file(infilename, ext );
 
@@ -28,19 +51,43 @@ int main (int argc, char *argv[]) {
 	json data = json::parse(ifs);
 	ifs.close();
 
+	// Parameter parsing complete. Load lattice into a container struct
+
 	lattice lat(data);
 
-	pyro_vtree_parallel L(lat, num_spinon_pairs, atoi(argv[2]));
+	auto choice = prog.get<std::string>("--order_spins");
+
+	// Optionally permute the indices to make the early tree
+	// truncation as efficient as possible. We permute indices, run the algo,
+	// then finally unpermute when saving to file
+	std::vector<size_t> perm = get_permutation(choice, lat);
+
+	lat.apply_permutation(perm);
+	
+	pyro_vtree_parallel L(lat, num_spinon_pairs, n_threads);
 	
 	printf("Building state tree...\n");
 	L.build_state_tree();
 
+	// undo the permutation from earlier to keep the output order consistent
+	L.permute_spins(perm);
 
 	printf("Sorting...\n");
 	L.sort();
 	
-	L.write_basis_csv(outfilename);
-	L.write_basis_hdf5(outfilename);
+	switch(prog.get<std::string>("--out_format")[0]){
+		case 'c': // csv
+			L.write_basis_csv(outfilename);
+			break;
+		case 'h': // h5 
+			L.write_basis_hdf5(outfilename);
+			break;
+		case 'n': // do not save (why whould you want this?)
+			break;
+		default: // also catches 'both' case
+			L.write_basis_csv(outfilename);
+			L.write_basis_hdf5(outfilename);
+	}
 
 	return 0;
 }

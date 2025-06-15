@@ -1,7 +1,6 @@
 #include "pyro_tree.hpp"
 #include <cstdio>
 #include <fstream>
-#include <random>
 #include <argparse/argparse.hpp>
 #include <string>
 #include "admin.hpp"
@@ -9,6 +8,7 @@
 
 using namespace std;
 using json=nlohmann::json;
+
 
 
 int main (int argc, char *argv[]) {
@@ -23,6 +23,9 @@ int main (int argc, char *argv[]) {
 	prog.add_argument("--order_spins")
 		.choices("none", "greedy", "random")
 		.default_value("greedy");
+	prog.add_argument("--out_format")
+		.choices("csv", "h5", "both", "none")
+		.default_value("h5");
 
 
     try {
@@ -33,8 +36,8 @@ int main (int argc, char *argv[]) {
         std::exit(1);
     }
 
-	std::string infilename = prog.get<std::string>("lattice_file");
-	unsigned num_spinon_pairs= prog.get<int>("n_spinon_pairs");
+	auto infilename = prog.get<std::string>("lattice_file");
+	auto num_spinon_pairs= prog.get<int>("n_spinon_pairs");
 
 	std::string ext = ".";
 	ext += std::to_string(num_spinon_pairs);
@@ -46,23 +49,16 @@ int main (int argc, char *argv[]) {
 	json data = json::parse(ifs);
 	ifs.close();
 
+	// Parameter parsing complete. Load lattice into a container struct
+
 	lattice lat(data);
-
-
-	std::vector<size_t> perm;	
-	for (size_t i=0; i<lat.spins.size(); i++){
-		perm.push_back(i);
-	}
 
 	auto choice = prog.get<std::string>("--order_spins");
 
-	std::random_device rd;
-	std::mt19937 rng(rd());
-	if (choice == "greedy"){
-		perm = lat.greedy_spin_ordering(0);
-	} else if (choice == "random") {
-		std::shuffle(perm.begin(), perm.end(), rng);
-	}
+	// Optionally permute the indices to make the early tree
+	// truncation as efficient as possible. We permute indices, run the algo,
+	// then finally unpermute when saving to file
+	std::vector<size_t> perm = get_permutation(choice, lat);
 
 	lat.apply_permutation(perm);
 
@@ -70,14 +66,26 @@ int main (int argc, char *argv[]) {
 	
 	printf("Building state tree...\n");
 	L.build_state_tree();
-
-	L.permute_spins((perm));
+	
+	// undo the permutation from earlier to keep the output order consistent
+	L.permute_spins(perm);
 
 	printf("Sorting...\n");
 	L.sort();
 	
-	L.write_basis_csv(outfilename);
-	L.write_basis_hdf5(outfilename);
+	switch(prog.get<std::string>("--out_format")[0]){
+		case 'c': // csv
+			L.write_basis_csv(outfilename);
+			break;
+		case 'h': // h5 
+			L.write_basis_hdf5(outfilename);
+			break;
+		case 'n': // do not save (why whould you want this?)
+			break;
+		default: // also catches 'both' case
+			L.write_basis_csv(outfilename);
+			L.write_basis_hdf5(outfilename);
+	}
 
 	return 0;
 }

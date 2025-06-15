@@ -1,72 +1,110 @@
 #!/bin/bash
+set -e
 
-mkdir -p "tmp"
+# Resolve the directory the script is in
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
-data_dir="data"
-tmp_dir="tmp"
+data_dir="$REPO_ROOT/test/data"
+tmp_dir="$REPO_ROOT/test/tmp"
 stem="pyro_2_2_2x0,4,4b4,0,4b4,4,0b1"
-
-
-# Copy the json file from the reference folder
+exec_dir="$REPO_ROOT/build"
 infile="${tmp_dir}/${stem}.json"
-cp "${data_dir}/${stem}.json" $infile
 
-ext_st=".test_basis_st"
-ext_par=".test_basis_par"
+ref_outfile_csv="${data_dir}/${stem}.reference.basis.csv"
+ref_outfile_h5="${data_dir}/${stem}.reference.basis.h5"
 
-gen_outfile_st="${tmp_dir}/${stem}.0${ext_st}.csv"
-gen_outfile_par="${tmp_dir}/${stem}.0${ext_par}.csv"
-ref_outfile="${data_dir}/${stem}.reference.basis.csv"
+mkdir -p "$tmp_dir"
+cp "${data_dir}/${stem}.json" "$infile"
 
-# ensure there is nothing already there
-rm -f $gen_outfile_st $gen_outfile_par
-rm -f "${gen_outfile_st%.csv}.h5" "${gen_outfile_par%.csv}.h5"
+test_single() {
+  ext_st=".test_basis_st"
+  outfile="${tmp_dir}/${stem}.0${ext_st}.csv"
+  h5file="${outfile%.csv}.h5"
+  rm -f "$outfile" "$h5file"
 
-sort "${ref_outfile}" > "${ref_outfile}.sorted"
-ref_outfile="${ref_outfile}.sorted"
+  echo "[running] gen_spinon_basis (single-threaded)"
+  "${exec_dir}/gen_spinon_basis" "$infile" 0 "$ext_st" --out_format both > "${tmp_dir}/output_st.txt"
 
+  if diff "$outfile" "$ref_outfile_csv" > /dev/null; then
+    echo -e "\033[32;1m[csv] single-threaded test passed\033[0m"
+  else
+    echo -e "\033[31;1m[csv] single-threaded test failed\033[0m"
+  fi
 
-CMD1="../build/gen_spinon_basis $infile 0 $ext_st"
-echo $CMD1
-eval "$CMD1" > tmp/output_st.txt
+  if h5diff "$h5file" "$ref_outfile_h5"; then
+    echo -e "\033[32;1m[hdf5] single-threaded test passed\033[0m"
+  else
+    echo -e "\033[31;1m[hdf5] single-threaded test failed\033[0m"
+    return 1
+  fi
+}
 
-DCMD="sort ${gen_outfile_st} | diff - ${ref_outfile}"
-echo $DCMD
-eval "$DCMD"
+test_parallel() {
+  ext_par=".test_basis_par"
+  outfile="${tmp_dir}/${stem}.0${ext_par}.csv"
+  h5file="${outfile%.csv}.h5"
+  rm -f "$outfile" "$h5file"
 
-if [[ $? -eq 0 ]]; then
-	echo -e "\033[32;1;4msingle-threaded test passed!\033[0m"
-	rm $gen_outfile_st
-else
-	echo -e "\033[31;1;4msingle-threaded test failed!\033[0m"
-fi
+  echo "[running] gen_spinon_basis_parallel"
+  "${exec_dir}/gen_spinon_basis_parallel" "$infile" 4 0 "$ext_par" --out_format both > "${tmp_dir}/output_par.txt"
 
+  if diff "$outfile" "$ref_outfile_csv" > /dev/null; then
+    echo -e "\033[32;1m[csv] multi-threaded test passed\033[0m"
+  else
+    echo -e "\033[31;1m[csv] multi-threaded test failed\033[0m"
+  fi
 
-CMD2="../build/gen_spinon_basis_parallel $infile 4 0 $ext_par"
-echo $CMD2
-eval $CMD2 > tmp/output_par.txt
+  if h5diff "$h5file" "$ref_outfile_h5" > /dev/null; then
+    echo -e "\033[32;1m[hdf5] multi-threaded test passed\033[0m"
+  else
+    echo -e "\033[31;1m[hdf5] multi-threaded test failed\033[0m"
+    return 1
+  fi
+}
 
+test_spinorder() {
+  ext_rand=".test_basis_par_rand"
+  ext_default=".test_basis_par"
+  outfile_rand="${tmp_dir}/${stem}.0${ext_rand}.h5"
+  outfile_default="${tmp_dir}/${stem}.0${ext_default}.h5"
+  rm -f "$outfile_rand" "$outfile_default"
 
-DCMD="sort ${gen_outfile_par} | diff - ${ref_outfile}"
-echo $DCMD
-eval "$DCMD"
+  echo "[running] gen_spinon_basis_parallel --order_spins random"
+  "${exec_dir}/gen_spinon_basis_parallel" "$infile" 4 0 "$ext_rand" --order_spins random > "${tmp_dir}/output_rand.txt"
 
-if [[ $? -eq 0 ]]; then
-	echo -e "\033[32;1;4mparallel test passed!\033[0m"
-	rm $gen_outfile_par
-else
-	echo -e "\033[31;1;4mparallel test failed!\033[0m"
-fi
+  echo "[running] gen_spinon_basis_parallel --order_spins greedy"
+  "${exec_dir}/gen_spinon_basis_parallel" "$infile" 4 0 "$ext_default" --order_spins greedy > "${tmp_dir}/output_rand.txt"
 
-DCMD="h5diff ${gen_outfile_st%.csv}.h5 ${gen_outfile_par%.csv}.h5"
-echo $DCMD
-eval "$DCMD"
-if [[ $? -eq 0 ]]; then
-	echo -e "\033[32;1;4mHDF5 export test passed!\033[0m"
-	rm "${gen_outfile_par%.csv}.h5"
+  if h5diff "$outfile_rand" "$outfile_default" > /dev/null; then
+    echo -e "\033[32;1mspin order test passed\033[0m"
+  else
+    echo -e "\033[31;1mspin order test failed\033[0m"
+    return 1
+  fi
+}
 
-	rm "${gen_outfile_st%.csv}.h5"
-else
-	echo -e "\033[31;1;4mHDF5 export test failed!\033[0m"
-fi
+# entry point
+MODE="${1:-all}"
+
+case "$MODE" in
+  single)
+    test_single
+    ;;
+  parallel)
+    test_parallel
+    ;;
+  spinorder)
+    test_spinorder
+    ;;
+  all)
+    test_single &&
+    test_parallel &&
+    test_spinorder
+    ;;
+  *)
+    echo "Usage: $0 [single|parallel|hdf5|spinorder|all]"
+    exit 1
+    ;;
+esac
 
