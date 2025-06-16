@@ -10,6 +10,8 @@
 
 #include <hdf5.h>
 #include <cinttypes>
+#include <mutex>
+#include <condition_variable>
 
 
 // LOGIC
@@ -197,8 +199,37 @@ _build_state_dfs(cust_stack& node_stack,
 	}
 }
 
-void pyro_vtree_parallel::
-build_state_tree(){
+// the complicated parallel code
+std::mutex rebalance_mutex;
+std::condition_variable rebalance_cv;
+std::atomic<int> threads_waiting = 0;
+std::atomic<bool> should_rebalance = false;
+const int CHECKIN_INTERVAL = 2000; // Number of nodes before checking in
+
+template <typename StackT>
+void rebalance_stacks(std::vector<StackT>& job_stacks) {
+    std::vector<vtree_node_t> combined;
+
+    // Collect all remaining work
+    for (auto& stack : job_stacks) {
+        while (!stack.empty()) {
+            combined.push_back(stack.top());
+            stack.pop();
+        }
+    }
+
+    // Redistribute
+    size_t chunk = (combined.size() + job_stacks.size() - 1) / job_stacks.size();
+    auto it = combined.begin();
+    for (auto& stack : job_stacks) {
+        for (size_t i = 0; i < chunk && it != combined.end(); ++i, ++it) {
+            stack.push(*it);
+        }
+    }
+}
+
+
+void pyro_vtree_parallel::build_state_tree(){
 	// strategy: fork nodes until we exceed the thread pool	
 	// BFS to keep the layer of all threads roughly the same
 	std::queue<vtree_node_t> starting_nodes;
@@ -213,18 +244,59 @@ build_state_tree(){
 	job_stacks.resize(n_threads);
 	counters.resize(n_threads);
 
+	std::cout<<"Starting states:\n";
     unsigned thread_id=0;
     while(!starting_nodes.empty()){
+		std::cout<<"State "<<starting_nodes.front().state_thus_far.uint64[0] <<" Depth "<<starting_nodes.front().
+			curr_spin<<std::endl;
 		job_stacks[thread_id].push(starting_nodes.front());
 		starting_nodes.pop();
         thread_id = (thread_id+1) % n_threads;
     }
 
-	for (thread_id=0; thread_id<n_threads; thread_id++){
-        printf("Thread %u; %zu initialisers\n", thread_id, job_stacks[thread_id].size());
-		threads.push_back(std::thread([this, thread_id]() {
-					_build_state_dfs(job_stacks[thread_id], thread_id); }));
-	}
+//	for (thread_id=0; thread_id<n_threads; thread_id++){
+//        printf("Thread %u; %zu initialisers\n", thread_id, job_stacks[thread_id].size());
+//		threads.push_back(std::thread([this, thread_id]() {
+//					_build_state_dfs(job_stacks[thread_id], thread_id); 
+//
+//                    }));
+//	}
+
+    for (unsigned thread_id = 0; thread_id < n_threads; ++thread_id) {
+        threads.emplace_back([&, thread_id]() {
+            auto& local_stack = job_stacks[thread_id];
+            int counter = 0;
+
+            while (!local_stack.empty()) {
+                // build_state_dfs
+                if (local_stack.top().curr_spin == lat.spins.size()){
+                    state_set[thread_id].push_back(local_stack.top().state_thus_far);
+                    local_stack.pop();
+                } else {
+                    fork_state(local_stack);
+                }
+                ++counter;
+
+                if (counter % CHECKIN_INTERVAL == 0) {
+                    int waiting = ++threads_waiting;
+
+                    if (waiting == static_cast<int>(n_threads)) {
+                        std::unique_lock<std::mutex> lock(rebalance_mutex);
+                        should_rebalance = true;
+
+                        rebalance_stacks(job_stacks);
+
+                        threads_waiting = 0;
+                        should_rebalance = false;
+                        rebalance_cv.notify_all();
+                    } else {
+                        std::unique_lock<std::mutex> lock(rebalance_mutex);
+                        rebalance_cv.wait(lock, []() { return !should_rebalance; });
+                    }
+                }
+            }
+        });
+    }
 
 	// Wait for all threads to finish
 	for (auto& t : threads){

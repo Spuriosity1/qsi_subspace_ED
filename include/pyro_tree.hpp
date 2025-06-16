@@ -147,7 +147,7 @@ protected:
 	// auxiliary, for debug only
 	std::vector<unsigned> counters = {0};
 
-    static constexpr unsigned INITIAL_DEPTH_FACTOR = 4;
+    static constexpr unsigned INITIAL_DEPTH_FACTOR = 1;
 };
 
 

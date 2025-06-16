@@ -76,7 +76,7 @@ if spectra_dep.found()
 
 
 diag_DOQSI_ham = executable('diag_DOQSI_ham',
-  'src/diag_DOQSI_ham.cpp',
+  files(['src/diag_DOQSI_ham.cpp', 'src/expectation_eval.cpp']),
   dependencies: [g_deps, eigen_dep, spectra_dep],
   include_directories: inc)
 

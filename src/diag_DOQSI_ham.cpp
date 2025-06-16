@@ -201,8 +201,8 @@ int main(int argc, char* argv[]) {
 
     auto [ringL, ringR, sl] = get_ring_ops(jdata);
 
-    auto diag_vals = compute_expectation_values(basis, v, ringL);
-    auto cross_vals = compute_cross_terms(basis, v, ringL, 0, 1);
+    Eigen::MatrixXd diag_vals = compute_expectation_values(basis, v, ringL);
+    Eigen::MatrixXd cross_vals = compute_cross_terms(basis, v, ringL, 0, 1);
 
     save_expectation_data_to_hdf5(s.str() + ".out.h5", 
             eigvals, diag_vals, cross_vals, sl);

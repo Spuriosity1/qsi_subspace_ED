@@ -154,4 +154,5 @@ inline diagonalise_real(const LazyOpSum<double>& H, const argparse::ArgumentPars
     compute_spectrum_iterative<LazyOpSumProd<double>>(H, eigvals, eigvecs,
                                                       prog);
   }
+  return std::make_pair(eigvals, eigvecs);
 }

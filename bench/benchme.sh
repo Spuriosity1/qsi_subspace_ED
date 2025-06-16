@@ -9,3 +9,5 @@ for j in `seq 2 10`; do
 	runtime=$(awk -v s="$start" -v e="$end" 'BEGIN { printf "%.6f\n", e - s }')
     echo "$runtime"
 done
+
+rm bench/test_data/*.h5
