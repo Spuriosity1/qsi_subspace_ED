@@ -127,7 +127,7 @@ void compute_eigenspectrum_dense(const MatrixXd& ham, Eigen::VectorXd& e, Eigen:
 }
 
 
-void build_hamiltonian(SymbolicOpSum<double>& H_sym){
+void build_hamiltonian(SymbolicOpSum<double>& H_sym, const nlohmann::json& jdata){
 
 	try {
 		auto version=jdata.at("__version__");
@@ -160,10 +160,10 @@ void build_hamiltonian(SymbolicOpSum<double>& H_sym){
 
 
 	Matrix<double, 4, 3> local_z;
-	local_z <<  1,  1,  1,
-				1, -1, -1,
-			   -1,  1, -1,
-			   -1, -1,  1;
+	local_z <<  1.,  1,  1,
+				1., -1, -1,
+			   -1.,  1, -1,
+			   -1., -1,  1;
 	local_z /= std::sqrt(3.0);
 
 	Vector3d B;
@@ -183,6 +183,8 @@ void build_hamiltonian(SymbolicOpSum<double>& H_sym){
     }
 
 }
+
+
 
 
 

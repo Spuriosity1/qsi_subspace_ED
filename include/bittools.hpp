@@ -11,10 +11,13 @@ union Uint128 {
     __uint128_t uint128;
     uint64_t uint64[2];
     constexpr Uint128(){uint128 = 0;}
+
     template<typename T=__uint128_t>
+    requires std::convertible_to<T, __uint128_t>
 	constexpr Uint128(T x){
     uint128 = x;
 	}
+
     constexpr Uint128(uint64_t x1, uint64_t x0){
         uint64[0] = x0;
         uint64[1] = x1;

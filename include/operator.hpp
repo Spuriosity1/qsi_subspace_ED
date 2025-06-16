@@ -146,6 +146,7 @@ inline int highest_set_bit(ZBasis::state_t x) {
 // const * Z Z Z Z X X X X + + + - - - -
 // S- and S+ are impleneted as "abort masks" followed by an X.
 struct SymbolicPMROperator {
+
 	SymbolicPMROperator(const std::vector<char>& opstring, 
 			const std::vector<int>& spin_ids)  {
 			if ( opstring.size() != spin_ids.size() ){
@@ -190,16 +191,6 @@ struct SymbolicPMROperator {
     // returns sign of only possibly-nonzero entry, modifies J to its index
     int applyIndex(const ZBasis& basis, ZBasis::idx_t& J) const {
 		ZBasis::state_t state = basis[J];
-/*
-        const auto s = state.uint128;
-        const auto d = down_mask.uint128;
-        const auto u = up_mask.uint128;
-
-        if ( (s & d) != 0 ) return 0;
-        if ( (s & u) != u ) return 0;
-        state ^= X_mask;
-        int sign = 1 - 2 * (popcnt_u128(state & Z_mask) % 2);
- */
 		int sign = applyState(state);
         J= basis.idx_of_state(state);
         return sign;
@@ -210,21 +201,6 @@ struct SymbolicPMROperator {
 	template <typename Orig, typename Dest>
 	void apply(const ZBasis& basis, const Orig& in, Dest& out) const {	
 		for (ZBasis::idx_t i = 0; i < basis.dim(); ++i) {
-            /*
-			comp_basis_state_t state = basis[i];
-
-			const auto s = state.uint128;
-			const auto d = down_mask.uint128;
-			const auto u = up_mask.uint128;
-
-			if ( (s & d) != 0 ) continue;
-			if ( (s & u) != u ) continue;
-			state ^= X_mask;
-			int sign = 1 - 2 * (popcnt_u128(state & Z_mask) % 2);
-
-			out [ basis.idx_of_state(state) ] = sign * in[i];
-            */
-
 			ZBasis::idx_t J = i;
             auto c = applyIndex(basis, J) * in[i];
             out[J] += c;

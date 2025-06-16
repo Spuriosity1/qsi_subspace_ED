@@ -69,8 +69,14 @@ gen_projected_basis = executable('gen_projected_basis', files('src/gen_projected
 
 if spectra_dep.found()
 
-build_hamiltonian = executable('build_hamiltonian',
-  build_hamiltonian_sources,
+#build_hamiltonian = executable('build_hamiltonian',
+#  build_hamiltonian_sources,
+#  dependencies: [g_deps, eigen_dep, spectra_dep],
+#  include_directories: inc)
+
+
+diag_DOQSI_ham = executable('diag_DOQSI_ham',
+  'src/diag_DOQSI_ham.cpp',
   dependencies: [g_deps, eigen_dep, spectra_dep],
   include_directories: inc)
 
