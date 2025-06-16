@@ -3,7 +3,7 @@
 #include <Eigen/Dense>
 #include <vector>
 #include <string>
-#include <HighFive/HighFive.hpp> // or <H5Cpp.h> if using HDF5 C++ API
+#include <hdf5.h>
 
 #include "operator.hpp"
 

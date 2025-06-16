@@ -1,8 +1,6 @@
 #include "expectation_eval.hpp"
 
 
-
-
 Eigen::MatrixXd compute_expectation_values(
     const ZBasis& basis,
     const Eigen::MatrixXd& eigenvectors,
@@ -59,15 +57,48 @@ void save_expectation_data_to_hdf5(
     const Eigen::MatrixXd& cross_vals,
     const std::vector<int>& group_ids
 ) {
-    using namespace HighFive;
+    hid_t file_id = H5Fcreate(filename.c_str(), H5F_ACC_TRUNC, H5P_DEFAULT, H5P_DEFAULT);
+    if (file_id < 0) throw std::runtime_error("Failed to create HDF5 file");
 
-    File file(filename, File::Overwrite);
+    // Helper lambda to write a dataset
+    auto write_dataset = [](hid_t file_id, const char* name, const double* data, hsize_t* dims, int rank) {
+        hid_t dataspace_id = H5Screate_simple(rank, dims, NULL);
+        hid_t dataset_id = H5Dcreate2(file_id, name, H5T_NATIVE_DOUBLE, dataspace_id,
+                                      H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT);
+        H5Dwrite(dataset_id, H5T_NATIVE_DOUBLE, H5S_ALL, H5S_ALL, H5P_DEFAULT, data);
+        H5Dclose(dataset_id);
+        H5Sclose(dataspace_id);
+    };
 
-    file.createDataSet("eigenvalues", DataSpace::From(eigvals)).write(eigvals);
-    file.createDataSet("expectation_values", DataSpace::From(diag_vals)).write(diag_vals);
-    file.createDataSet("cross_terms", DataSpace::From(cross_vals)).write(cross_vals);
+    // Write eigenvalues: shape (N,)
+    {
+        hsize_t dims[1] = {static_cast<hsize_t>(eigvals.size())};
+        write_dataset(file_id, "eigenvalues", eigvals.data(), dims, 1);
+    }
 
-    // Store operator group IDs
-    file.createDataSet("operator_group_ids", DataSpace::From(group_ids)).write(group_ids);
+    // Write diag_vals: shape (n_ops, N)
+    {
+        hsize_t dims[2] = {static_cast<hsize_t>(diag_vals.rows()), static_cast<hsize_t>(diag_vals.cols())};
+        write_dataset(file_id, "expectation_values", diag_vals.data(), dims, 2);
+    }
+
+    // Write cross_vals: shape (n_ops, 2)
+    {
+        hsize_t dims[2] = {static_cast<hsize_t>(cross_vals.rows()), static_cast<hsize_t>(cross_vals.cols())};
+        write_dataset(file_id, "cross_terms", cross_vals.data(), dims, 2);
+    }
+
+    // Write group_ids (int): shape (n_ops,)
+    {
+        hsize_t dims[1] = {static_cast<hsize_t>(group_ids.size())};
+        hid_t dataspace_id = H5Screate_simple(1, dims, NULL);
+        hid_t dataset_id = H5Dcreate2(file_id, "operator_group_ids", H5T_NATIVE_INT, dataspace_id,
+                                      H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT);
+        H5Dwrite(dataset_id, H5T_NATIVE_INT, H5S_ALL, H5S_ALL, H5P_DEFAULT, group_ids.data());
+        H5Dclose(dataset_id);
+        H5Sclose(dataspace_id);
+    }
+
+    H5Fclose(file_id);
 }
 
