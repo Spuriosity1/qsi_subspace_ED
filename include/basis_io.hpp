@@ -3,6 +3,7 @@
 #include <string>
 #include <vector>
 #include <stdexcept>
+#include <cinttypes>
 
 #ifndef DONT_USE_HDF5
 #include "basis_io_h5.hpp" 
@@ -13,7 +14,7 @@ namespace basis_io {
 
 
 inline auto write_line(FILE* of, const Uint128& b){
-	return std::fprintf(of, "0x%016llx%016llx\n", b.uint64[1],b.uint64[0]);
+    return std::fprintf(of, "0x%016" PRIx64 "%016" PRIx64 "\n", b.uint64[1], b.uint64[0]);
 }
 
 inline bool read_line(FILE *infile, Uint128& b) {
@@ -22,7 +23,7 @@ inline bool read_line(FILE *infile, Uint128& b) {
 		return false;  // Return false on failure (e.g., EOF)
 	}
 	
-	return std::sscanf(buffer, "0x%016llx%016llx", &b.uint64[1], &b.uint64[0]) == 2;
+	return std::sscanf(buffer, "0x%016" PRIx64 "%016" PRIx64 , &b.uint64[1], &b.uint64[0]) == 2;
 }
 
 inline void write_basis_csv(const std::vector<Uint128>& state_list, 

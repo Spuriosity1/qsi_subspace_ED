@@ -32,7 +32,7 @@ class state_not_found_error : public std::exception
 	char state_as_c_str[128];
 	public:
 	state_not_found_error(const comp_basis_state_t& state_not_found){
-		snprintf(state_as_c_str, sizeof(state_as_c_str), "State not found: 0x%8llx%8llx\n", 
+		snprintf(state_as_c_str, sizeof(state_as_c_str), "State not found: 0x%" PRIx64 "%" PRIx64 "\n", 
 				state_not_found.uint64[1], state_not_found.uint64[0]);
 	}
 	const char * what() const noexcept override {

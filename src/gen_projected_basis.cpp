@@ -26,6 +26,7 @@ struct constr_explorer : public ZBasis {
 		for (idx_t i=0; i<states.size(); i++){
 			state_to_index[states[i]] = i;
 		}
+
 	}
 
 	void write_basis_csv(const std::string &outfilename) {
@@ -106,7 +107,7 @@ int main (int argc, char *argv[]) {
 	std::string infilename(argv[1]);
 
 	Uint128 seed_state;
-	size_t nchar = std::sscanf(argv[2], "0x%016llx%016llx", &seed_state.uint64[1], &seed_state.uint64[0]);
+	size_t nchar = std::sscanf(argv[2], "0x%" PRIx64 "0x%" PRIx64, &seed_state.uint64[1], &seed_state.uint64[0]);
 	if (nchar != 2){
 		cerr<<"Failed to parse argv[2] as a seed state: got "<<argv[2]<<endl;
 	}
