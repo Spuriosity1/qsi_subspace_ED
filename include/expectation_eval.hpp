@@ -11,14 +11,14 @@
 Eigen::MatrixXd compute_expectation_values(
     const ZBasis& basis,
     const Eigen::MatrixXd& eigenvectors,
-    std::vector<SymbolicPMROperator>& grouped_ops
+    const std::vector<SymbolicPMROperator>& grouped_ops
 );
 
 // Computes cross terms ⟨ψ_i| O |ψ_j⟩ for given i and j
 Eigen::MatrixXd compute_cross_terms(
     const ZBasis& basis,
     const Eigen::MatrixXd& eigenvectors,
-    std::vector<SymbolicPMROperator>& grouped_ops,
+    const std::vector<SymbolicPMROperator>& grouped_ops,
     int i, int j
 );
 
