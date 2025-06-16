@@ -204,28 +204,26 @@ std::mutex rebalance_mutex;
 std::condition_variable rebalance_cv;
 std::atomic<int> threads_waiting = 0;
 std::atomic<bool> should_rebalance = false;
-const int CHECKIN_INTERVAL = 2000; // Number of nodes before checking in
+const int CHECKIN_INTERVAL = 20; // Number of nodes before checking in
 
 template <typename StackT>
-void rebalance_stacks(std::vector<StackT>& job_stacks) {
-    std::vector<vtree_node_t> combined;
+void rebalance_stacks(std::vector<StackT>& stacks) {
 
-    // Collect all remaining work
-    for (auto& stack : job_stacks) {
+    std::vector<vtree_node_t> all_jobs;
+
+    for (auto& stack : stacks) {
         while (!stack.empty()) {
-            combined.push_back(stack.top());
+            all_jobs.push_back(stack.top());
             stack.pop();
         }
     }
 
-    // Redistribute
-    size_t chunk = (combined.size() + job_stacks.size() - 1) / job_stacks.size();
-    auto it = combined.begin();
-    for (auto& stack : job_stacks) {
-        for (size_t i = 0; i < chunk && it != combined.end(); ++i, ++it) {
-            stack.push(*it);
-        }
+    size_t i = 0;
+    for (auto& job : all_jobs) {
+        stacks[i++ %
+            stacks.size()].push(job);
     }
+
 }
 
 
@@ -267,32 +265,46 @@ void pyro_vtree_parallel::build_state_tree(){
             auto& local_stack = job_stacks[thread_id];
             int counter = 0;
 
-            while (!local_stack.empty()) {
-                // build_state_dfs
-                if (local_stack.top().curr_spin == lat.spins.size()){
-                    state_set[thread_id].push_back(local_stack.top().state_thus_far);
-                    local_stack.pop();
-                } else {
-                    fork_state(local_stack);
-                }
-                ++counter;
+            while (true) {
 
-                if (counter % CHECKIN_INTERVAL == 0) {
-                    int waiting = ++threads_waiting;
-
-                    if (waiting == static_cast<int>(n_threads)) {
-                        std::unique_lock<std::mutex> lock(rebalance_mutex);
-                        should_rebalance = true;
-
-                        rebalance_stacks(job_stacks);
-
-                        threads_waiting = 0;
-                        should_rebalance = false;
-                        rebalance_cv.notify_all();
+                // exit condition checking
+                if (!local_stack.empty()) {
+                    // build_state_dfs
+                    if (local_stack.top().curr_spin == lat.spins.size()){
+                        state_set[thread_id].push_back(local_stack.top().state_thus_far);
+                        local_stack.pop();
                     } else {
-                        std::unique_lock<std::mutex> lock(rebalance_mutex);
-                        rebalance_cv.wait(lock, []() { return !should_rebalance; });
+                        fork_state(local_stack);
                     }
+                    counter++;
+                    if (counter%CHECKIN_INTERVAL != 0) continue;
+                } 
+                std::cout<<"thread "<<thread_id<<" stacksize="<<local_stack.size()<<"\n";
+
+                // Checking and rebalance section
+                std::unique_lock<std::mutex> lock(rebalance_mutex);
+                threads_waiting++;
+
+                if (threads_waiting==n_threads){
+                    // all are idle -- should be done
+                    should_rebalance = true;
+                    rebalance_stacks(job_stacks);
+                    threads_waiting = 0;
+                    should_rebalance = false;
+                    rebalance_cv.notify_all();
+                } else {
+                    rebalance_cv.wait(lock, [] { return !should_rebalance; });
+                }
+
+                // After rebalancing, check if there's still work globally 
+                if (local_stack.empty()) { 
+                    bool all_empty = true; 
+                    for (const auto& s : job_stacks) {
+                        if (!s.empty()) {
+                            all_empty = false; break; 
+                            }
+                    } 
+                    if (all_empty) break; // No work remains; safe to exit 
                 }
             }
         });

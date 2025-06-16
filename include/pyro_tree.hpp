@@ -28,7 +28,11 @@ template<typename T>
 struct vstack {
     std::vector<T> m_contents;
     T top() const { return m_contents.back(); }
-    T pop() { T top = m_contents.back(); m_contents.pop_back(); return top; }
+    T pop() { 
+        T top = m_contents.back();
+        m_contents.pop_back();
+        return top;
+    }
     bool empty() const { return m_contents.empty(); }
     size_t size() const { return m_contents.size(); }
     void push(const T& x) { m_contents.push_back(x); }
@@ -66,6 +70,7 @@ struct lat_container {
 	void fork_state_impl(Container& to_examine, vtree_node_t curr); 
 
     using cust_stack = vstack<vtree_node_t>;
+    //using cust_stack = std::stack<vtree_node_t>;
 	void fork_state(cust_stack& to_examine);
 	void fork_state(std::queue<vtree_node_t>& to_examine);
 
