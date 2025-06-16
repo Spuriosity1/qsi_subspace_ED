@@ -127,6 +127,65 @@ void compute_eigenspectrum_dense(const MatrixXd& ham, Eigen::VectorXd& e, Eigen:
 }
 
 
+void build_hamiltonian(SymbolicOpSum<double>& H_sym){
+
+	try {
+		auto version=jdata.at("__version__");
+		if ( stof(version.get<std::string>()) < 1.0 ){
+			throw std::runtime_error("JSON file is old, API version 1.0 is required");
+		}
+	} catch (const json::out_of_range& e){
+		throw std::runtime_error("__version__ field missing, suspect an old file");
+	} 	
+
+	for (const auto& ring : jdata.at("rings")) {
+		std::vector<int> spins = ring.at("member_spin_idx");
+
+		std::vector<char> ops;
+		std::vector<char> conj_ops;
+		for (auto s : ring.at("signs")){
+			ops.push_back( s == 1 ? '+' : '-');
+			conj_ops.push_back( s == 1 ? '-' : '+');
+		}
+		
+		int sl = ring.at("sl").get<int>();
+		auto O   = SymbolicPMROperator(     ops, spins);
+		auto O_h = SymbolicPMROperator(conj_ops, spins);
+		H_sym.add_term(g[sl], O);
+		H_sym.add_term(g[sl], O_h);
+	}
+
+    auto atoms = jdata.at("atoms");
+
+
+
+	Matrix<double, 4, 3> local_z;
+	local_z <<  1,  1,  1,
+				1, -1, -1,
+			   -1,  1, -1,
+			   -1, -1,  1;
+	local_z /= std::sqrt(3.0);
+
+	Vector3d B;
+
+    for (const auto& bond : jdata.at("bonds")){
+        auto i = bond.at("from_idx").get<int>();
+        auto j = bond.at("to_idx").get<int>();
+        int sl = stoi(atoms[i].at("sl".get<std::string>())
+
+		// Convert row of local_z to Eigen::Vector3d
+		double zi = B.dot(local_z.row(i));
+		double zj = B.dot(local_z.row(j));
+
+		zz_coeff = -4.0 * Jpm * zi * zj;
+
+		H_sym.add_term(zz_coeff, SymbolicPMROperator("zz", {i, j}));
+    }
+
+}
+
+
+
 int main(int argc, char* argv[]) {
 	argparse::ArgumentParser prog("build_ham");
 	prog.add_argument("lattice_file");
@@ -178,8 +237,6 @@ int main(int argc, char* argv[]) {
 			g[i] = g[0];
 		}
 	}
-			
-
 
 	// Step 1: Load basis from CSV
     std::cout<<"Loading basis..."<<std::endl;
@@ -200,31 +257,7 @@ int main(int argc, char* argv[]) {
 	using T=double;
 	SymbolicOpSum<T> H_sym;
 
-	try {
-		auto version=jdata.at("__version__");
-		if ( atof(version.get<std::string>().c_str()) < 1.0 ){
-			throw std::runtime_error("JSON file is old, API version 1.0 is required");
-		}
-	} catch (const json::out_of_range& e){
-		throw std::runtime_error("__version__ field missing, suspect an old file");
-	} 	
-
-	for (const auto& ring : jdata.at("rings")) {
-		std::vector<int> spins = ring.at("member_spin_idx");
-
-		std::vector<char> ops;
-		std::vector<char> conj_ops;
-		for (auto s : ring.at("signs")){
-			ops.push_back( s == 1 ? '+' : '-');
-			conj_ops.push_back( s == 1 ? '-' : '+');
-		}
-		
-		int sl = ring.at("sl").get<int>();
-		auto O   = SymbolicPMROperator(     ops, spins);
-		auto O_h = SymbolicPMROperator(conj_ops, spins);
-		H_sym.add_term(g[sl], O);
-		H_sym.add_term(g[sl], O_h);
-	}
+	build_hamiltonian(H_sym);
 
 	auto H = LazyOpSum(basis, H_sym);	
 
