@@ -14,6 +14,13 @@
 #include <condition_variable>
 
 
+std::mutex rebalance_mutex;
+std::condition_variable rebalance_cv;
+std::atomic<int> threads_waiting = 0;
+std::atomic<bool> should_rebalance = false;
+const int CHECKIN_INTERVAL = 2000; // Number of nodes before checking in
+
+
 // LOGIC
 char lat_container::possible_spin_states(const vtree_node_t& curr) const {
 	// state is only initialised up to (but not including) bit 1<<idx
@@ -105,6 +112,7 @@ void lat_container::fork_state_impl(Container& to_examine, vtree_node_t curr) {
 }
 
 void lat_container::fork_state(cust_stack& to_examine) {
+    assert(!should_rebalance);
     auto curr = to_examine.top();
 	to_examine.pop();
     fork_state_impl(to_examine, curr);
@@ -200,11 +208,6 @@ _build_state_dfs(cust_stack& node_stack,
 }
 
 // the complicated parallel code
-std::mutex rebalance_mutex;
-std::condition_variable rebalance_cv;
-std::atomic<int> threads_waiting = 0;
-std::atomic<bool> should_rebalance = false;
-const int CHECKIN_INTERVAL = 20; // Number of nodes before checking in
 
 template <typename StackT>
 void rebalance_stacks(std::vector<StackT>& stacks) {
@@ -240,7 +243,6 @@ void pyro_vtree_parallel::build_state_tree(){
 	// now farm out to different threads
 	state_set.resize(n_threads);
 	job_stacks.resize(n_threads);
-	counters.resize(n_threads);
 
 	std::cout<<"Starting states:\n";
     unsigned thread_id=0;
@@ -260,15 +262,14 @@ void pyro_vtree_parallel::build_state_tree(){
 //                    }));
 //	}
 
+    threads_waiting=0;
     for (unsigned thread_id = 0; thread_id < n_threads; ++thread_id) {
-        threads.emplace_back([&, thread_id]() {
+        threads.emplace_back([this, thread_id]() {
             auto& local_stack = job_stacks[thread_id];
             int counter = 0;
 
             while (true) {
-
-                // exit condition checking
-                if (!local_stack.empty()) {
+                while (!local_stack.empty() && counter%CHECKIN_INTERVAL == 0) {
                     // build_state_dfs
                     if (local_stack.top().curr_spin == lat.spins.size()){
                         state_set[thread_id].push_back(local_stack.top().state_thus_far);
@@ -276,36 +277,43 @@ void pyro_vtree_parallel::build_state_tree(){
                     } else {
                         fork_state(local_stack);
                     }
-                    counter++;
-                    if (counter%CHECKIN_INTERVAL != 0) continue;
                 } 
-                std::cout<<"thread "<<thread_id<<" stacksize="<<local_stack.size()<<"\n";
+                counter++;
 
-                // Checking and rebalance section
-                std::unique_lock<std::mutex> lock(rebalance_mutex);
-                threads_waiting++;
+//                std::cout<<"thread "<<thread_id<<" stacksize="<<local_stack.size()<<" threads_waiting="<<threads_waiting<<"/"<<n_threads<<"\n";
 
-                if (threads_waiting==n_threads){
-                    // all are idle -- should be done
-                    should_rebalance = true;
-                    rebalance_stacks(job_stacks);
-                    threads_waiting = 0;
-                    should_rebalance = false;
-                    rebalance_cv.notify_all();
-                } else {
-                    rebalance_cv.wait(lock, [] { return !should_rebalance; });
+                {
+                    // Checking and rebalance section
+                    std::unique_lock<std::mutex> lock(rebalance_mutex);
+                    threads_waiting++;
+
+                    if (threads_waiting==n_threads){
+                        // Last thread within the barrier
+                        should_rebalance = true;
+
+                        rebalance_stacks(job_stacks);
+
+                        should_rebalance = false;
+                        threads_waiting = 0;
+                        rebalance_cv.notify_all();
+                    } else {
+                        rebalance_cv.wait(lock, [] { 
+                                return threads_waiting==0;
+                                });
+                    }
                 }
 
-                // After rebalancing, check if there's still work globally 
-                if (local_stack.empty()) { 
-                    bool all_empty = true; 
-                    for (const auto& s : job_stacks) {
-                        if (!s.empty()) {
-                            all_empty = false; break; 
-                            }
-                    } 
-                    if (all_empty) break; // No work remains; safe to exit 
+                // Check if there's work left
+                bool any_work = false;
+                for (const auto& s : job_stacks) {
+                    if (!s.empty()) {
+                        any_work = true;
+                        break;
+                    }
                 }
+
+                if (!any_work) break; // All done
+
             }
         });
     }

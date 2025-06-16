@@ -69,8 +69,8 @@ struct lat_container {
 	template <typename Container>
 	void fork_state_impl(Container& to_examine, vtree_node_t curr); 
 
-    using cust_stack = vstack<vtree_node_t>;
-    //using cust_stack = std::stack<vtree_node_t>;
+    // using cust_stack = vstack<vtree_node_t>;
+    using cust_stack = std::stack<vtree_node_t>;
 	void fork_state(cust_stack& to_examine);
 	void fork_state(std::queue<vtree_node_t>& to_examine);
 
@@ -148,9 +148,6 @@ protected:
 	std::vector<std::vector<Uint128>> state_set;
 	std::vector<std::thread> threads;
 	std::vector<cust_stack> job_stacks;
-
-	// auxiliary, for debug only
-	std::vector<unsigned> counters = {0};
 
     static constexpr unsigned INITIAL_DEPTH_FACTOR = 1;
 };
