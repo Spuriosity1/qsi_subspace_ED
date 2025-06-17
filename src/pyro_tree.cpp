@@ -11,6 +11,7 @@
 #include <hdf5.h>
 #include <cinttypes>
 #include <barrier>
+#include <future>
 
 
 // LOGIC
@@ -147,6 +148,7 @@ void pyro_vtree::sort(){
 	this->is_sorted = true;
 }
 
+
 // Simple k-way merge using a min-heap (sequential, but efficient)
 template <typename T>
 std::vector<T> k_way_merge(const std::vector<std::vector<T>>& chunks) {
@@ -173,6 +175,34 @@ std::vector<T> k_way_merge(const std::vector<std::vector<T>>& chunks) {
 }
 
 
+
+
+// Simple k-way merge using a min-heap (sequential, but efficient)
+template <typename T>
+std::vector<T> parallel_k_way_merge(const std::vector<std::vector<T>>& chunks) {
+    using pair = std::pair<T, std::pair<size_t, size_t>>;  // value, {chunk_idx, idx_in_chunk}
+    std::priority_queue<pair, std::vector<pair>, std::greater<>> min_heap;
+
+    // Init heap with first element of each chunk
+    for (size_t i = 0; i < chunks.size(); ++i) {
+        if (!chunks[i].empty()) {
+            min_heap.emplace(chunks[i][0], std::make_pair(i, 0));
+        }
+    }
+
+    std::vector<T> result;
+    while (!min_heap.empty()) {
+        auto [val, idx] = min_heap.top(); min_heap.pop();
+        auto [chunk_idx, elem_idx] = idx;
+        result.push_back(val);
+        if (elem_idx + 1 < chunks[chunk_idx].size()) {
+            min_heap.emplace(chunks[chunk_idx][elem_idx + 1], std::make_pair(chunk_idx, elem_idx + 1));
+        }
+    }
+    return result;
+}
+
+/*
 void pyro_vtree_parallel::sort(){	
 	if (this->is_sorted) return;
     // sort it thread-wise
@@ -185,7 +215,8 @@ void pyro_vtree_parallel::sort(){
 		t.join();
 	}
     
-    auto res = k_way_merge(state_set);
+    // auto res = k_way_merge(state_set);
+    auto res = parallel_k_way_merge(state_set);
 
     state_set[0] = res;  
 	for (size_t i=1; i<state_set.size(); i++){
@@ -196,6 +227,88 @@ void pyro_vtree_parallel::sort(){
     assert(std::is_sorted(state_set[0].begin(), state_set[0].end()));
 	this->is_sorted = true;
 }
+*/
+
+
+void pyro_vtree_parallel::sort() {
+    if (this->is_sorted) return;
+    
+    // Quick check: if we only have one chunk, just sort it
+    if (state_set.size() == 1) {
+        std::sort(state_set[0].begin(), state_set[0].end());
+        this->is_sorted = true;
+        return;
+    }
+    
+    // Remove empty chunks first to avoid unnecessary work
+    state_set.erase(
+        std::remove_if(state_set.begin(), state_set.end(),
+                      [](const auto& chunk) { return chunk.empty(); }),
+        state_set.end()
+    );
+    
+    if (state_set.empty()) {
+        this->is_sorted = true;
+        return;
+    }
+    
+    // Determine optimal number of threads
+    const size_t num_threads = std::min(state_set.size(), 
+                                       static_cast<size_t>(std::thread::hardware_concurrency()));
+    
+    // Sort chunks in parallel with better thread management
+    if (state_set.size() <= num_threads) {
+        // Each chunk gets its own thread
+        std::vector<std::future<void>> futures;
+        futures.reserve(state_set.size());
+        
+        for (auto& chunk : state_set) {
+            futures.push_back(std::async(std::launch::async, [&chunk]() {
+                if (!chunk.empty()) {
+                    std::sort(chunk.begin(), chunk.end());
+                }
+            }));
+        }
+        
+        // Wait for all sorting to complete
+        for (auto& future : futures) {
+            future.wait();
+        }
+    } else {
+        // More chunks than threads - use thread pool approach
+        std::atomic<size_t> chunk_index{0};
+        std::vector<std::thread> threads;
+        threads.reserve(num_threads);
+        
+        for (size_t i = 0; i < num_threads; ++i) {
+            threads.emplace_back([&]() {
+                size_t idx;
+                while ((idx = chunk_index.fetch_add(1)) < state_set.size()) {
+                    if (!state_set[idx].empty()) {
+                        std::sort(state_set[idx].begin(), state_set[idx].end());
+                    }
+                }
+            });
+        }
+        
+        for (auto& thread : threads) {
+            thread.join();
+        }
+    }
+    
+    // Merge sorted chunks efficiently
+    auto merged_result = parallel_k_way_merge(state_set);
+    
+    // Replace state_set with merged result efficiently
+    state_set.clear();
+    state_set.emplace_back(std::move(merged_result));
+    
+    // Ensure we have the expected structure
+    assert(std::is_sorted(state_set[0].begin(), state_set[0].end()));
+    this->is_sorted = true;
+}
+
+
 
 void pyro_vtree_parallel::
 _build_state_bfs(std::queue<vtree_node_t>& node_stack, 
