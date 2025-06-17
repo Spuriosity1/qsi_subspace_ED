@@ -147,36 +147,21 @@ inline int highest_set_bit(ZBasis::state_t x) {
 // S- and S+ are impleneted as "abort masks" followed by an X.
 struct SymbolicPMROperator {
 
+	SymbolicPMROperator()  {
+    }
+
 	SymbolicPMROperator(const std::vector<char>& opstring, 
 			const std::vector<int>& spin_ids)  {
-			if ( opstring.size() != spin_ids.size() ){
-				throw bad_operator_spec(opstring, spin_ids);
-			}
-			for (size_t i=0; i<opstring.size(); i++){
-				auto J = spin_ids[i];
-				switch (opstring[i]) {
-					case 'x':
-					case 'X':
-						or_bit(X_mask, J);
-						break;
-					case 'z':
-					case 'Z':
-						or_bit(Z_mask, J);
-						break;
-					case '+':
-						or_bit(X_mask, J);
-						or_bit(down_mask, J);
-						break;
-					case '-':
-						or_bit(X_mask, J);
-						or_bit(up_mask, J);
-						break;
-					default:
-						throw bad_operator_spec(opstring, spin_ids);
-				}
-			}
-		}
+        _construct(opstring, spin_ids);
+    }
 
+       SymbolicPMROperator(const std::string& spec) {
+           auto [opstr, sgn] = parseSpec(spec);
+           _construct(opstr, sgn);
+       }
+
+    // Mutates the uint128 state into Z X ([S+][S-] | [S-] [S+]) *state
+    // and returns overall sign
 	inline int applyState(ZBasis::state_t& state) const {
         const auto s = state.uint128;
         const auto d = down_mask.uint128;
@@ -185,15 +170,15 @@ struct SymbolicPMROperator {
         if ( (s & d) != 0 ) return 0;
         if ( (s & u) != u ) return 0;
         state ^= X_mask;
-        return 1 - 2 * (popcnt_u128(state & Z_mask) % 2); 
+        return sign * (1 - 2 * (popcnt_u128(state & Z_mask) % 2) ); 
 	}
 
     // returns sign of only possibly-nonzero entry, modifies J to its index
     int applyIndex(const ZBasis& basis, ZBasis::idx_t& J) const {
 		ZBasis::state_t state = basis[J];
-		int sign = applyState(state);
+		int _sign = applyState(state);
         J= basis.idx_of_state(state);
-        return sign;
+        return _sign;
     }
     
 	
@@ -212,12 +197,145 @@ struct SymbolicPMROperator {
 	}
 
 
+    inline bool operator==(const SymbolicPMROperator& other) const {
+        return X_mask == other.X_mask &&
+            Z_mask == other.Z_mask &&
+            up_mask == other.up_mask &&
+            down_mask == other.down_mask &&
+            sign == other.sign;
+    }
+            
+
+    SymbolicPMROperator operator*=(int a){
+        sign *= a;
+        return *this;
+    }
+
+    SymbolicPMROperator operator*=(const SymbolicPMROperator& b){
+        // t->Z t->X t->P+ t->P- * Z X P+ P-
+        // anticommute with Z
+        sign *= (1 - 2 * (popcnt_u128(X_mask & b.Z_mask) % 2) ); 
+        // t->Z  * Z * t->X t->P+ t->P- * X P+ P-
+        // flip
+        Z_mask ^= b.Z_mask;
+        X_mask ^= b.X_mask;
+        // sort out the mess with the +- 
+        auto require_up = down_mask & b.X_mask;
+        require_up |= up_mask & (~b.X_mask);
+        auto require_down = up_mask & b.X_mask;
+        require_down |= down_mask & (~b.X_mask);
+        up_mask = b.up_mask | require_up;
+        down_mask = b.down_mask | require_down;
+        if ((up_mask & down_mask) != 0)
+            sign =0; // we killed the operator
+        return *this;
+    }
+
+    SymbolicPMROperator operator*(const SymbolicPMROperator& b){
+        auto c = *this;
+        c *= b;
+        return c;
+    }
+
+    int get_sign() const noexcept {
+        return sign;
+    }
+
 protected:
 	ZBasis::state_t X_mask = 0;
 	ZBasis::state_t Z_mask = 0;
 	ZBasis::state_t down_mask = 0; // init_state & down_mask must be zero
 	ZBasis::state_t up_mask = 0; // init_state & up_mask must be == up_mask
+    int sign=1;
+private:
+    static std::pair<std::vector<char>, std::vector<int>> parseSpec(const std::string& spec) {
+        std::vector<char> ops;
+        std::vector<int> ids;
+
+        std::istringstream ss(spec);
+        std::string token;
+        while (ss >> token) {
+            if (token.size() < 2)
+                throw std::invalid_argument("Invalid token in operator string: " + token);
+
+            size_t i = 0;
+            int idx = 0;
+            while (i < token.size() - 1 && std::isdigit(token[i])) {
+                idx = idx * 10 + (token[i] - '0');
+                ++i;
+            }
+
+            char op = token[i];
+            if (op != 'Z' && op !='z' && op != 'X' && op != 'x' && op != '+' && op != '-')
+                throw std::invalid_argument("Invalid op '" + std::string(1, op) + "' in token: " + token);
+
+            ops.push_back(op);
+            ids.push_back(idx);
+        }
+
+        return {ops, ids};
+    }
+
+	void _construct(const std::vector<char>& opstring, 
+			const std::vector<int>& spin_ids)  {
+
+			if ( opstring.size() != spin_ids.size() ){
+				throw bad_operator_spec(opstring, spin_ids);
+			}
+			for (int i=opstring.size()-1; i>=0; i--){
+				auto J = spin_ids[i];
+				switch (opstring[i]) {
+					case 'x':
+					case 'X':
+						xor_bit(X_mask, J);
+                        if (readbit(Z_mask, J)) sign *= -1;
+                    break;
+					case 'z':
+					case 'Z':
+						xor_bit(Z_mask, J);
+						break;
+					case '+':
+                        // ++ situation
+                        if (readbit(down_mask&X_mask, J)){
+                            sign=0; break;
+                        }
+                        if (readbit(Z_mask, J))
+                            sign *= -1;
+
+						xor_bit(X_mask, J);
+                        // if +-, don't reset the mask
+                        if (!readbit(X_mask, J))
+                            or_bit(up_mask, J);
+                        else
+                            or_bit(down_mask, J);
+						break;
+					case '-':
+                        // -- situation
+                        if (readbit(up_mask&X_mask, J)){
+                            sign=0; break; 
+                        }
+                        if (readbit(Z_mask, J))
+                            sign *= -1;
+
+						xor_bit(X_mask, J);
+                        // if -+, don't reset the mask
+                        if (!readbit(X_mask, J))
+                            or_bit(down_mask, J);
+                        else
+                            or_bit(up_mask, J);
+						break;
+					default:
+						throw bad_operator_spec(opstring, spin_ids);
+				}
+			}
+		}
 };
+
+inline SymbolicPMROperator operator*(int m, const SymbolicPMROperator& other){
+    auto r = other;
+    r *= m;
+    return r;
+}
 
 
 template<ScalarLike coeff_t>

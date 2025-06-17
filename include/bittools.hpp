@@ -38,6 +38,13 @@ union Uint128 {
         return *this;
     }
 
+    constexpr Uint128 operator~() const {
+        Uint128 x = *this;
+        x.uint64[0] = ~x.uint64[0];
+        x.uint64[1] = ~x.uint64[1];
+        return x;
+    }
+
     constexpr bool operator<(const Uint128& other) const {
         return uint128 < other.uint128;
     }
@@ -72,6 +79,14 @@ constexpr inline void or_bit(Uint128& x, T i){
     __uint128_t l=1;
 	l <<= i;
     x.uint128 |= l;
+}
+
+
+template<typename T>
+constexpr inline void xor_bit(Uint128& x, T i){	
+    __uint128_t l=1;
+	l <<= i;
+    x.uint128 ^= l;
 }
 
 template<typename T>

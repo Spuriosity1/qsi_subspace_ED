@@ -5,14 +5,24 @@ test('gen_spinon_basis_par', spinon_tests, args: ['parallel'])
 test('gen_spinon_basis_spinorder', spinon_tests, args: ['spinorder'])
 
 
-# Test executable
 test_uint128 = executable('test_uint128',
                          'test_uint128.cpp',
                          include_directories: inc,
                          install : false)
 
 
+test_PMR_operator = executable('test_PMR_operator',
+                         'test_PMR_construct.cpp',
+                         include_directories: inc,
+                         dependencies: [eigen_dep, hdf5_dep],
+                         install : false)
+
 # Register specific test categories
+test('PMRoperator_edge_case', test_PMR_operator,
+  timeout : 10,
+  suite: ['unit', 'constructors']
+  )
+
 test('uint128_constructors', test_uint128,
      args : ['--test-constructors'],
      timeout : 10,
