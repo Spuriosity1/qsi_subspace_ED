@@ -48,6 +48,10 @@ union Uint128 {
     constexpr bool operator<(const Uint128& other) const {
         return uint128 < other.uint128;
     }
+
+    constexpr bool operator>(const Uint128& other) const {
+        return uint128 > other.uint128;
+    }
 };
 
 

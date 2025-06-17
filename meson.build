@@ -33,6 +33,9 @@ if get_option('buildtype') == 'release'
   endif
 
   target_args += ['-DNDEBUG']
+
+elif get_option('buildtype') == 'debug'
+  # add_project_arguments(['-fsanitize=address'], language: 'cpp' )
 endif
 
 hdf5_dep = dependency('hdf5',
@@ -56,8 +59,8 @@ g_deps = [
 
 subdir('src')
 
-if not eigen_dep.found()
-  add_project_arguments('-DDONT_USE_HDF5')
+if not hdf5_dep.found()
+  add_project_arguments('-DDONT_USE_HDF5', language: 'cpp')
 endif
 
 gen_spinon_basis = executable('gen_spinon_basis',spinon_basis_sources, 

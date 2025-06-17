@@ -30,36 +30,28 @@ void build_and_export(T& L, const argparse::ArgumentParser& prog,
 	printf("Sorting...\n");
 	L.sort();
 	
-
-#ifndef DONT_USE_HDF5
-	switch(prog.get<std::string>("--out_format")[0]){
-		case 'c': // csv
-			L.write_basis_csv(outfilename);
-			break;
-		case 'h': // h5 
-			L.write_basis_hdf5(outfilename);
-			break;
-		case 'n': // do not save (why whould you want this?)
-			break;
-		default: // also catches 'both' case
-			L.write_basis_csv(outfilename);
-			L.write_basis_hdf5(outfilename);
-	}
-#else
-	switch(prog.get<std::string>("--out_format")[0]){
-		case 'n': // do not save (why whould you want this?)
-			break;
-
-		case 'c': // csv
-			L.write_basis_csv(outfilename);
-			break;
-		case 'h': // h5 
-		case 'b': // both
-			std::cerr<<"Sorry, this was compiled without HDF5 -- writing CSV\n"
-		default: // also catches 'both' case
-			L.write_basis_csv(outfilename);
-	}
+    char out_fmt = prog.get<std::string>("--out_format")[0];
+#ifdef DONT_USE_HDF5
+    out_fmt = 'c';
 #endif
+	switch(out_fmt){
+		case 'c': // csv 
+	        printf("[csv] Saving...\n");
+			L.write_basis_csv(outfilename);
+			break;
+		case 'h': // h5 
+	        printf("[h5] Saving...\n");
+			L.write_basis_hdf5(outfilename);
+			break;
+		case 'n': // do not save (why whould you want this?)
+	        printf("Not saving...\n");
+			break;
+		default: // also catches 'both' case 
+	        printf("[csv] Saving...\n");
+			L.write_basis_csv(outfilename);
+	        printf("[h5] Saving...\n");
+			L.write_basis_hdf5(outfilename);
+	}
 
 }
 
