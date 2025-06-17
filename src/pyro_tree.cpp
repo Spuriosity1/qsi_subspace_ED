@@ -10,15 +10,7 @@
 
 #include <hdf5.h>
 #include <cinttypes>
-#include <mutex>
-#include <condition_variable>
-
-
-std::mutex rebalance_mutex;
-std::condition_variable rebalance_cv;
-std::atomic<int> threads_waiting = 0;
-std::atomic<bool> should_rebalance = false;
-const int CHECKIN_INTERVAL = 2000; // Number of nodes before checking in
+#include <barrier>
 
 
 // LOGIC
@@ -112,7 +104,6 @@ void lat_container::fork_state_impl(Container& to_examine, vtree_node_t curr) {
 }
 
 void lat_container::fork_state(cust_stack& to_examine) {
-    assert(!should_rebalance);
     auto curr = to_examine.top();
 	to_examine.pop();
     fork_state_impl(to_examine, curr);
@@ -156,20 +147,53 @@ void pyro_vtree::sort(){
 	this->is_sorted = true;
 }
 
+// Simple k-way merge using a min-heap (sequential, but efficient)
+template <typename T>
+std::vector<T> k_way_merge(const std::vector<std::vector<T>>& chunks) {
+    using pair = std::pair<T, std::pair<size_t, size_t>>;  // value, {chunk_idx, idx_in_chunk}
+    std::priority_queue<pair, std::vector<pair>, std::greater<>> min_heap;
+
+    // Init heap with first element of each chunk
+    for (size_t i = 0; i < chunks.size(); ++i) {
+        if (!chunks[i].empty()) {
+            min_heap.emplace(chunks[i][0], std::make_pair(i, 0));
+        }
+    }
+
+    std::vector<T> result;
+    while (!min_heap.empty()) {
+        auto [val, idx] = min_heap.top(); min_heap.pop();
+        auto [chunk_idx, elem_idx] = idx;
+        result.push_back(val);
+        if (elem_idx + 1 < chunks[chunk_idx].size()) {
+            min_heap.emplace(chunks[chunk_idx][elem_idx + 1], std::make_pair(chunk_idx, elem_idx + 1));
+        }
+    }
+    return result;
+}
+
 
 void pyro_vtree_parallel::sort(){	
 	if (this->is_sorted) return;
-	// step 1: move everything into state_set[0]
-	auto& state_list = state_set[0];
+    // sort it thread-wise
+    std::vector<std::thread> threads;
+    for (auto& l : state_set){
+        threads.emplace_back([&l]() { std::sort(l.begin(), l.end()); });
+    }
+	// Wait for all threads to finish
+	for (auto& t : threads){
+		t.join();
+	}
+    
+    auto res = k_way_merge(state_set);
+
+    state_set[0] = res;  
 	for (size_t i=1; i<state_set.size(); i++){
-          state_list.insert(state_list.end(), state_set[i].begin(),
-                            state_set[i].end());
-		  // delete the old vector
+		  // delete the old vectors
 		  state_set[i].clear();
 		  state_set[i].shrink_to_fit();
 	}
-	// sort as normal
-	std::sort(state_list.begin(), state_list.end());	
+    assert(std::is_sorted(state_set[0].begin(), state_set[0].end()));
 	this->is_sorted = true;
 }
 
@@ -210,25 +234,34 @@ _build_state_dfs(cust_stack& node_stack,
 // the complicated parallel code
 
 template <typename StackT>
-void rebalance_stacks(std::vector<StackT>& stacks) {
+void pyro_vtree_parallel::rebalance_stacks(std::vector<StackT>& stacks) {
 
     std::vector<vtree_node_t> all_jobs;
 
     for (auto& stack : stacks) {
+        printf("%4lu | ", stack.size());
         while (!stack.empty()) {
             all_jobs.push_back(stack.top());
             stack.pop();
         }
     }
 
+    printf("\n");
+
     size_t i = 0;
     for (auto& job : all_jobs) {
-        stacks[i++ %
-            stacks.size()].push(job);
+        stacks[i++ % stacks.size()].push(job);
     }
 
 }
 
+template <typename T>
+bool any_full(const std::vector<T>& job_stacks){
+    for (auto& s : job_stacks){
+        if (!s.empty()) return true;
+    }
+    return false;
+}
 
 void pyro_vtree_parallel::build_state_tree(){
 	// strategy: fork nodes until we exceed the thread pool	
@@ -244,84 +277,139 @@ void pyro_vtree_parallel::build_state_tree(){
 	state_set.resize(n_threads);
 	job_stacks.resize(n_threads);
 
-	std::cout<<"Starting states:\n";
+	std::cout<<starting_nodes.size()<<" starting states.\n";
     unsigned thread_id=0;
     while(!starting_nodes.empty()){
-		std::cout<<"State "<<starting_nodes.front().state_thus_far.uint64[0] <<" Depth "<<starting_nodes.front().
-			curr_spin<<std::endl;
 		job_stacks[thread_id].push(starting_nodes.front());
 		starting_nodes.pop();
         thread_id = (thread_id+1) % n_threads;
     }
+    
+#ifdef DEBUG 
+    const int CHECKIN_INTERVAL=5;
+#else 
+    const int CHECKIN_INTERVAL=5000000;
+#endif
 
-//	for (thread_id=0; thread_id<n_threads; thread_id++){
-//        printf("Thread %u; %zu initialisers\n", thread_id, job_stacks[thread_id].size());
-//		threads.push_back(std::thread([this, thread_id]() {
-//					_build_state_dfs(job_stacks[thread_id], thread_id); 
-//
-//                    }));
-//	}
+    
 
-    threads_waiting=0;
-    for (unsigned thread_id = 0; thread_id < n_threads; ++thread_id) {
-        threads.emplace_back([this, thread_id]() {
-            auto& local_stack = job_stacks[thread_id];
-            int counter = 0;
+    std::atomic<bool> work_to_do{true};
 
-            while (true) {
-                while (!local_stack.empty() && counter%CHECKIN_INTERVAL == 0) {
-                    // build_state_dfs
-                    if (local_stack.top().curr_spin == lat.spins.size()){
-                        state_set[thread_id].push_back(local_stack.top().state_thus_far);
+
+    auto on_completion = [this, &work_to_do]() noexcept
+    { 
+        rebalance_stacks(job_stacks);
+        work_to_do = any_full(job_stacks);
+    };
+    std::barrier sync_point(n_threads, on_completion);
+
+    for (unsigned tid = 0; tid < n_threads; ++tid) {
+        threads.emplace_back([this, tid, &sync_point, &work_to_do]() {
+            auto& local_stack = job_stacks[tid];
+            while(work_to_do) {
+                size_t counter;
+                for (counter=0; 
+                    !local_stack.empty() && counter < CHECKIN_INTERVAL;
+                    counter++) 
+                {
+                    if (local_stack.top().curr_spin == lat.spins.size()) {
+                        state_set[tid].push_back(local_stack.top().state_thus_far);
                         local_stack.pop();
                     } else {
                         fork_state(local_stack);
                     }
-                } 
-                counter++;
+                }
 
-//                std::cout<<"thread "<<thread_id<<" stacksize="<<local_stack.size()<<" threads_waiting="<<threads_waiting<<"/"<<n_threads<<"\n";
+//                std::cout << "[" << tid << "] processed " << counter <<"\n";
+                sync_point.arrive_and_wait();
+            } 
+        });
+    };
 
-                {
-                    // Checking and rebalance section
-                    std::unique_lock<std::mutex> lock(rebalance_mutex);
-                    threads_waiting++;
-
-                    if (threads_waiting==n_threads){
-                        // Last thread within the barrier
-                        should_rebalance = true;
-
-                        rebalance_stacks(job_stacks);
-
-                        should_rebalance = false;
-                        threads_waiting = 0;
-                        rebalance_cv.notify_all();
+/*
+    // Synchronization variables
+    std::atomic<unsigned> threads_at_barrier{0};
+    std::atomic<bool> work_complete{false};
+    std::mutex barrier_mutex;
+    std::condition_variable barrier_cv;
+    
+    for (unsigned tid = 0; tid < n_threads; ++tid) {
+        threads.emplace_back([this, tid, &threads_at_barrier, &work_complete, &barrier_mutex, &barrier_cv]() {
+            auto& local_stack = job_stacks[tid];
+            //const int CHECKIN_INTERVAL=500000;
+            const int CHECKIN_INTERVAL=5;
+            
+            while (!work_complete.load()) {
+                // Phase 1: Process work
+                int work_done = 0;
+                while (!local_stack.empty() && work_done < CHECKIN_INTERVAL && !work_complete.load()) {
+                    if (local_stack.top().curr_spin == lat.spins.size()) {
+                        state_set[tid].push_back(local_stack.top().state_thus_far);
+                        local_stack.pop();
                     } else {
-                        rebalance_cv.wait(lock, [] { 
-                                return threads_waiting==0;
-                                });
+                        fork_state(local_stack);
+                    }
+                    work_done++;
+                }
+                
+                // Early exit if work is complete
+                if (work_complete.load()) break;
+                
+               // std::cout << "Thread " << tid << " processed " << work_done 
+                 //        << " items, stack size now: " << local_stack.size() << std::endl;
+                
+                // Phase 2: Synchronization barrier
+                {
+                    std::unique_lock<std::mutex> lock(barrier_mutex);
+                    
+                    unsigned arrived = ++threads_at_barrier;
+                   // std::cout << "Thread " << tid << " at barrier (" << arrived << "/" << n_threads << ")" << std::endl;
+                    
+                    if (arrived == n_threads) {
+                        // Last thread - check for completion and rebalance
+                        bool any_work = false;
+                        for (const auto& stack : job_stacks) {
+                            if (!stack.empty()) {
+                                any_work = true;
+                                break;
+                            }
+                        }
+                        
+                        if (!any_work) {
+                            std::cout << "Thread " << tid << " detected completion" << std::endl;
+                            work_complete.store(true);
+                        } else {
+                            std::cout << "Thread " << tid << " rebalancing stacks" << std::endl;
+                            rebalance_stacks(job_stacks);
+                        }
+                        
+                        // Reset barrier and wake all threads
+                        threads_at_barrier.store(0);
+                        barrier_cv.notify_all();
+                        
+                    } else {
+                        // Wait for all threads to reach barrier
+                        barrier_cv.wait(lock, [&threads_at_barrier] {
+                            return threads_at_barrier.load() == 0;
+                        });
                     }
                 }
-
-                // Check if there's work left
-                bool any_work = false;
-                for (const auto& s : job_stacks) {
-                    if (!s.empty()) {
-                        any_work = true;
-                        break;
-                    }
+                
+                // Check completion status after barrier
+                if (work_complete.load()) {
+                    std::cout << "Thread " << tid << " exiting" << std::endl;
+                    break;
                 }
-
-                if (!any_work) break; // All done
-
             }
         });
     }
+    */
+    
+    // Wait for all threads to finish
+    for (auto& t : threads) {
+        t.join();
+    }
 
-	// Wait for all threads to finish
-	for (auto& t : threads){
-		t.join();
-	}
 	// make sure the queue was cleared
 	for (auto& q : job_stacks){
 		if (!q.empty()){
@@ -348,10 +436,17 @@ void pyro_vtree::permute_spins(const std::vector<size_t>& perm) {
 
 
 void pyro_vtree_parallel::permute_spins(const std::vector<size_t>& perm) {
-	for (auto& state_list : this->state_set) {
-		for (auto& b : state_list) {
-			b = permute(b, perm);
-		}
+    std::vector<std::thread> threads;
+    for (auto& l : state_set){
+        threads.emplace_back([&l, perm]() {
+            for (auto& b : l) {
+                b = permute(b, perm);
+            }
+        });
+    }
+	// Wait for all threads to finish
+	for (auto& t : threads){
+		t.join();
 	}
 }
 

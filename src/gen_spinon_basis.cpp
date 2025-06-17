@@ -24,6 +24,7 @@ void build_and_export(T& L, const argparse::ArgumentParser& prog,
 	L.build_state_tree();
 
 	// undo the permutation from earlier to keep the output order consistent
+	printf("Permuting...\n");
 	L.permute_spins(perm);
 
 	printf("Sorting...\n");

@@ -8,7 +8,6 @@ project('projected_ed', ['cpp', 'c'],
 # Compiler flags for 128-bit integer support
 cpp_compiler = meson.get_compiler('cpp')
 host_cpu = host_machine.cpu_family()
-add_project_arguments('-DUINT128_AVAILABLE', language : 'cpp')
 
 if get_option('buildtype') == 'release'
   if host_cpu.startswith('x86')
@@ -30,6 +29,8 @@ if get_option('buildtype') == 'release'
       add_project_arguments('-march=armv8-a+sha3', language : 'cpp')
     endif
   endif
+
+  add_project_arguments('-DNDEBUG', language : 'cpp')
 endif
 
 hdf5_dep = dependency('hdf5',

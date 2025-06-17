@@ -134,6 +134,10 @@ protected:
 		unsigned long max_queue_len);
 	unsigned n_threads;
 
+
+    template <typename StackT>
+    void rebalance_stacks(std::vector<StackT>& stacks);
+
 	bool is_sorted;
 
 	size_t n_states() const {
@@ -149,7 +153,7 @@ protected:
 	std::vector<std::thread> threads;
 	std::vector<cust_stack> job_stacks;
 
-    static constexpr unsigned INITIAL_DEPTH_FACTOR = 1;
+    static constexpr unsigned INITIAL_DEPTH_FACTOR = 5;
 };
 
 
