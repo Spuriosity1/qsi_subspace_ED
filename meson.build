@@ -59,7 +59,16 @@ g_deps = [
 
 subdir('src')
 
-if not hdf5_dep.found()
+if hdf5_dep.found()
+  
+    partition_basis = executable('partition_basis', files('src/partition_basis.cpp'),
+            dependencies: g_deps,
+            include_directories:inc,
+            cpp_args: target_args
+            )
+
+
+else
   add_project_arguments('-DDONT_USE_HDF5', language: 'cpp')
 endif
 
@@ -79,10 +88,6 @@ gen_projected_basis = executable('gen_projected_basis', files('src/gen_projected
 
 if spectra_dep.found()
 
-#build_hamiltonian = executable('build_hamiltonian',
-#  build_hamiltonian_sources,
-#  dependencies: [g_deps, eigen_dep, spectra_dep],
-#  include_directories: inc)
 
 
 diag_DOQSI_ham = executable('diag_DOQSI_ham',

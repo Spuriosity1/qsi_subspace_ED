@@ -133,7 +133,7 @@ void build_hamiltonian(SymbolicOpSum<double>& H_sym,
 int main(int argc, char* argv[]) {
 	argparse::ArgumentParser prog("build_ham");
 	prog.add_argument("lattice_file");
-	prog.add_argument("-b", "--basis_file");
+	prog.add_argument("-s", "--sector");
 	prog.add_argument("--Jpm")
 		.help("Jom, units of Jzz")
         .required()
