@@ -24,19 +24,24 @@ using namespace Eigen;
 inline std::string get_basis_file(const argparse::ArgumentParser& prog){
 // Determine basis_file default if not set
 	std::string basis_file;
-	if (prog.is_used("--basis_file")) {
-		basis_file = prog.get<std::string>("--basis_file");
-	} else {
-		// Replace extension
-        std::filesystem::path path(prog.get<std::string>("lattice_file"));
-		if (path.extension() == ".json") {
-			path.replace_extension(".0.basis.h5");
-		} else {
-			// fallback if extension isn't ".json"
-			path += ".0.basis.h5";
-		}
-		basis_file = path.string();
-	}
+    int n_spinons = prog.get<int>("--n_spinons");
+
+    std::string ext = "." + std::to_string(n_spinons) + ".basis";
+	if (prog.is_used("--sector")) {
+        ext += ".partitioned";
+    } 
+    ext += ".h5";
+    
+    // Replace extension: json-> ext
+    std::filesystem::path path(prog.get<std::string>("lattice_file"));
+    if (path.extension() == ".json") {
+        path.replace_extension(ext);
+    } else {
+        // fallback if extension isn't ".json"
+        path += ext;
+    }
+    basis_file = path.string();
+	
 	return basis_file;
 }
 
@@ -71,6 +76,7 @@ void compute_spectrum_iterative(const T ham, VectorXd& evals, MatrixX<S>& evecs,
 
     // parse ncv and n_eigvals
 	size_t n_eigvals = settings.get<int>("--n_eigvals");
+	size_t n_eigvecs = settings.get<int>("--n_eigvecs");
 	size_t ncv = settings.get<int>("--ncv");
 	if (ncv < 2*n_eigvals){
 		std::cout<<"Warning: ncv is very small, recommend at leaast 2*n_eigvals";
@@ -78,11 +84,13 @@ void compute_spectrum_iterative(const T ham, VectorXd& evals, MatrixX<S>& evecs,
 
 	ncv = std::min(ncv, static_cast<decltype(ncv)>(ham.rows()));
 	n_eigvals = std::min(ncv-1, n_eigvals );
+	n_eigvecs = std::min(n_eigvecs, n_eigvals);
 
     auto max_it = settings.get<int>("--max_iters");
     auto tol    = settings.get<double>("--tol");
 
 	std::cout << "Using ncv="<<ncv<<" n_eigvals="<<n_eigvals<<std::endl;
+	std::cout << "Trucncating eigvecs to n_eigvecs="<<n_eigvecs<<std::endl;
     using Solver = Spectra::SymEigsSolver<OpType>;
     Solver eigs(op, n_eigvals, ncv);
     eigs.init();
@@ -96,7 +104,7 @@ void compute_spectrum_iterative(const T ham, VectorXd& evals, MatrixX<S>& evecs,
 
     if (eigs.info() == Spectra::CompInfo::Successful) {
         evals = eigs.eigenvalues().head(nconv);
-        evecs = eigs.eigenvectors(nconv);
+        evecs = eigs.eigenvectors(std::min(static_cast<size_t>(nconv), n_eigvecs));
     } else {
         std::cerr << "Spectra failed\n";
         throw std::runtime_error("Eigenvalue decomposition failed");
@@ -108,7 +116,9 @@ inline void compute_eigenspectrum_dense(const MatrixXd& ham, Eigen::VectorXd& e,
     const argparse::ArgumentParser& settings)
 {
 	size_t n_eigvals = settings.get<int>("--n_eigvals");
+	size_t n_eigvecs = settings.get<int>("--n_eigvecs");
 	n_eigvals = std::min(static_cast<decltype(n_eigvals)>(ham.rows()), n_eigvals );
+	n_eigvecs = std::min(n_eigvecs, n_eigvals);
 
     SelfAdjointEigenSolver<Eigen::MatrixXd> eigs(ham);
     // truncate to # requested eigvals

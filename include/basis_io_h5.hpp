@@ -69,8 +69,20 @@ inline void write_basis_hdf5(const std::vector<Uint128>& state_list, const std::
 }
 
 
+// sector-based operations
 
-inline std::vector<Uint128> read_basis_hdf5(const std::string& infile) {
+
+// Helper function to create sector string
+inline std::string make_sector_string(const std::vector<int>& sector) {
+    std::stringstream ss;
+    ss << "basis_s" << sector[0] << "." << sector[1] << "." << sector[2] << "." << sector[3];
+    return ss.str();
+}
+
+
+inline std::vector<Uint128> read_basis_hdf5(const std::string& infile,
+
+        const char*dset_name = "basis") {
 	// Result vector to store the loaded data
 	std::vector<Uint128> result;
 	
@@ -84,7 +96,7 @@ inline std::vector<Uint128> read_basis_hdf5(const std::string& infile) {
 		if (file_id < 0) throw HDF5Error(file_id, -1, -1, "read_basis: Failed to open file");
 		
 		// Open the dataset
-		dataset_id = H5Dopen(file_id, "basis", H5P_DEFAULT);
+		dataset_id = H5Dopen(file_id, dset_name, H5P_DEFAULT);
 		if (dataset_id < 0) throw HDF5Error(file_id, -1, dataset_id, "read_basis: Failed to open dataset");
 		
 		// Get the dataspace to retrieve the dimensions
@@ -121,7 +133,6 @@ inline std::vector<Uint128> read_basis_hdf5(const std::string& infile) {
 		throw; // Rethrow the exception
 	}
 }
-
 
 
 }; // end namespace basis_io

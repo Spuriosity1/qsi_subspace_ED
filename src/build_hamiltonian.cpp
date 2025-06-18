@@ -24,25 +24,6 @@
 using namespace Eigen;
 using json = nlohmann::json;
 
-std::string get_basis_file(const argparse::ArgumentParser& prog){
-// Determine basis_file default if not set
-	std::string basis_file;
-	if (prog.is_used("--basis_file")) {
-		basis_file = prog.get<std::string>("--basis_file");
-	} else {
-		// Replace extension
-		fs::path path(prog.get<std::string>("lattice_file"));
-		if (path.extension() == ".json") {
-			path.replace_extension(".0.basis.h5");
-		} else {
-			// fallback if extension isn't ".json"
-			path += ".0.basis.h5";
-		}
-		basis_file = path.string();
-	}
-	return basis_file;
-}
-
 template <typename T>
 struct is_sym_solver : std::false_type {};
 

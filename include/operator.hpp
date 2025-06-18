@@ -107,8 +107,11 @@ struct ZBasis {
 		return n_insertions;
 	}
 
-	void load_from_file(const fs::path& bfile){
-		if (bfile.extension() == ".h5"){
+	void load_from_file(const fs::path& bfile, const char* sector=""){
+        if (bfile.stem().extension() == ".partitioned"){
+            assert(bfile.extension() == ".h5");
+            states = basis_io::read_basis_hdf5(bfile, sector);
+        } else if (bfile.extension() == ".h5"){
 			states = basis_io::read_basis_hdf5(bfile); 
 		} else if (bfile.extension() == ".csv"){
 			states = basis_io::read_basis_csv(bfile); 

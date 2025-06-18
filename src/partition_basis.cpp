@@ -7,13 +7,7 @@
 #include <sstream>
 #include <algorithm>
 
-
-// Helper function to create sector string
-inline std::string make_sector_string(const std::vector<int>& sector) {
-    std::stringstream ss;
-    ss << "basis_s" << sector[0] << "." << sector[1] << "." << sector[2] << "." << sector[3];
-    return ss.str();
-}
+using namespace basis_io;
 
 inline void partition_basis_hdf5(const std::string& infile, const std::array<Uint128, 4>& sl_mask) {
     // HDF5 identifiers for input file
@@ -167,7 +161,8 @@ inline void partition_basis_hdf5(const std::string& infile, const std::array<Uin
                 if (output_datasets.find(sector_name) == output_datasets.end()) {
                     hsize_t initial_dims[2] = {0, dims[1]};
                     hsize_t max_dims[2] = {H5S_UNLIMITED, dims[1]};
-                    hsize_t chunk_dims[2] = {std::min(BUFFER_SIZE, buffer.size()), dims[1]};
+                    hsize_t chunk_dims[2] = {std::min(BUFFER_SIZE, 
+                            static_cast<hsize_t>(buffer.size())), dims[1]};
                     
                     hid_t plist_id = H5Pcreate(H5P_DATASET_CREATE);
                     H5Pset_chunk(plist_id, 2, chunk_dims);

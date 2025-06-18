@@ -157,6 +157,14 @@ int main(int argc, char* argv[]) {
 		.default_value(5)
 		.scan<'i', int>();
 
+	prog.add_argument("--n_eigvecs", "-N")
+		.help("Number of eigenvectors to store (must be <= n_eigvals)")
+		.default_value(4)
+		.scan<'i', int>();
+	prog.add_argument("--n_spinons")
+        .default_value(0)
+        .scan<'i', int>();
+
 	prog.add_argument("--save_matrix")
 		.help("Flag to get the solver to export a rep of the matrix")
 		.default_value(false)
@@ -186,7 +194,13 @@ int main(int argc, char* argv[]) {
 	// Step 1: Load basis from CSV
     std::cout<<"Loading basis..."<<std::endl;
 	ZBasis basis;
-	basis.load_from_file(get_basis_file(prog));
+
+	if (prog.is_used("--sector")) {
+        auto sector = prog.get<std::string>("--sector");
+        basis.load_from_file(get_basis_file(prog), sector.c_str());
+    } else {
+        basis.load_from_file(get_basis_file(prog));
+    }
     std::cout<<"Done! Basis dim="<<basis.dim()<<std::endl;
 
 	// Step 2: Load ring data from JSON
@@ -250,13 +264,13 @@ int main(int argc, char* argv[]) {
 
     
 
-    // Write eigenvalues: shape (N,)
+    // Write eigenvalues: shape (n_eigvals,)
     {
         hsize_t dims[1] = {static_cast<hsize_t>(eigvals.size())};
         write_dataset(file_id, "eigenvalues", eigvals.data(), dims, 1);
     }
 
-    // Write diag_vals: shape (N, n_eigvals)
+    // Write diag_vals: shape (dim, n_eigvecs)
     {
         hsize_t dims[2] = {static_cast<hsize_t>(v.rows()), static_cast<hsize_t>(v.cols())};
         write_dataset(file_id, "eigenvectors", v.data(), dims, 2);
