@@ -10,74 +10,12 @@
 
 #include "Spectra/Util/SelectionRule.h"
 #include "operator.hpp"
-
 #include "expectation_eval.hpp"
 
 
 
+
 using json = nlohmann::json;
-
-
-std::tuple<std::vector<SymbolicPMROperator>,std::vector<SymbolicPMROperator>,
-    std::vector<int>> 
-get_ring_ops(
-const nlohmann::json& jdata) {
-
-    std::vector<SymbolicPMROperator> op_list;
-    std::vector<SymbolicPMROperator> op_H_list;
-    std::vector<int> sl_list;
-
-
-	for (const auto& ring : jdata.at("rings")) {
-		std::vector<int> spins = ring.at("member_spin_idx");
-
-		std::vector<char> ops;
-		std::vector<char> conj_ops;
-		for (auto s : ring.at("signs")){
-			ops.push_back( s == 1 ? '+' : '-');
-			conj_ops.push_back( s == 1 ? '-' : '+');
-		}
-		
-		int sl = ring.at("sl").get<int>();
-		auto O   = SymbolicPMROperator(     ops, spins);
-		auto O_h = SymbolicPMROperator(conj_ops, spins);
-        op_list.push_back(O);
-        op_H_list.push_back(O_h);
-        sl_list.push_back(sl);
-	}
-    return std::make_tuple(op_list, op_H_list, sl_list);
-}
-
-
-std::tuple<std::vector<SymbolicPMROperator>,std::vector<SymbolicPMROperator>,
-    std::vector<int>> 
-get_vol_ops(
-const nlohmann::json& jdata,
-    const std::vector<SymbolicPMROperator>& ring_list,
-    const std::vector<SymbolicPMROperator>& ring_H_list
-) {
-
-    std::vector<SymbolicPMROperator> op_list;
-    std::vector<SymbolicPMROperator> op_H_list;
-    std::vector<int> sl_list;
-    
-	for (const auto& vol : jdata.at("vols")) {
-		std::vector<int> plaqi = vol.at("member_plaq_idx");
-        SymbolicPMROperator volOp("");
-        SymbolicPMROperator volOp_H("");
-
-        for (auto J : plaqi){
-            volOp *= ring_list[J];
-            volOp_H *= ring_H_list[J];
-        } 
-	    
-        op_list.push_back(volOp);
-        op_H_list.push_back(volOp_H);
-        sl_list.push_back(vol.at("sl").get<int>());
-
-	}
-    return std::make_tuple(op_list, op_H_list, sl_list);
-}
 
 void build_hamiltonian(SymbolicOpSum<double>& H_sym, 
         const nlohmann::json& jdata, double Jpm, const Vector3d B){
@@ -128,6 +66,8 @@ void build_hamiltonian(SymbolicOpSum<double>& H_sym,
     }
 
 }
+
+
 
 
 int main(int argc, char* argv[]) {
@@ -191,26 +131,29 @@ int main(int argc, char* argv[]) {
         std::exit(1);
     }
 
-	// Step 1: Load basis from CSV
-    std::cout<<"Loading basis..."<<std::endl;
-	ZBasis basis;
 
-	if (prog.is_used("--sector")) {
-        auto sector = prog.get<std::string>("--sector");
-        basis.load_from_file(get_basis_file(prog), sector.c_str());
-    } else {
-        basis.load_from_file(get_basis_file(prog));
-    }
-    std::cout<<"Done! Basis dim="<<basis.dim()<<std::endl;
-
-	// Step 2: Load ring data from JSON
-	std::ifstream jfile(prog.get<std::string>("lattice_file"));
+	// Step 1: Load ring data from JSON
+    auto lattice_file = prog.get<std::string>("lattice_file");
+	std::ifstream jfile(lattice_file);
 	if (!jfile) {
 		std::cerr << "Failed to open JSON file\n";
 		return 1;
 	}
 	json jdata;
 	jfile >> jdata;
+
+	// Step 2: Load basis from H5
+    std::cout<<"Loading basis..."<<std::endl;
+	ZBasis basis;
+
+	if (prog.is_used("--sector")) {
+        auto sector = prog.get<std::string>("--sector");
+        basis.load_from_file(get_basis_file(lattice_file, prog), sector.c_str());
+    } else {
+        basis.load_from_file(get_basis_file(lattice_file, prog));
+    }
+    std::cout<<"Done! Basis dim="<<basis.dim()<<std::endl;
+
 
 
 	using T=double;
@@ -255,18 +198,7 @@ int main(int argc, char* argv[]) {
     hid_t file_id = H5Fcreate(filename.c_str(), H5F_ACC_TRUNC, H5P_DEFAULT, H5P_DEFAULT);
     if (file_id < 0) throw std::runtime_error("Failed to create HDF5 file");
 
-    // Helper lambda to write a dataset
-    auto write_dataset = [](hid_t file_id, const char* name, const double* data, hsize_t* dims, int rank) {
-        hid_t dataspace_id = H5Screate_simple(rank, dims, NULL);
-        hid_t dataset_id = H5Dcreate2(file_id, name, H5T_NATIVE_DOUBLE, dataspace_id,
-                                      H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT);
-        H5Dwrite(dataset_id, H5T_NATIVE_DOUBLE, H5S_ALL, H5S_ALL, H5P_DEFAULT, data);
-        H5Dclose(dataset_id);
-        H5Sclose(dataspace_id);
-    };
-
     
-
     // Write eigenvalues: shape (n_eigvals,)
     {
         hsize_t dims[1] = {static_cast<hsize_t>(eigvals.size())};
@@ -279,16 +211,14 @@ int main(int argc, char* argv[]) {
         write_dataset(file_id, "eigenvectors", v.data(), dims, 2);
     }
 
+    {
+        fs::path latfile = prog.get<std::string>("lattice_file");
+        write_string_to_hdf5(file_id, "latfile_json", 
+                latfile.filename() );
+    }
 
-    /*
-    
-    auto [ringL, ringR, sl] = get_ring_ops(jdata);
-    Eigen::MatrixXd diag_vals = compute_expectation_values(basis, v, ringL);
-    Eigen::MatrixXd cross_vals = compute_cross_terms(basis, v, ringL, 0, 1);
 
-    save_expectation_data_to_hdf5(s.str() + ".out.h5", 
-            eigvals, diag_vals, cross_vals, sl);
-            */
+
 
 	return 0;
 }

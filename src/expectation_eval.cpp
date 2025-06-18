@@ -1,104 +1,207 @@
 #include "expectation_eval.hpp"
+#include <iostream>
 
 
-Eigen::MatrixXd compute_expectation_values(
+std::tuple<std::vector<SymbolicPMROperator>,std::vector<SymbolicPMROperator>,
+    std::vector<int>> 
+get_ring_ops(
+const nlohmann::json& jdata) {
+
+    std::vector<SymbolicPMROperator> op_list;
+    std::vector<SymbolicPMROperator> op_H_list;
+    std::vector<int> sl_list;
+
+
+	for (const auto& ring : jdata.at("rings")) {
+		std::vector<int> spins = ring.at("member_spin_idx");
+
+		std::vector<char> ops;
+		std::vector<char> conj_ops;
+		for (auto s : ring.at("signs")){
+			ops.push_back( s == 1 ? '+' : '-');
+			conj_ops.push_back( s == 1 ? '-' : '+');
+		}
+		
+		int sl = ring.at("sl").get<int>();
+		auto O   = SymbolicPMROperator(     ops, spins);
+		auto O_h = SymbolicPMROperator(conj_ops, spins);
+        op_list.push_back(O);
+        op_H_list.push_back(O_h);
+        sl_list.push_back(sl);
+	}
+    return std::make_tuple(op_list, op_H_list, sl_list);
+}
+
+
+std::tuple<std::vector<SymbolicPMROperator>,std::vector<SymbolicPMROperator>,
+    std::vector<int>> 
+get_vol_ops(
+const nlohmann::json& jdata,
+    const std::vector<SymbolicPMROperator>& ring_list,
+    const std::vector<SymbolicPMROperator>& ring_H_list
+) {
+
+    std::vector<SymbolicPMROperator> op_list;
+    std::vector<SymbolicPMROperator> op_H_list;
+    std::vector<int> sl_list;
+    
+	for (const auto& vol : jdata.at("vols")) {
+		std::vector<int> plaqi = vol.at("member_plaq_idx");
+        SymbolicPMROperator volOp("");
+        SymbolicPMROperator volOp_H("");
+
+        for (auto J : plaqi){
+            volOp *= ring_list[J];
+            volOp_H *= ring_H_list[J];
+        } 
+	    
+        op_list.push_back(volOp);
+        op_H_list.push_back(volOp_H);
+        sl_list.push_back(vol.at("sl").get<int>());
+
+	}
+    return std::make_tuple(op_list, op_H_list, sl_list);
+}
+
+
+
+double compute_expectation(
     const ZBasis& basis,
     const Eigen::MatrixXd& eigenvectors,
-    const std::vector<SymbolicPMROperator>& ops
+    const Eigen::SparseMatrix<double>& op,
+    int i, int j
 ) {
-    const int nStates = static_cast<int>(eigenvectors.cols());
-    const int nOps = static_cast<int>(ops.size());
 
-    Eigen::MatrixXd result(nOps, nStates);
+    const auto& psi_i = eigenvectors.col(i);
+    const auto& psi_j = eigenvectors.col(j);
 
-    for (int k = 0; k < nStates; ++k) {
-        const auto& psi_k = eigenvectors.col(k);
+    return  psi_j.dot( op * psi_i);
+}
 
-        for (int op_idx = 0; op_idx < nOps; ++op_idx) {
-            Eigen::VectorXd temp = Eigen::VectorXd::Zero(psi_k.size());
-            ops[op_idx].apply(basis, psi_k, temp);
-            result(op_idx, k) = psi_k.dot(temp);
+
+std::vector<double> compute_all_expectations(
+    const ZBasis& basis,
+    const Eigen::MatrixXd& eigenvectors,
+    const std::vector<Eigen::SparseMatrix<double>>& ops
+) {
+    const int num_ops = ops.size();
+    const int num_vecs = eigenvectors.cols();
+
+    std::vector<double> result(num_ops * num_vecs * num_vecs);
+
+    for (int l = 0; l < num_ops; ++l) {
+        for (int i = 0; i < num_vecs; ++i) {
+            for (int j = 0; j < num_vecs; ++j) {
+                double val = compute_expectation(basis, eigenvectors, ops[l], i, j);
+                result[l * num_vecs * num_vecs + i * num_vecs + j] = val;
+            }
         }
     }
 
     return result;
 }
 
-Eigen::MatrixXd compute_cross_terms(
-    const ZBasis& basis,
-    const Eigen::MatrixXd& eigenvectors,
-    const std::vector<SymbolicPMROperator>& ops,
-    int i, int j
+
+
+void write_dataset(hid_t file_id, const char* name, const double* data, hsize_t* dims, int rank) {
+
+    // Create the data space for the dataset
+    hid_t dataspace_id = H5Screate_simple(rank, dims, NULL);
+    if (dataspace_id < 0) throw std::runtime_error("Failed to create dataspace");
+
+    // Create the dataset
+    hid_t dataset_id = H5Dcreate2(file_id, name, H5T_NATIVE_DOUBLE,
+                            dataspace_id, H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT);
+    if (dataset_id < 0) throw std::runtime_error("Failed to create dataset");
+
+    // Write the data to the dataset
+    herr_t status = H5Dwrite(dataset_id, H5T_NATIVE_DOUBLE, H5S_ALL, H5S_ALL,
+                             H5P_DEFAULT, data);
+    if (status < 0) throw std::runtime_error("Failed to write dataset");
+
+    // Clean up
+    H5Dclose(dataset_id);
+    H5Sclose(dataspace_id);
+};
+
+
+void write_expectation_vals_h5(
+    hid_t file_id,
+    const char* name,
+    const std::vector<double>& data,
+    int num_ops,
+    int num_vecs
 ) {
-    const int nOps = static_cast<int>(ops.size());
-    Eigen::MatrixXd result(nOps, 2); // col 0: ⟨i|O|j⟩, col 1: ⟨j|O|i⟩
+    // HDF5 file and dataset handles
+    hid_t dataspace_id, dataset_id;
 
-    const auto& psi_i = eigenvectors.col(i);
-    const auto& psi_j = eigenvectors.col(j);
+    // Define the dimensions of the dataset
+    hsize_t dims[3] = {
+        static_cast<hsize_t>(num_ops),
+        static_cast<hsize_t>(num_vecs),
+        static_cast<hsize_t>(num_vecs)
+    };
 
-    for (int op_idx = 0; op_idx < nOps; ++op_idx) {
-        Eigen::VectorXd temp_i = Eigen::VectorXd::Zero(psi_i.size());
-        ops[op_idx].apply(basis, psi_j, temp_i);
-        result(op_idx, 0) = psi_i.dot(temp_i);
-
-        Eigen::VectorXd temp_j = Eigen::VectorXd::Zero(psi_j.size());
-        ops[op_idx].apply(basis, psi_i, temp_j);
-        result(op_idx, 1) = psi_j.dot(temp_j);
-    }
-
-    return result;
+    write_dataset(file_id, name, data.data(), dims, 3);
+ 
 }
 
 
-void save_expectation_data_to_hdf5(
-    const std::string& filename,
-    const Eigen::VectorXd& eigvals,
-    const Eigen::MatrixXd& diag_vals,
-    const Eigen::MatrixXd& cross_vals,
-    const std::vector<int>& group_ids
-) {
-    hid_t file_id = H5Fcreate(filename.c_str(), H5F_ACC_TRUNC, H5P_DEFAULT, H5P_DEFAULT);
-    if (file_id < 0) throw std::runtime_error("Failed to create HDF5 file");
+// helper HDF5 functions
 
-    // Helper lambda to write a dataset
-    auto write_dataset = [](hid_t file_id, const char* name, const double* data, hsize_t* dims, int rank) {
-        hid_t dataspace_id = H5Screate_simple(rank, dims, NULL);
-        hid_t dataset_id = H5Dcreate2(file_id, name, H5T_NATIVE_DOUBLE, dataspace_id,
-                                      H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT);
-        H5Dwrite(dataset_id, H5T_NATIVE_DOUBLE, H5S_ALL, H5S_ALL, H5P_DEFAULT, data);
-        H5Dclose(dataset_id);
-        H5Sclose(dataspace_id);
-    };
+void write_string_to_hdf5(hid_t file_id, const std::string& dataset_name, const std::string& value) {
+    // Step 1: Create scalar dataspace (for a single string)
+    hid_t dataspace_id = H5Screate(H5S_SCALAR);
 
-    // Write eigenvalues: shape (N,)
-    {
-        hsize_t dims[1] = {static_cast<hsize_t>(eigvals.size())};
-        write_dataset(file_id, "eigenvalues", eigvals.data(), dims, 1);
-    }
+    // Step 2: Create string datatype (variable-length string)
+    hid_t dtype = H5Tcopy(H5T_C_S1);
+    H5Tset_size(dtype, H5T_VARIABLE);
 
-    // Write diag_vals: shape (n_ops, N)
-    {
-        hsize_t dims[2] = {static_cast<hsize_t>(diag_vals.rows()), static_cast<hsize_t>(diag_vals.cols())};
-        write_dataset(file_id, "expectation_values", diag_vals.data(), dims, 2);
-    }
+    // Step 3: Create the dataset
+    hid_t dset_id = H5Dcreate(file_id, dataset_name.c_str(), dtype, dataspace_id,
+                              H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT);
 
-    // Write cross_vals: shape (n_ops, 2)
-    {
-        hsize_t dims[2] = {static_cast<hsize_t>(cross_vals.rows()), static_cast<hsize_t>(cross_vals.cols())};
-        write_dataset(file_id, "cross_terms", cross_vals.data(), dims, 2);
-    }
+    // Step 4: Write the string
+    const char* c_str = value.c_str();
+    H5Dwrite(dset_id, dtype, H5S_ALL, H5S_ALL, H5P_DEFAULT, &c_str);
 
-    // Write group_ids (int): shape (n_ops,)
-    {
-        hsize_t dims[1] = {static_cast<hsize_t>(group_ids.size())};
-        hid_t dataspace_id = H5Screate_simple(1, dims, NULL);
-        hid_t dataset_id = H5Dcreate2(file_id, "operator_group_ids", H5T_NATIVE_INT, dataspace_id,
-                                      H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT);
-        H5Dwrite(dataset_id, H5T_NATIVE_INT, H5S_ALL, H5S_ALL, H5P_DEFAULT, group_ids.data());
-        H5Dclose(dataset_id);
-        H5Sclose(dataspace_id);
-    }
+    // Step 5: Close resources
+    H5Dclose(dset_id);
+    H5Tclose(dtype);
+    H5Sclose(dataspace_id);
+}
 
-    H5Fclose(file_id);
+
+
+
+std::vector<double> read_vector_h5(hid_t file_id, const std::string& name) {
+    hid_t dset_id = H5Dopen(file_id, name.c_str(), H5P_DEFAULT);
+    hid_t space_id = H5Dget_space(dset_id);
+    
+    hsize_t dims[1];
+    H5Sget_simple_extent_dims(space_id, dims, nullptr);
+    std::vector<double> data(dims[0]);
+
+    H5Dread(dset_id, H5T_NATIVE_DOUBLE, H5S_ALL, H5S_ALL, H5P_DEFAULT, data.data());
+
+    H5Sclose(space_id);
+    H5Dclose(dset_id);
+    return data;
+}
+
+
+Eigen::MatrixXd read_matrix_h5(hid_t file_id, const std::string& name) {
+    hid_t dset_id = H5Dopen(file_id, name.c_str(), H5P_DEFAULT);
+    hid_t space_id = H5Dget_space(dset_id);
+
+    hsize_t dims[2];
+    H5Sget_simple_extent_dims(space_id, dims, nullptr);
+    Eigen::MatrixXd mat(dims[0], dims[1]);
+
+    H5Dread(dset_id, H5T_NATIVE_DOUBLE, H5S_ALL, H5S_ALL, H5P_DEFAULT, mat.data());
+
+    H5Sclose(space_id);
+    H5Dclose(dset_id);
+    return mat;
 }
 

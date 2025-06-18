@@ -21,7 +21,7 @@
 using namespace Eigen;
 
 
-inline std::string get_basis_file(const argparse::ArgumentParser& prog){
+inline fs::path get_basis_file(const std::filesystem::path& lattice_file, const argparse::ArgumentParser& prog){
 // Determine basis_file default if not set
 	std::string basis_file;
     int n_spinons = prog.get<int>("--n_spinons");
@@ -31,18 +31,17 @@ inline std::string get_basis_file(const argparse::ArgumentParser& prog){
         ext += ".partitioned";
     } 
     ext += ".h5";
-    
+   
+    std::filesystem::path path(lattice_file);
     // Replace extension: json-> ext
-    std::filesystem::path path(prog.get<std::string>("lattice_file"));
     if (path.extension() == ".json") {
         path.replace_extension(ext);
     } else {
         // fallback if extension isn't ".json"
         path += ext;
     }
-    basis_file = path.string();
-	
-	return basis_file;
+
+    return path;
 }
 
 template <typename T>
@@ -170,3 +169,6 @@ inline diagonalise_real(const LazyOpSum<double>& H, const argparse::ArgumentPars
   }
   return std::make_pair(eigvals, eigvecs);
 }
+
+
+

@@ -343,14 +343,23 @@ inline SymbolicPMROperator operator*(int m, const SymbolicPMROperator& other){
 
 template<ScalarLike coeff_t>
 struct SymbolicOpSum {
+
 	using Op = SymbolicPMROperator;
 
+
+    SymbolicOpSum(){
+    }
+
+    SymbolicOpSum(const Op& o){
+        terms.push_back({1.0,o});
+    }
+
 	void add_term(coeff_t c, const Op& op) {
-		terms.emplace_back(c, op); // copies are fine
+		terms.push_back({c, op}); // copies are fine
 	}
 
 	void operator+=(const Op& op) {
-		terms.emplace_back(1.0,op);
+		terms.push_back({1.0,op});
 	}
 
 	std::vector<std::pair<coeff_t, Op >> terms;
@@ -378,6 +387,14 @@ struct LazyOpSum {
 	explicit LazyOpSum(
 			const ZBasis& basis_, const SymbolicOpSum<coeff_t>& ops_
 			) : basis(basis_), ops(ops_) 
+	{
+		// allocate the temporary storage
+		tmp = new coeff_t[basis.dim()]; 
+	}
+
+	explicit LazyOpSum(
+			const ZBasis& basis_, const SymbolicPMROperator& op
+			) : basis(basis_), ops(op)
 	{
 		// allocate the temporary storage
 		tmp = new coeff_t[basis.dim()]; 
