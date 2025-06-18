@@ -90,17 +90,21 @@ void compute_spectrum_iterative(const T ham, VectorXd& evals, MatrixX<S>& evecs,
     auto tol    = settings.get<double>("--tol");
 
 	std::cout << "Using ncv="<<ncv<<" n_eigvals="<<n_eigvals<<std::endl;
-	std::cout << "Trucncating eigvecs to n_eigvecs="<<n_eigvecs<<std::endl;
+	std::cout << "Eigvecs will be truncated to n_eigvecs="<<n_eigvecs<<std::endl;
     using Solver = Spectra::SymEigsSolver<OpType>;
     Solver eigs(op, n_eigvals, ncv);
     eigs.init();
     Spectra::SortRule sortrule = default_sort_rule<Solver>();
+
+	std::cout << "Diagonalising..."<<std::endl;
     auto nconv = eigs.compute(
             sortrule,
             max_it, /*maxit*/
             tol, /*tol*/
             sortrule
             );
+
+	std::cout << "Done!"<<std::endl;
 
     if (eigs.info() == Spectra::CompInfo::Successful) {
         evals = eigs.eigenvalues().head(nconv);

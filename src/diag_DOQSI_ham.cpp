@@ -249,6 +249,9 @@ int main(int argc, char* argv[]) {
     std::cout << "Eigenvalues:\n" << eigvals << "\n\n";
     std::string filename = s.str()+".eigs.h5";
 
+
+	std::cout << "Writing to\n"<<filename<<std::endl;
+
     hid_t file_id = H5Fcreate(filename.c_str(), H5F_ACC_TRUNC, H5P_DEFAULT, H5P_DEFAULT);
     if (file_id < 0) throw std::runtime_error("Failed to create HDF5 file");
 
