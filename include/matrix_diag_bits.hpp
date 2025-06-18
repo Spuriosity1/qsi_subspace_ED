@@ -64,8 +64,8 @@ constexpr Spectra::SortRule default_sort_rule() {
 }
 
 
-template<typename OpType, typename T>
-void compute_spectrum_iterative(const T ham, VectorXd& evals, MatrixXcd evecs, const argparse::ArgumentParser& settings)
+template<typename OpType, typename T, ScalarLike S>
+void compute_spectrum_iterative(const T ham, VectorXd& evals, MatrixX<S>& evecs, const argparse::ArgumentParser& settings)
 {
     OpType op(ham);
 

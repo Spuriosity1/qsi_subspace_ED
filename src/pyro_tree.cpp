@@ -174,125 +174,82 @@ std::vector<T> k_way_merge(const std::vector<std::vector<T>>& chunks) {
     return result;
 }
 
+template<typename T>
+void remove_empty(std::vector<std::vector<T>>& chunks){
+    chunks.erase(
+            std::remove_if(chunks.begin(), chunks.end(),
+                [](const auto& chunk) { return chunk.empty(); }),
+            chunks.end()
+            );
 
-// Alternative: Parallel merge for very large datasets (FIXED - no double free)
-template <typename T>
-std::vector<T> parallel_k_way_merge(std::vector<std::vector<T>>& chunks, size_t num_threads = std::thread::hardware_concurrency()) {
-    if (chunks.size() <= 1) {
-        return chunks.empty() ? std::vector<T>{} : std::move(chunks[0]);
-    }
-    
-    // For small number of chunks, use sequential merge
-    if (chunks.size() <= 4) {
-        return k_way_merge_optimized(chunks);
-    }
-    
-    // Hierarchical merge: merge chunks in pairs/groups
-    while (chunks.size() > 1) {
-        std::vector<std::vector<T>> next_level;
-        std::vector<std::future<std::vector<T>>> futures;
-        
-        // Process chunks in groups - FIXED: move chunks before async call
-        for (size_t i = 0; i < chunks.size(); i += 2) {
-            if (i + 1 < chunks.size()) {
-                // Move chunks out BEFORE creating async task to avoid double-free
-                auto chunk1 = std::move(chunks[i]);
-                auto chunk2 = std::move(chunks[i + 1]);
-                
-                futures.push_back(std::async(std::launch::async, 
-                    [chunk1 = std::move(chunk1), chunk2 = std::move(chunk2)]() mutable {
-                        std::vector<std::vector<T>> pair;
-                        pair.reserve(2);
-                        pair.push_back(std::move(chunk1));
-                        pair.push_back(std::move(chunk2));
-                        return k_way_merge_optimized(pair);
-                    }));
-            } else {
-                // Odd chunk out
-                next_level.push_back(std::move(chunks[i]));
-            }
-        }
-        
-        // Collect results
-        chunks.clear();
-        chunks.reserve(futures.size() + next_level.size());
-        
-        for (auto& future : futures) {
-            chunks.push_back(future.get());
-        }
-        
-        // Add any remaining odd chunk
-        for (auto& chunk : next_level) {
-            chunks.push_back(std::move(chunk));
-        }
-        next_level.clear();
-    }
-    
-    return std::move(chunks[0]);
 }
+
 
 // Zero-allocation in-place merge without any heap
 template <typename T>
 void inplace_merge_chunks(std::vector<std::vector<T>>& chunks) {
     if (chunks.size() <= 1) return;
+
+    for (auto& c : chunks){
+        std::cout<<"[merge] "<<c.size()<<"\n";
+    }
     
-    // Remove empty chunks
-    chunks.erase(
-        std::remove_if(chunks.begin(), chunks.end(),
-                      [](const auto& chunk) { return chunk.empty(); }),
-        chunks.end()
-    );
-    
+    remove_empty(chunks); 
     if (chunks.size() <= 1) return;
-    
-    // Merge chunks pairwise in-place - no heap allocation
+
+// Merge chunks pairwise in-place - no heap allocation
     while (chunks.size() > 1) {
-        size_t write_idx = 0;
+        std::vector<std::vector<T>> next_round;
+        next_round.reserve((chunks.size() + 1) / 2);
         
         // Merge pairs of chunks
         for (size_t i = 0; i + 1 < chunks.size(); i += 2) {
-            // Merge chunks[i] and chunks[i+1] into chunks[i]
             auto& left = chunks[i];
             auto& right = chunks[i + 1];
             
             if (right.empty()) {
-                chunks[write_idx++] = std::move(left);
+                if (!left.empty()) {
+                    next_round.push_back(std::move(left));
+                }
                 continue;
             }
             if (left.empty()) {
-                chunks[write_idx++] = std::move(right);
+                next_round.push_back(std::move(right));
                 continue;
             }
             
-            // Reserve space for merged result (only growth, no extra allocation)
+            // Reserve space for merged result
             size_t left_size = left.size();
             left.reserve(left_size + right.size());
             
             // Move elements from right to end of left
-            left.insert(left.end(), 
+            left.insert(left.end(),
                        std::make_move_iterator(right.begin()),
                        std::make_move_iterator(right.end()));
             
-            // In-place merge within the single vector (no extra memory)
-            std::inplace_merge(left.begin(), 
+            // In-place merge within the single vector
+            std::inplace_merge(left.begin(),
                              left.begin() + left_size,
                              left.end());
             
-            // Clear the right chunk (it's been moved)
-            right.clear();
-            right.shrink_to_fit();
-            
-            chunks[write_idx++] = std::move(left);
+            next_round.push_back(std::move(left));
         }
         
         // Handle odd chunk if exists
         if (chunks.size() % 2 == 1) {
-            chunks[write_idx++] = std::move(chunks.back());
+            auto& last = chunks.back();
+            if (!last.empty()) {
+                next_round.push_back(std::move(last));
+            }
         }
         
-        // Remove processed chunks
-        chunks.resize(write_idx);
+        chunks = std::move(next_round);
     }
+    
+}
+
+int cmp_uint128( const void* a, const void*b){
+    return *static_cast<const Uint128*>(a) < *static_cast<const Uint128*>(b);
 }
 
 void pyro_vtree_parallel::sort() {
@@ -319,7 +276,8 @@ void pyro_vtree_parallel::sort() {
     
     // Sort each chunk individually (this is the only parallel part remaining)
     // Sacrifice some parallelism for guaranteed in-place operation
-    const size_t num_threads = std::min(state_set.size(), static_cast<size_t>(n_threads));
+    const size_t num_threads = std::min(state_set.size(), 
+                                       static_cast<size_t>(std::thread::hardware_concurrency()));
     
     if (num_threads > 1 && state_set.size() > 1) {
         // Parallel sort of individual chunks
@@ -329,6 +287,7 @@ void pyro_vtree_parallel::sort() {
         for (auto& chunk : state_set) {
             futures.push_back(std::async(std::launch::async, [&chunk]() {
                 if (!chunk.empty()) {
+                    //std::qsort(chunk.data(), chunk.size(), sizeof(Uint128), cmp_uint128);
                     std::sort(chunk.begin(), chunk.end());
                 }
             }));
@@ -342,6 +301,7 @@ void pyro_vtree_parallel::sort() {
         // Sequential sort
         for (auto& chunk : state_set) {
             if (!chunk.empty()) {
+                //std::qsort(chunk.data(), chunk.size(), sizeof(Uint128), cmp_uint128);
                 std::sort(chunk.begin(), chunk.end());
             }
         }
@@ -355,82 +315,6 @@ void pyro_vtree_parallel::sort() {
     assert(std::is_sorted(state_set[0].begin(), state_set[0].end()));
     this->is_sorted = true;
 }
-
-/*
-void pyro_vtree_parallel::sort() {
-    if (this->is_sorted) return;
-    
-    // Quick check: if we only have one chunk, just sort it
-    if (state_set.size() == 1) {
-        std::sort(state_set[0].begin(), state_set[0].end());
-        this->is_sorted = true;
-        return;
-    }
-    
-    // Remove empty chunks first to avoid unnecessary work
-    state_set.erase(
-        std::remove_if(state_set.begin(), state_set.end(),
-                      [](const auto& chunk) { return chunk.empty(); }),
-        state_set.end()
-    );
-    
-    if (state_set.empty()) {
-        this->is_sorted = true;
-        return;
-    }
-        
-    // Sort chunks in parallel with better thread management
-    if (state_set.size() <= n_threads) {
-        // Each chunk gets its own thread
-        std::vector<std::future<void>> futures;
-        futures.reserve(state_set.size());
-        
-        for (auto& chunk : state_set) {
-            futures.push_back(std::async(std::launch::async, [&chunk]() {
-                if (!chunk.empty()) {
-                    std::sort(chunk.begin(), chunk.end());
-                }
-            }));
-        }
-        
-        // Wait for all sorting to complete
-        for (auto& future : futures) {
-            future.wait();
-        }
-    } else {
-        // More chunks than threads - use thread pool approach
-        std::atomic<size_t> chunk_index{0};
-        std::vector<std::thread> threads;
-        threads.reserve(n_threads);
-        
-        for (size_t i = 0; i < n_threads; ++i) {
-            threads.emplace_back([&]() {
-                size_t idx;
-                while ((idx = chunk_index.fetch_add(1)) < state_set.size()) {
-                    if (!state_set[idx].empty()) {
-                        std::sort(state_set[idx].begin(), state_set[idx].end());
-                    }
-                }
-            });
-        }
-        
-        for (auto& thread : threads) {
-            thread.join();
-        }
-    }
-    
-    // Merge sorted chunks efficiently
-    auto merged_result = k_way_merge(state_set);
-    
-    // Replace state_set with merged result efficiently
-    state_set.clear();
-    state_set.emplace_back(std::move(merged_result));
-    
-    // Ensure we have the expected structure
-    assert(std::is_sorted(state_set[0].begin(), state_set[0].end()));
-    this->is_sorted = true;
-}
-*/
 
 
 
@@ -525,7 +409,7 @@ void pyro_vtree_parallel::build_state_tree(){
 #ifdef DEBUG 
     const int CHECKIN_INTERVAL=5;
 #else 
-    const int CHECKIN_INTERVAL=5000000;
+    const int CHECKIN_INTERVAL=50000000;
 #endif
 
     
@@ -562,86 +446,7 @@ void pyro_vtree_parallel::build_state_tree(){
             } 
         });
     };
-
-/*
-    // Synchronization variables
-    std::atomic<unsigned> threads_at_barrier{0};
-    std::atomic<bool> work_complete{false};
-    std::mutex barrier_mutex;
-    std::condition_variable barrier_cv;
-    
-    for (unsigned tid = 0; tid < n_threads; ++tid) {
-        threads.emplace_back([this, tid, &threads_at_barrier, &work_complete, &barrier_mutex, &barrier_cv]() {
-            auto& local_stack = job_stacks[tid];
-            //const int CHECKIN_INTERVAL=500000;
-            const int CHECKIN_INTERVAL=5;
-            
-            while (!work_complete.load()) {
-                // Phase 1: Process work
-                int work_done = 0;
-                while (!local_stack.empty() && work_done < CHECKIN_INTERVAL && !work_complete.load()) {
-                    if (local_stack.top().curr_spin == lat.spins.size()) {
-                        state_set[tid].push_back(local_stack.top().state_thus_far);
-                        local_stack.pop();
-                    } else {
-                        fork_state(local_stack);
-                    }
-                    work_done++;
-                }
-                
-                // Early exit if work is complete
-                if (work_complete.load()) break;
-                
-               // std::cout << "Thread " << tid << " processed " << work_done 
-                 //        << " items, stack size now: " << local_stack.size() << std::endl;
-                
-                // Phase 2: Synchronization barrier
-                {
-                    std::unique_lock<std::mutex> lock(barrier_mutex);
-                    
-                    unsigned arrived = ++threads_at_barrier;
-                   // std::cout << "Thread " << tid << " at barrier (" << arrived << "/" << n_threads << ")" << std::endl;
-                    
-                    if (arrived == n_threads) {
-                        // Last thread - check for completion and rebalance
-                        bool any_work = false;
-                        for (const auto& stack : job_stacks) {
-                            if (!stack.empty()) {
-                                any_work = true;
-                                break;
-                            }
-                        }
-                        
-                        if (!any_work) {
-                            std::cout << "Thread " << tid << " detected completion" << std::endl;
-                            work_complete.store(true);
-                        } else {
-                            std::cout << "Thread " << tid << " rebalancing stacks" << std::endl;
-                            rebalance_stacks(job_stacks);
-                        }
-                        
-                        // Reset barrier and wake all threads
-                        threads_at_barrier.store(0);
-                        barrier_cv.notify_all();
-                        
-                    } else {
-                        // Wait for all threads to reach barrier
-                        barrier_cv.wait(lock, [&threads_at_barrier] {
-                            return threads_at_barrier.load() == 0;
-                        });
-                    }
-                }
-                
-                // Check completion status after barrier
-                if (work_complete.load()) {
-                    std::cout << "Thread " << tid << " exiting" << std::endl;
-                    break;
-                }
-            }
-        });
-    }
-    */
-    
+ 
     // Wait for all threads to finish
     for (auto& t : threads) {
         t.join();
@@ -706,6 +511,9 @@ void pyro_vtree::write_basis_hdf5(const std::string& outfilename){
 
 void pyro_vtree_parallel::write_basis_hdf5(const std::string& outfilename){
 	this->sort();
+    for (size_t i=0; i<state_set.size(); i++){
+        std::cout << "[w] chunk ["<<i<<"] size "<<state_set[i].size() <<"\n";
+    }
 	basis_io::write_basis_hdf5(this->state_set[0], outfilename);
 }
 
