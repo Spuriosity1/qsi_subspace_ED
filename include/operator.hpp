@@ -392,8 +392,6 @@ struct LazyOpSum {
 		tmp = new coeff_t[basis.dim()]; 
 	}
 
-
-
 	~LazyOpSum() {
 		delete[] tmp;
 	}
@@ -457,15 +455,6 @@ struct LazyOpSum {
 		// Eigen::VectorXd y(N);
 
 		for (Eigen::Index j = 0; j < N; ++j) {
-            /*
-			x[j] = coeff_t(1);
-			applyTo(x, y);
-			for (Eigen::Index i = 0; i < N; ++i) {
-				if (std::abs(y[i]) > tol)
-					triplets.emplace_back(i, j, y[i]);
-			}
-			x[j] = coeff_t(0);
-            */
             for (auto& [c, op] : ops.terms){
 				ZBasis::idx_t J = j;
                 coeff_t res = c * op.applyIndex(basis, J);
@@ -482,7 +471,7 @@ struct LazyOpSum {
 	private:
 	coeff_t* tmp; // temp storage
 	const ZBasis& basis;
-	const SymbolicOpSum<coeff_t>& ops;
+	const SymbolicOpSum<coeff_t> ops;
 };
 
 template <typename coeff_t>

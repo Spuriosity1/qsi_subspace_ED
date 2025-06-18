@@ -124,6 +124,7 @@ int main(int argc, char* argv[]) {
         l_ring_operators.emplace_back(basis, O);
         ring_operators.push_back(l_ring_operators.back().toSparseMatrix());
     }
+    
  
     auto ring_expect = compute_all_expectations(basis, eigvecs, ring_operators);
 
