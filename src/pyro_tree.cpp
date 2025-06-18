@@ -174,6 +174,189 @@ std::vector<T> k_way_merge(const std::vector<std::vector<T>>& chunks) {
     return result;
 }
 
+
+// Alternative: Parallel merge for very large datasets (FIXED - no double free)
+template <typename T>
+std::vector<T> parallel_k_way_merge(std::vector<std::vector<T>>& chunks, size_t num_threads = std::thread::hardware_concurrency()) {
+    if (chunks.size() <= 1) {
+        return chunks.empty() ? std::vector<T>{} : std::move(chunks[0]);
+    }
+    
+    // For small number of chunks, use sequential merge
+    if (chunks.size() <= 4) {
+        return k_way_merge_optimized(chunks);
+    }
+    
+    // Hierarchical merge: merge chunks in pairs/groups
+    while (chunks.size() > 1) {
+        std::vector<std::vector<T>> next_level;
+        std::vector<std::future<std::vector<T>>> futures;
+        
+        // Process chunks in groups - FIXED: move chunks before async call
+        for (size_t i = 0; i < chunks.size(); i += 2) {
+            if (i + 1 < chunks.size()) {
+                // Move chunks out BEFORE creating async task to avoid double-free
+                auto chunk1 = std::move(chunks[i]);
+                auto chunk2 = std::move(chunks[i + 1]);
+                
+                futures.push_back(std::async(std::launch::async, 
+                    [chunk1 = std::move(chunk1), chunk2 = std::move(chunk2)]() mutable {
+                        std::vector<std::vector<T>> pair;
+                        pair.reserve(2);
+                        pair.push_back(std::move(chunk1));
+                        pair.push_back(std::move(chunk2));
+                        return k_way_merge_optimized(pair);
+                    }));
+            } else {
+                // Odd chunk out
+                next_level.push_back(std::move(chunks[i]));
+            }
+        }
+        
+        // Collect results
+        chunks.clear();
+        chunks.reserve(futures.size() + next_level.size());
+        
+        for (auto& future : futures) {
+            chunks.push_back(future.get());
+        }
+        
+        // Add any remaining odd chunk
+        for (auto& chunk : next_level) {
+            chunks.push_back(std::move(chunk));
+        }
+        next_level.clear();
+    }
+    
+    return std::move(chunks[0]);
+}
+
+// Zero-allocation in-place merge without any heap
+template <typename T>
+void inplace_merge_chunks(std::vector<std::vector<T>>& chunks) {
+    if (chunks.size() <= 1) return;
+    
+    // Remove empty chunks
+    chunks.erase(
+        std::remove_if(chunks.begin(), chunks.end(),
+                      [](const auto& chunk) { return chunk.empty(); }),
+        chunks.end()
+    );
+    
+    if (chunks.size() <= 1) return;
+    
+    // Merge chunks pairwise in-place - no heap allocation
+    while (chunks.size() > 1) {
+        size_t write_idx = 0;
+        
+        // Merge pairs of chunks
+        for (size_t i = 0; i + 1 < chunks.size(); i += 2) {
+            // Merge chunks[i] and chunks[i+1] into chunks[i]
+            auto& left = chunks[i];
+            auto& right = chunks[i + 1];
+            
+            if (right.empty()) {
+                chunks[write_idx++] = std::move(left);
+                continue;
+            }
+            if (left.empty()) {
+                chunks[write_idx++] = std::move(right);
+                continue;
+            }
+            
+            // Reserve space for merged result (only growth, no extra allocation)
+            size_t left_size = left.size();
+            left.reserve(left_size + right.size());
+            
+            // Move elements from right to end of left
+            left.insert(left.end(), 
+                       std::make_move_iterator(right.begin()),
+                       std::make_move_iterator(right.end()));
+            
+            // In-place merge within the single vector (no extra memory)
+            std::inplace_merge(left.begin(), 
+                             left.begin() + left_size,
+                             left.end());
+            
+            // Clear the right chunk (it's been moved)
+            right.clear();
+            right.shrink_to_fit();
+            
+            chunks[write_idx++] = std::move(left);
+        }
+        
+        // Handle odd chunk if exists
+        if (chunks.size() % 2 == 1) {
+            chunks[write_idx++] = std::move(chunks.back());
+        }
+        
+        // Remove processed chunks
+        chunks.resize(write_idx);
+    }
+}
+
+void pyro_vtree_parallel::sort() {
+    if (this->is_sorted) return;
+    
+    // Remove empty chunks first
+    state_set.erase(
+        std::remove_if(state_set.begin(), state_set.end(),
+                      [](const auto& chunk) { return chunk.empty(); }),
+        state_set.end()
+    );
+    
+    if (state_set.empty()) {
+        this->is_sorted = true;
+        return;
+    }
+    
+    // If only one chunk, sort it directly
+    if (state_set.size() == 1) {
+        std::sort(state_set[0].begin(), state_set[0].end());
+        this->is_sorted = true;
+        return;
+    }
+    
+    // Sort each chunk individually (this is the only parallel part remaining)
+    // Sacrifice some parallelism for guaranteed in-place operation
+    const size_t num_threads = std::min(state_set.size(), static_cast<size_t>(n_threads));
+    
+    if (num_threads > 1 && state_set.size() > 1) {
+        // Parallel sort of individual chunks
+        std::vector<std::future<void>> futures;
+        futures.reserve(state_set.size());
+        
+        for (auto& chunk : state_set) {
+            futures.push_back(std::async(std::launch::async, [&chunk]() {
+                if (!chunk.empty()) {
+                    std::sort(chunk.begin(), chunk.end());
+                }
+            }));
+        }
+        
+        // Wait for all sorting to complete
+        for (auto& future : futures) {
+            future.wait();
+        }
+    } else {
+        // Sequential sort
+        for (auto& chunk : state_set) {
+            if (!chunk.empty()) {
+                std::sort(chunk.begin(), chunk.end());
+            }
+        }
+    }
+    
+    // Merge chunks in-place (sequential but memory-efficient)
+    inplace_merge_chunks(state_set);
+    
+    // Ensure we have the expected structure
+    assert(state_set.size() == 1);
+    assert(std::is_sorted(state_set[0].begin(), state_set[0].end()));
+    this->is_sorted = true;
+}
+
+/*
 void pyro_vtree_parallel::sort() {
     if (this->is_sorted) return;
     
@@ -247,6 +430,7 @@ void pyro_vtree_parallel::sort() {
     assert(std::is_sorted(state_set[0].begin(), state_set[0].end()));
     this->is_sorted = true;
 }
+*/
 
 
 

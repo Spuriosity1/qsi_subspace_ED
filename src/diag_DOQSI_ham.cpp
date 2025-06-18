@@ -156,6 +156,7 @@ int main(int argc, char* argv[]) {
 		.help("Number of eigenvlaues to compute")
 		.default_value(5)
 		.scan<'i', int>();
+
 	prog.add_argument("--save_matrix")
 		.help("Flag to get the solver to export a rep of the matrix")
 		.default_value(false)
@@ -247,13 +248,15 @@ int main(int argc, char* argv[]) {
         H5Sclose(dataspace_id);
     };
 
+    
+
     // Write eigenvalues: shape (N,)
     {
         hsize_t dims[1] = {static_cast<hsize_t>(eigvals.size())};
         write_dataset(file_id, "eigenvalues", eigvals.data(), dims, 1);
     }
 
-    // Write diag_vals: shape (n_ops, N)
+    // Write diag_vals: shape (N, n_eigvals)
     {
         hsize_t dims[2] = {static_cast<hsize_t>(v.rows()), static_cast<hsize_t>(v.cols())};
         write_dataset(file_id, "eigenvectors", v.data(), dims, 2);
