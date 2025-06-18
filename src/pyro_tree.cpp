@@ -174,6 +174,72 @@ std::vector<T> k_way_merge(const std::vector<std::vector<T>>& chunks) {
     return result;
 }
 
+// Memory-optimized k-way merge for Uint128 (memory IO bottlenecked)
+template <typename T>
+std::vector<T> k_way_merge_optimized(std::vector<std::vector<T>>& chunks) {
+    // Remove empty chunks and count total elements
+    size_t total_size = 0;
+    auto write_pos = chunks.begin();
+    for (auto read_pos = chunks.begin(); read_pos != chunks.end(); ++read_pos) {
+        if (!read_pos->empty()) {
+            total_size += read_pos->size();
+            if (write_pos != read_pos) {
+                *write_pos = std::move(*read_pos);
+            }
+            ++write_pos;
+        }
+    }
+    chunks.erase(write_pos, chunks.end());
+    
+    if (chunks.empty()) return {};
+    if (chunks.size() == 1) return std::move(chunks[0]);
+    
+    // Pre-allocate result - critical for memory IO performance
+    std::vector<T> result;
+    result.reserve(total_size);
+    
+    // Simple array-based min-heap for minimal memory overhead
+    // Store: {chunk_index, element_index} - value lookup is chunks[chunk_idx][elem_idx]
+    struct HeapNode {
+        uint32_t chunk_idx;
+        uint32_t elem_idx;
+    };
+    
+    std::vector<HeapNode> heap;
+    heap.reserve(chunks.size());
+    
+    // Initialize with first element from each chunk
+    for (uint32_t i = 0; i < chunks.size(); ++i) {
+        heap.push_back({i, 0});
+    }
+    
+    // Comparator that dereferences to actual values
+    auto compare = [&chunks](const HeapNode& a, const HeapNode& b) {
+        return chunks[a.chunk_idx][a.elem_idx] > chunks[b.chunk_idx][b.elem_idx];
+    };
+    
+    std::make_heap(heap.begin(), heap.end(), compare);
+    
+    // Main merge loop - optimized for memory bandwidth
+    while (!heap.empty()) {
+        // Get minimum element info
+        HeapNode min_node = heap.front();
+        std::pop_heap(heap.begin(), heap.end(), compare);
+        heap.pop_back();
+        
+        // Move the actual value (avoid extra copy for 128-bit values)
+        result.emplace_back(std::move(chunks[min_node.chunk_idx][min_node.elem_idx]));
+        
+        // Advance to next element in the same chunk
+        if (++min_node.elem_idx < chunks[min_node.chunk_idx].size()) {
+            heap.push_back(min_node);
+            std::push_heap(heap.begin(), heap.end(), compare);
+        }
+    }
+    
+    return result;
+}
+
 void pyro_vtree_parallel::sort() {
     if (this->is_sorted) return;
     
@@ -237,7 +303,7 @@ void pyro_vtree_parallel::sort() {
     }
     
     // Merge sorted chunks efficiently
-    auto merged_result = k_way_merge(state_set);
+    auto merged_result = k_way_merge_optimized(state_set);
     
     // Replace state_set with merged result efficiently
     state_set.clear();
