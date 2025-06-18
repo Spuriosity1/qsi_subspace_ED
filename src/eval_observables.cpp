@@ -117,12 +117,12 @@ int main(int argc, char* argv[]) {
  
     auto [ringL, ringR, sl] = get_ring_ops(jdata);
 
+    std::vector<LazyOpSum<double>> l_ring_operators;
     std::vector<Eigen::SparseMatrix<double>> ring_operators;
     ring_operators.reserve(ringL.size());
     for (auto& O : ringL){
-        LazyOpSum<double> O_op(basis, O);
-        std::cout<<O_op.cols()<<" "<<O_op.rows() << "\n";
-        ring_operators.push_back(O_op.toSparseMatrix());
+        l_ring_operators.emplace_back(basis, O);
+        ring_operators.push_back(l_ring_operators.back().toSparseMatrix());
     }
  
     auto ring_expect = compute_all_expectations(basis, eigvecs, ring_operators);

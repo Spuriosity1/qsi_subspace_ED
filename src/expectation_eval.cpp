@@ -132,8 +132,6 @@ void write_expectation_vals_h5(
     int num_ops,
     int num_vecs
 ) {
-    // HDF5 file and dataset handles
-    hid_t dataspace_id, dataset_id;
 
     // Define the dimensions of the dataset
     hsize_t dims[3] = {

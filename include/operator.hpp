@@ -392,17 +392,7 @@ struct LazyOpSum {
 		tmp = new coeff_t[basis.dim()]; 
 	}
 
-	explicit LazyOpSum(
-			const ZBasis& basis_, const SymbolicPMROperator& op
-			) : basis(basis_), ops(op)
-	{
-		// allocate the temporary storage
-		tmp = new coeff_t[basis.dim()]; 
-	}
 
-	LazyOpSum(const LazyOpSum& other) : basis(other.basis), ops(other.ops){
-		tmp = new coeff_t[basis.dim()];
-	}
 
 	~LazyOpSum() {
 		delete[] tmp;
