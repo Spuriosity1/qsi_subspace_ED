@@ -69,20 +69,51 @@ void build_hamiltonian(SymbolicOpSum<double>& H_sym,
 
 
 
+void build_hamiltonian(SymbolicOpSum<double>& H_sym, 
+        const nlohmann::json& jdata, const std::vector<double>& g){
+
+    auto atoms = jdata.at("atoms");
+
+    auto [ringL, ringR, sl_list]  = get_ring_ops(jdata);
+
+    for (size_t i=0; i<sl_list.size(); i++){
+        auto sl = sl_list[i];
+        auto R = ringR[i];
+        auto L = ringL[i];
+
+        H_sym.add_term(g[sl], R);
+        H_sym.add_term(g[sl], L); 
+    }
+    
+}
+
+
+
+
 
 int main(int argc, char* argv[]) {
 	argparse::ArgumentParser prog("build_ham");
 	prog.add_argument("lattice_file");
 	prog.add_argument("-s", "--sector");
-	prog.add_argument("--Jpm")
-		.help("Jom, units of Jzz")
-        .required()
-        .scan<'g', double>();
-    prog.add_argument("--B")
-		.help("magnetic field, units of Jzz")
-        .required()
-        .nargs(3)
-		.scan<'g', double>();
+
+    // G specification
+    {
+        auto &group = prog.add_mutually_exclusive_group(true);
+        group.add_argument("--B")
+            .help("magnetic field, units of Jzz")
+            .nargs(3)
+            .scan<'g', double>();
+
+        group.add_argument("--g")
+            .help("raw ring exchange, units of Jzz")
+            .nargs(4)
+            .scan<'g', double>();
+
+
+        prog.add_argument("--Jpm")
+            .help("Jom, units of Jzz")
+            .scan<'g', double>();
+    }
 
     prog.add_argument("-o", "--output_dir")
         .required()
@@ -159,23 +190,37 @@ int main(int argc, char* argv[]) {
 	using T=double;
 	SymbolicOpSum<T> H_sym;
 
-    auto Bv = prog.get<std::vector<double>>("B");
-
-    Vector3d B;
-    for (size_t i=0; i<3; i++) 
-        B[i] = Bv[i];
-
-    auto Jpm = prog.get<double>("Jpm");
 
     char outfilename_buf[1024];
-    snprintf(outfilename_buf, 1024, "Jpm=%.4f%%Bx=%.4f%%By=%.4f%%Bz=%.4f%%",
-            Jpm, B[0], B[1], B[2]);
 
     std::stringstream s;
-    s << prog.get<std::string>("--output_dir") << "/" <<
-        outfilename_buf;
 
-	build_hamiltonian(H_sym, jdata, Jpm, B);
+
+
+    if (prog.is_used("--g")){
+
+        auto gv = prog.get<std::vector<double>>("--g");
+        build_hamiltonian(H_sym, jdata, gv);
+
+        snprintf(outfilename_buf, 1024, "g0=%.4f%%g1=%.4f%%g2=%.4f%%g3=%.4f%%",
+                gv[0], gv[1], gv[2],gv[3]);
+
+    } else {
+
+        auto Jpm = prog.get<double>("--Jpm");
+        auto Bv = prog.get<std::vector<double>>("B");
+
+        Vector3d B;
+        for (size_t i=0; i<3; i++) 
+            B[i] = Bv[i];
+
+        snprintf(outfilename_buf, 1024, "Jpm=%.4f%%Bx=%.4f%%By=%.4f%%Bz=%.4f%%",
+                Jpm, B[0], B[1], B[2]);
+        s << prog.get<std::string>("--output_dir") << "/" <<
+            outfilename_buf;
+
+        build_hamiltonian(H_sym, jdata, Jpm, B);
+    }
 
 	auto H = LazyOpSum(basis, H_sym);
 

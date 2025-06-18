@@ -351,15 +351,15 @@ struct SymbolicOpSum {
     }
 
     SymbolicOpSum(const Op& o){
-        terms.push_back({1.0,o});
+        terms.emplace_back(1.0,o);
     }
 
 	void add_term(coeff_t c, const Op& op) {
-		terms.push_back({c, op}); // copies are fine
+		terms.emplace_back(c, op); // copies are fine
 	}
 
 	void operator+=(const Op& op) {
-		terms.push_back({1.0,op});
+        terms.emplace_back(1.0,op);
 	}
 
 	std::vector<std::pair<coeff_t, Op >> terms;
@@ -391,6 +391,13 @@ struct LazyOpSum {
 		// allocate the temporary storage
 		tmp = new coeff_t[basis.dim()]; 
 	}
+
+
+    LazyOpSum operator=(const LazyOpSum& other) = delete;
+
+    LazyOpSum(const LazyOpSum& other) : basis(other.basis), ops(other.ops) {
+		tmp = new coeff_t[basis.dim()]; 
+    }
 
 	~LazyOpSum() {
 		delete[] tmp;
