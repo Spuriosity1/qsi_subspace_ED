@@ -216,11 +216,11 @@ int main(int argc, char* argv[]) {
 
         snprintf(outfilename_buf, 1024, "Jpm=%.4f%%Bx=%.4f%%By=%.4f%%Bz=%.4f%%",
                 Jpm, B[0], B[1], B[2]);
-        s << prog.get<std::string>("--output_dir") << "/" <<
-            outfilename_buf;
 
         build_hamiltonian(H_sym, jdata, Jpm, B);
     }
+
+    s << prog.get<std::string>("--output_dir") << "/" << outfilename_buf;
 
 	auto H = LazyOpSum(basis, H_sym);
 
@@ -250,7 +250,7 @@ int main(int argc, char* argv[]) {
         write_dataset(file_id, "eigenvalues", eigvals.data(), dims, 1);
     }
 
-    // Write diag_vals: shape (dim, n_eigvecs)
+    // Write eigenvectors: shape (dim, n_eigvecs)
     {
         hsize_t dims[2] = {static_cast<hsize_t>(v.rows()), static_cast<hsize_t>(v.cols())};
         write_dataset(file_id, "eigenvectors", v.data(), dims, 2);
