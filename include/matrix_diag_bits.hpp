@@ -21,13 +21,15 @@
 using namespace Eigen;
 
 
-inline fs::path get_basis_file(const std::filesystem::path& lattice_file, const argparse::ArgumentParser& prog){
+
+
+inline fs::path get_basis_file(const std::filesystem::path& lattice_file,
+        int n_spinons, bool subspace=false){
 // Determine basis_file default if not set
 	std::string basis_file;
-    int n_spinons = prog.get<int>("--n_spinons");
 
     std::string ext = "." + std::to_string(n_spinons) + ".basis";
-	if (prog.is_used("--sector")) {
+	if (subspace) {
         ext += ".partitioned";
     } 
     ext += ".h5";
@@ -43,6 +45,7 @@ inline fs::path get_basis_file(const std::filesystem::path& lattice_file, const 
 
     return path;
 }
+
 
 template <typename T>
 struct is_sym_solver : std::false_type {};

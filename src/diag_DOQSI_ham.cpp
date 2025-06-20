@@ -89,6 +89,21 @@ void build_hamiltonian(SymbolicOpSum<double>& H_sym,
 
 
 
+inline void load_basis(ZBasis& basis, const argparse::ArgumentParser& prog){
+    auto basisfile = get_basis_file(prog.get<std::string>("lattice_file"), 
+            prog.get<int>("--n_spinons"),
+            prog.is_used("--sector"));
+
+    std::cout <<"Loading from "<<basisfile << std::endl;
+	if (prog.is_used("--sector")) {
+        auto sector = prog.get<std::string>("--sector");
+        basis.load_from_file(basisfile, sector.c_str());
+    } else {
+        basis.load_from_file(basisfile);
+    }
+}
+
+
 
 
 int main(int argc, char* argv[]) {
@@ -177,12 +192,8 @@ int main(int argc, char* argv[]) {
     std::cout<<"Loading basis..."<<std::endl;
 	ZBasis basis;
 
-	if (prog.is_used("--sector")) {
-        auto sector = prog.get<std::string>("--sector");
-        basis.load_from_file(get_basis_file(lattice_file, prog), sector.c_str());
-    } else {
-        basis.load_from_file(get_basis_file(lattice_file, prog));
-    }
+    load_basis(basis, prog);
+
     std::cout<<"Done! Basis dim="<<basis.dim()<<std::endl;
 
 
@@ -260,6 +271,10 @@ int main(int argc, char* argv[]) {
         fs::path latfile = prog.get<std::string>("lattice_file");
         write_string_to_hdf5(file_id, "latfile_json", 
                 latfile.filename() );
+        std::string dset_name = prog.is_used("--sector") ?
+             prog.get<std::string>("--sector") : "basis";
+        write_string_to_hdf5(file_id, "dset_name", 
+                dset_name );
     }
 
 
