@@ -169,7 +169,7 @@ class RingflipHamiltonian:
         if self.basis is None:
             raise AttributeError("basis is None, run `calc_basis` first")
 
-    def save_basis(self, filename: str = None):
+    def save_basis(self, filename = None):
         if filename is None:
             filename = "basis_"+self.lattice.shape_hash()+".csv"
         self._assert_basis()
@@ -177,11 +177,7 @@ class RingflipHamiltonian:
             for b in self.basis:
                 f.write('0x%08x\n' % b)
 
-
-
-
     def _load_basis_h5(self, fname, print_every=100):
-        raise NotImplemented
         self.basis = []
         with h5py.File(fname, 'r') as f:
             data = f["basis"][:]  # Read full dataset
@@ -190,13 +186,10 @@ class RingflipHamiltonian:
             raise ValueError("Dataset shape must be (N,2) for Uint128 storage.")
         
         # Convert (N,2) uint64 array to (N,) uint128 array
-        uint128_array = (data[:, 1].astype(uint128) << 64) | data[:, 0].astype(uint128)
-        
-        for line_no in range(data.shape[0]):
-            if (line_no % print_every == 0):
-                print(f"\r{len(self.basis)} sectors | line {line_no}", end='')
-            self.basis[sector].append(uint128_array[line_no])
-
+        for i in range(data.shape[0]):
+            v = int(data[i, 0])
+            v |= (int(data[i, 1]) << 64)
+            self.basis.append(v)
 
 
     def load_basis(self, fname, print_every=100, sort=False):
