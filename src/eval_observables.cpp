@@ -63,6 +63,27 @@ std::string read_string_from_hdf5(hid_t file_id, const std::string& dataset_name
 
 
 using json=nlohmann::json;
+using namespace std;
+
+void obtain_flags(
+    bool& calc_ring,
+    bool& calc_ring_ring,
+    bool& calc_partial_vol,
+    const argparse::ArgumentParser& prog){
+
+    if (prog.is_used("--calculate")){
+        calc_ring =        false;
+        calc_ring_ring =   false;
+        calc_partial_vol = false;
+        auto calc_opts = prog.get<std::vector<std::string>>("--calculate");
+        for (auto& s : calc_opts){
+            if (s == "ring") calc_ring=true;
+            if (s == "ring_ring") calc_ring_ring=true;
+            if (s == "partial_vol") calc_partial_vol=true;
+        }
+    }
+}
+
     
 int main(int argc, char* argv[]) {
 	argparse::ArgumentParser prog("build_ham");
@@ -72,7 +93,9 @@ int main(int argc, char* argv[]) {
 	prog.add_argument("-s", "--n_spinons")
         .default_value(0)
         .scan<'i',int>();
-
+    prog.add_argument("--calculate")
+        .choices("ring", "ring_ring", "partial_vol")
+        .nargs(argparse::nargs_pattern::at_least_one);
 
     try {
         prog.parse_args(argc, argv);
@@ -81,6 +104,11 @@ int main(int argc, char* argv[]) {
 		std::cerr << prog;
         std::exit(1);
     }
+
+
+    bool calc_ring, calc_ring_ring, calc_partial_vol;
+
+    obtain_flags(calc_ring, calc_ring_ring, calc_partial_vol, prog);
 
     auto in_datafile=fs::path(prog.get<std::string>("output_file"));
 
@@ -102,12 +130,15 @@ int main(int argc, char* argv[]) {
 	json jdata;
 	jfile >> jdata;
 
+    cout<<"Importing basis... ";
+
 	ZBasis basis;
     // NOTE n_spinons not handled properly
     basis.load_from_file( get_basis_file(latfile, 0, dset_name!="basis"), 
             dset_name
             );
     
+    cout<<"Done!"<<endl;
     
 
 
@@ -129,6 +160,8 @@ int main(int argc, char* argv[]) {
         write_dataset(out_fid, "eigenvalues", eigvals.data(), dims, 1);
     }
  
+    cout<<"Materialising rings... ";
+
     auto [ringL, ringR, sl] = get_ring_ops(jdata);
     int n_eigvecs = eigvecs.cols();
 
@@ -136,31 +169,41 @@ int main(int argc, char* argv[]) {
     std::vector<LazyOpSum<double>> lazy_ring_operators;
     std::vector<Eigen::SparseMatrix<double>> ring_operators;
     ring_operators.reserve(ringL.size());
+
     for (auto& O : ringL){
         lazy_ring_operators.emplace_back(basis, O);
         ring_operators.push_back(lazy_ring_operators.back().toSparseMatrix());
     }
 
+    cout<<"Done!"<<endl;
+
     std::cout<<"Calculating expectation vals of "<<n_eigvecs<<" lowest |psi>\n";
 
-    {
+    
+
+    if (calc_ring){
+
+        cout<<"Compute <O>... ";
         // computing all one-ring expectation values
         auto ring_expect = compute_all_expectations(eigvecs, ring_operators);
  
+        cout<<"Done!"<<endl;
         write_expectation_vals_h5(out_fid, "ring", ring_expect, 
                 ringL.size(), n_eigvecs); 
     }
 
-    {
+    if (calc_ring_ring){
+        cout<<"Compute <OO>... ";
         // computing all two-ring expectation values
         auto OO_expect = compute_cross_correlation(eigvecs, ring_operators);
         
+        cout<<"Done!"<<endl;
         write_cross_corr_vals_h5(out_fid, "ring_ring", OO_expect, 
                 ringL.size(), n_eigvecs); 
-
     }
 
-    {
+    if (calc_partial_vol){
+        cout<<"Compute <OOO>... ";
         // computing expectation values of the incomplete volumes 
         std::array<std::vector<double>, 4> partial_vol;
         for (int sl=0; sl<4; sl++){
@@ -173,6 +216,8 @@ int main(int argc, char* argv[]) {
             partial_vol[sl].reserve(lazy_par_vol_ops.size());
             partial_vol[sl]  = compute_all_expectations(eigvecs, lazy_par_vol_ops);
         }
+
+        cout<<"Done!"<<endl;
 
         // save the incomplete vol operators (each sl)
         for (size_t i = 0; i < partial_vol.size(); ++i) {
