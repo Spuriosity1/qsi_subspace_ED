@@ -2,6 +2,7 @@
 #include <basis_io.hpp>
 #include <nlohmann/json.hpp>
 #include <fstream>
+#include <cstdio>
 #include "bittools.hpp"
 #include <unordered_map>
 #include <sstream>
@@ -62,6 +63,7 @@ inline void partition_basis_hdf5(const std::string& infile, const std::array<Uin
         hsize_t total_rows = dims[0];
         
         for (hsize_t start_row = 0; start_row < total_rows; start_row += CHUNK_SIZE) {
+            printf("[ part ] row %12ld / %12ld (%.0f %%) \r", start_row, total_rows, 100.0*start_row/total_rows);
             hsize_t current_chunk_size = std::min(CHUNK_SIZE, total_rows - start_row);
             
             // Define hyperslab for current chunk
@@ -281,9 +283,7 @@ int main (int argc, char *argv[]) {
 
     partition_basis_hdf5(argv[1], sl_masks);
     
-
-
-
+    printf("\n\n Done! \n\n");
 
 
     return 0;

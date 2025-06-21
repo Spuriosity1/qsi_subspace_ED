@@ -144,16 +144,29 @@ inline diagonalise_real(const LazyOpSum<double>& H, const argparse::ArgumentPars
   VectorXd eigvals;
   MatrixXd eigvecs;
 
-  if (prog.get<std::string>("--algorithm") == "dense") {
+  std::string algo;
 
+  if (prog.is_used("--algorithm")){
+    algo = prog.get<std::string>("--algorithm");
+  } else {
+      if (H.cols() < 100){
+          algo = "dense";
+      } else if (H.cols() < 10000000){
+          algo = "sparse";
+      } else {
+          algo = "mfsparse";
+      }
+  }
+
+
+  if (algo == "dense") {
     // materialise
     std::cout << "Materialising dense matrix..." << std::endl;
     auto H_densemat = H.toSparseMatrix();
     std::cout << "Done!" << std::endl;
 
     compute_eigenspectrum_dense(H_densemat, eigvals, eigvecs, prog);
-  } else if (prog.get<std::string>("--algorithm") == "sparse") {
-
+  } else if (algo == "sparse") {
     // materialise
     std::cout << "Materialising sparse matrix..." << std::endl;
     auto H_sparsemat = H.toSparseMatrix();
@@ -163,10 +176,10 @@ inline diagonalise_real(const LazyOpSum<double>& H, const argparse::ArgumentPars
         H_sparsemat, eigvals, eigvecs, prog);
 
     if (prog.get<bool>("--save_matrix")) {
-      Eigen::saveMarket(H.toSparseMatrix(), "H.mtx");
+      Eigen::saveMarket(H_sparsemat, "H.mtx");
       std::cout << "Saved to H.mtx" << std::endl;
     }
-  } else if (prog.get<std::string>("--algorithm") == "mfsparse") {
+  } else if (algo == "mfsparse") {
     compute_spectrum_iterative<LazyOpSumProd<double>>(H, eigvals, eigvecs,
                                                       prog);
   }

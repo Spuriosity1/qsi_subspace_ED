@@ -166,7 +166,6 @@ int main(int argc, char* argv[]) {
 
     prog.add_argument("--algorithm", "-a")
         .choices("dense","sparse","mfsparse")
-        .default_value("sparse")
         .help("Variant of ED algorithm to run. dense is best for small problems, mfsparse is a matrix free method that trades off speed for memory.");
 		
     try {
@@ -234,12 +233,6 @@ int main(int argc, char* argv[]) {
     s << prog.get<std::string>("--output_dir") << "/" << outfilename_buf;
 
 	auto H = LazyOpSum(basis, H_sym);
-
-    if (prog.get<bool>("--save_matrix")) { 
-        std::string H_path = s.str() + ".H.mtx";
-        Eigen::saveMarket(H.toSparseMatrix(), H_path);
-        std::cout << "Saved Hamiltonian to " << H_path << std::endl;
-    }
 
     ////////////////////////////////////////
     // Do the diagonalisation
