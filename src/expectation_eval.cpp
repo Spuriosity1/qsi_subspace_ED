@@ -76,7 +76,7 @@ std::vector<optype>
 get_partial_vol_ops(
         const nlohmann::json& jdata,
         const std::vector<SymbolicPMROperator>& ring_list,
-        int sl
+        int missing_plaq_sl
 ) {
 
     std::vector<optype> op_list;
@@ -87,7 +87,7 @@ get_partial_vol_ops(
         
         std::vector<SymbolicPMROperator> ops;
         for (int i=0; i<4; i++) {
-            if (i != sl){
+            if (i != missing_plaq_sl){
                 int J = plaqi[i];
                 ops.push_back(ring_list[J]);
             }
