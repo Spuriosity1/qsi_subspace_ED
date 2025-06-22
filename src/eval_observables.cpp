@@ -232,17 +232,18 @@ int main(int argc, char* argv[]) {
         cout<<"Done!"<<endl;
 
         // save the incomplete vol operators (each sl)
-        for (size_t i = 0; i < partial_vol.size(); ++i) {
+        for (size_t sl = 0; sl < partial_vol.size(); ++sl) {
             const int n_vecs = eigvecs.cols();
-            const auto& vec = partial_vol[i];
+            const auto& vec = partial_vol[sl];
             const int num_ops = vec.size() / n_vecs / n_vecs;
 
-            assert( vec.size() == num_ops * n_vecs * n_vecs );
+            assert(vec.size() ==
+                   static_cast<size_t>(num_ops * n_vecs * n_vecs));
 
             hsize_t dims[3] = {static_cast<hsize_t>(num_ops),
                                static_cast<hsize_t>(n_vecs),
                                static_cast<hsize_t>(n_vecs)};
-            std::string name = "partial_vol_sl" + std::to_string(i);
+            std::string name = "partial_vol_sl" + std::to_string(sl);
             write_dataset(out_fid, name.c_str(), vec.data(), dims, 3);
         }
     }

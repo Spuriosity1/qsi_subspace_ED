@@ -92,13 +92,14 @@ get_partial_vol_ops(
                 ops.push_back(ring_list[J]);
             }
         } 
+        assert( ops.size() == 3);
         // Symmetrise
         //
         SymbolicOpSum<double> OOO;
         for (int i=0; i<6; i++){
             SymbolicPMROperator volOp("");
             for (int j=0; j<3; j++){
-                volOp *= ring_list[perm3[i][j]];
+                volOp *= ops[perm3[i][j]];
             }
             OOO += volOp; 
         } 
