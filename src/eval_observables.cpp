@@ -207,7 +207,7 @@ int main(int argc, char* argv[]) {
         // computing expectation values of the incomplete volumes 
         std::array<std::vector<double>, 4> partial_vol;
         for (int sl=0; sl<4; sl++){
-            auto par_vol_operators = get_partial_vol_ops(jdata, ringL, 0); 
+            auto par_vol_operators = get_partial_vol_ops(jdata, ringL, sl); 
             std::vector<LazyOpSum<double>> lazy_par_vol_ops;
             for (auto& v : par_vol_operators){
                 lazy_par_vol_ops.emplace_back(basis, v);
@@ -221,10 +221,14 @@ int main(int argc, char* argv[]) {
 
         // save the incomplete vol operators (each sl)
         for (size_t i = 0; i < partial_vol.size(); ++i) {
+
+            const int num_ops = partial_vol[i].size();
             const auto& vec = partial_vol[i];
-            hsize_t dims[1] = { vec.size() };
+            hsize_t dims[3] = {static_cast<hsize_t>(num_ops),
+                               static_cast<hsize_t>(eigvecs.cols()),
+                               static_cast<hsize_t>(eigvecs.cols())};
             std::string name = "partial_vol_sl" + std::to_string(i);
-            write_dataset(out_fid, name.c_str(), vec.data(), dims, 1);
+            write_dataset(out_fid, name.c_str(), vec.data(), dims, 3);
         }
     }
 
