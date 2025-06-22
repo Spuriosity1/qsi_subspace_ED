@@ -13,3 +13,5 @@ vendor/*
 hpc_driver/track
 basis_partitions
 .DS_Store
+driver/rundata
+driver/*.plan
