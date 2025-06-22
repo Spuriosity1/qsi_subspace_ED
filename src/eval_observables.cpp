@@ -234,8 +234,11 @@ int main(int argc, char* argv[]) {
         // save the incomplete vol operators (each sl)
         for (size_t i = 0; i < partial_vol.size(); ++i) {
             const int n_vecs = eigvecs.cols();
-            const int num_ops = partial_vol[i].size() / n_vecs / n_vecs;
             const auto& vec = partial_vol[i];
+            const int num_ops = vec.size() / n_vecs / n_vecs;
+
+            assert( vec.size() == num_ops * n_vecs * n_vecs );
+
             hsize_t dims[3] = {static_cast<hsize_t>(num_ops),
                                static_cast<hsize_t>(n_vecs),
                                static_cast<hsize_t>(n_vecs)};
