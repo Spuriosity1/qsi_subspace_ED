@@ -187,4 +187,3 @@ inline diagonalise_real(const LazyOpSum<double>& H, const argparse::ArgumentPars
 }
 
 
-

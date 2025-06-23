@@ -96,6 +96,14 @@ diag_DOQSI_ham = executable('diag_DOQSI_ham',
   )
 
 
+ftlm_DOQSI_ham = executable('ftlm_DOQSI_ham',
+  files(['src/ftlm_DOQSI_ham.cpp', 'src/expectation_eval.cpp','src/ftlm.cpp']),
+  dependencies: [g_deps, eigen_dep, spectra_dep],
+  include_directories: inc,
+  cpp_args: target_args
+  )
+
+
 eval_observables = executable('eval_observables',
   files(['src/eval_observables.cpp', 'src/expectation_eval.cpp']),
   dependencies: [g_deps, eigen_dep, spectra_dep],
