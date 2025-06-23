@@ -318,7 +318,7 @@ void test_vector_size_mismatch() {
     std::cout << "✓ Vector size mismatch test passed" << std::endl;
 }
 
-void test_random_orthogonal_matrix() {
+void test_random_orthogonal_matrix(int n=30) {
     std::cout << "Testing Random Orthogonal Matrix..." << std::endl;
     
     // Create a random orthogonal matrix (preserves norms)
@@ -326,9 +326,9 @@ void test_random_orthogonal_matrix() {
     std::mt19937 gen(42); // Fixed seed for reproducibility
     std::normal_distribution<> dis(0.0, 1.0);
     
-    Eigen::MatrixXd Q(4, 4);
-    for (int i = 0; i < 4; ++i) {
-        for (int j = 0; j < 4; ++j) {
+    Eigen::MatrixXd Q(n, n);
+    for (int i = 0; i < n; ++i) {
+        for (int j = 0; j < n; ++j) {
             Q(i, j) = dis(gen);
         }
     }
@@ -338,15 +338,24 @@ void test_random_orthogonal_matrix() {
     Q = qr.householderQ();
     
     MatrixOperator M(Q);
-    Eigen::VectorXd v(4);
-    v << 1.0, 0.0, 0.0, 0.0;
-    double beta = 1.0;
+    Eigen::VectorXd v(n);
+//    for (int i = 0; i < n; ++i) {
+//        v(i) = dis(gen);
+//    }
+    v(0)=1;
+    double beta = 0.001;
     
-    Eigen::VectorXd result = krylov_expv(M, v, beta, 10);
+    Eigen::VectorXd krylov_result = krylov_expv(M, v, n, beta, 10);
+    Eigen::MatrixXd tmp = -beta * Q;
+    Eigen::VectorXd exact_result = tmp.exp() * v;
+
     
     // For orthogonal matrices, the exponential should also preserve structure
-    assert(std::isfinite(result.norm()));
-    assert(result.norm() > 1e-10);
+    assert(std::isfinite(krylov_result.norm()));
+    assert(krylov_result.norm() > 1e-10);
+    std::cout << "Exact: "<<exact_result << std::endl;
+    std::cout << "Krylov: "<<krylov_result << std::endl;
+    assert(vectors_approx_equal(krylov_result, exact_result, 1e-4));
     std::cout << "✓ Random orthogonal matrix test passed" << std::endl;
 }
 

@@ -95,9 +95,11 @@ void write_cross_corr_vals_h5(
 
 void write_string_to_hdf5(hid_t file_id, const std::string& dataset_name, const std::string& value);
 
-
-
 void write_dataset(hid_t file_id, const char* name, const double* data, hsize_t* dims, int rank);
 
+
+template<typename T>
+requires std::convertible_to<T, int>
+void write_integer(hid_t file_id, const char* name, T value);
 
 

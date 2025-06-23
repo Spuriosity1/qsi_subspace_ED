@@ -144,11 +144,6 @@ int main(int argc, char* argv[]) {
     std::cout << "Running FTLM: R=" << R << ", ncv=" << ncv << ", Temps=[" << T_min << ", " << T_max << "] with N_T=" << N_T << std::endl;
 
     // Create temperature grid
-    std::vector<double> Ts(N_T);
-    for (int i = 0; i < N_T; ++i) {
-        Ts[i] = T_min + (T_max - T_min) * i / (N_T - 1);
-    }
-
     // Allocate result containers
     std::vector<double> Cvs(N_T), Zs(N_T);
 
@@ -158,14 +153,14 @@ int main(int argc, char* argv[]) {
 
     // Run it
     
-    using OpType = Spectra::SparseGenMatProd<double>;
+    using OpType = Eigen::SparseMatrix<double>;
 
 
     std::vector<OpType> observables;
     observables.push_back(H_sp);
     observables.push_back(H_sp*H_sp);
 
-    ftlm_computer<OpType> calc(observables, H_sp, Ts);
+    ftlm_computer<OpType> calc(observables, H_sp, T_min, T_max, N_T);
     calc.set_numerical_params(ncv, prog.get<double>("--tol"));
 
     // 6. Run multiple samples
@@ -173,8 +168,8 @@ int main(int argc, char* argv[]) {
     std::mt19937 rng(rd());
     auto num_samples=prog.get<int>("--n_randvecs");
     for (int ns=0; ns<num_samples; ns++){
-        std::cout<<"[ftlm] Sample "<<ns<<"/"<<num_samples << "     \r" << 
-            std::flush;
+        std::cout<<"[ftlm] Sample "<<ns+1<<"/"<<num_samples << 
+            std::endl;
         calc.evolve(rng);
     }
     std::cout<<std::endl;
@@ -188,10 +183,11 @@ int main(int argc, char* argv[]) {
 
     // Write temperatures
     {
-        hsize_t dims[1] = {Ts.size()};
+        hsize_t dims[1] = {static_cast<hsize_t>(N_T)};
         write_dataset(file_id, "beta", calc.get_beta_grid().data(), dims, 1);
         calc.write_to_h5(file_id, 0, "H");
         calc.write_to_h5(file_id, 1, "H*H");
+        write_integer(file_id, "num_samples", num_samples);
     }
 
 	return 0;

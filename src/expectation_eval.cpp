@@ -244,6 +244,33 @@ void write_dataset(hid_t file_id, const char* name, const double* data, hsize_t*
     H5Sclose(dataspace_id);
 };
 
+template<typename T>
+requires std::convertible_to<T, int>
+void write_integer(hid_t file_id, const char* name, T value) {
+    // Create the data space for the scalar dataset
+    hid_t dataspace_id = H5Screate(H5S_SCALAR);
+    int val = static_cast<int>(value);
+
+    // Create the dataset with integer type
+    hid_t dataset_id = H5Dcreate(file_id, name, H5T_NATIVE_INT,
+                                 dataspace_id, H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT);
+
+    // Write the integer to the dataset
+    herr_t status = H5Dwrite(dataset_id, H5T_NATIVE_INT, H5S_ALL, H5S_ALL,
+                             H5P_DEFAULT, &val);
+
+    // Close everything
+    H5Dclose(dataset_id);
+    H5Sclose(dataspace_id);
+    H5Fclose(file_id);
+    
+    if (status < 0) throw std::runtime_error("Failed to write dataset");
+}
+
+template void write_integer(hid_t file_id, const char* name, int value);
+template void write_integer(hid_t file_id, const char* name, unsigned int value);
+template void write_integer(hid_t file_id, const char* name, long int value);
+template void write_integer(hid_t file_id, const char* name, unsigned long int value);
 
 void write_expectation_vals_h5(
     hid_t file_id,
