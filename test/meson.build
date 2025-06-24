@@ -17,6 +17,12 @@ test_PMR_operator = executable('test_PMR_operator',
                          dependencies: [eigen_dep, hdf5_dep],
                          install : false)
 
+#test_ftlm_ops = executable('test_ftlm_ops','test_ftlm_ops.cpp',
+#                         include_directories: inc,
+#                         dependencies: [eigen_dep],
+#                         install : false)
+
+
 # Register specific test categories
 test('PMRoperator_edge_case', test_PMR_operator,
   timeout : 10,
@@ -47,3 +53,6 @@ test('uint128_edge_cases', test_uint128,
      args : ['--test-edge-cases'],
      timeout : 10,
      suite : ['unit', 'edge_cases'])
+
+
+#test('Krylov operations', test_ftlm_ops)

@@ -107,13 +107,16 @@ struct ZBasis {
 		return n_insertions;
 	}
 
-	void load_from_file(const fs::path& bfile, const char* sector=""){
+	void load_from_file(const fs::path& bfile, const std::string& dataset="basis"){
+
         if (bfile.stem().extension() == ".partitioned"){
             assert(bfile.extension() == ".h5");
-            states = basis_io::read_basis_hdf5(bfile, sector);
+            states = basis_io::read_basis_hdf5(bfile, dataset.c_str());
         } else if (bfile.extension() == ".h5"){
+            assert(dataset=="basis");
 			states = basis_io::read_basis_hdf5(bfile); 
 		} else if (bfile.extension() == ".csv"){
+            assert(dataset=="basis");
 			states = basis_io::read_basis_csv(bfile); 
 		} else {
 			throw std::runtime_error(
@@ -503,7 +506,7 @@ private:
 };
 
 
-/*
+
 namespace Eigen {
 	template<typename coeff_t, typename Rhs>
 	struct Product<LazyOpSum<coeff_t>, Rhs, AliasFreeProduct> :
@@ -516,6 +519,6 @@ namespace Eigen {
 		}
 	};
 }
-*/
+
 
 

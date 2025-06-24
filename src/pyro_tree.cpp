@@ -337,12 +337,6 @@ _build_state_dfs(cust_stack& node_stack,
 		unsigned thread_id, 
 		unsigned long max_queue_len){
 	while (!node_stack.empty() && node_stack.size() < max_queue_len){
-#if VERBOSITY > 1
-		counters[thread_id]++;
-		if (counters[thread_id]%100 == 0){
-			printf("Thread %u stack size %lu\n", thread_id, node_stack.size());
-		}
-#endif
 		if (node_stack.top().curr_spin == lat.spins.size()){
 			state_set[thread_id].push_back(node_stack.top().state_thus_far);
 			node_stack.pop();

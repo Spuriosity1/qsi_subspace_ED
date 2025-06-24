@@ -2,12 +2,13 @@
 
 
 #include <nlohmann/json.hpp>
+#include <ostream>
 #include "hamiltonain_setup.hpp"
+
+#include "ftlm.hpp"
 
 
 using json = nlohmann::json;
-
-
 
 int main(int argc, char* argv[]) {
 	argparse::ArgumentParser prog("build_ham");
@@ -41,36 +42,35 @@ int main(int argc, char* argv[]) {
 		.help("Krylov dimension, shoufl be > 2*n_eigvals")
 		.default_value(15)
 		.scan<'i', int>();
-	prog.add_argument("--n_eigvals", "-n")
-		.help("Number of eigenvlaues to compute")
-		.default_value(5)
+
+	prog.add_argument("--n_randvecs", "-R")
+		.help("Number of random vectors for FTLM evaluation")
+		.default_value(20)
 		.scan<'i', int>();
 
-	prog.add_argument("--n_eigvecs", "-N")
-		.help("Number of eigenvectors to store (must be <= n_eigvals)")
-		.default_value(4)
+	prog.add_argument("--n_temps", "-S")
+		.help("Number of temperatures")
+		.default_value(100)
 		.scan<'i', int>();
+
+    prog.add_argument("--T_min")
+        .required()
+        .scan<'g', double>();
+
+    prog.add_argument("--T_max")
+        .required()
+        .scan<'g', double>();
+
 	prog.add_argument("--n_spinons")
+        .help("Number of allowed spinons in the basis")
         .default_value(0)
         .scan<'i', int>();
 
-	prog.add_argument("--save_matrix")
-		.help("Flag to get the solver to export a rep of the matrix")
-		.default_value(false)
-		.implicit_value(true);
-    prog.add_argument("--max_iters")
-        .help("Max steps for iterative solver")
-        .default_value(1000)
-        .scan<'i', int>();
     prog.add_argument("--tol")
         .help("Tolerance iterative solver")
         .default_value(1e-10)
         .scan<'g', double>();
-
-    prog.add_argument("--algorithm", "-a")
-        .choices("dense","sparse","mfsparse")
-        .help("Variant of ED algorithm to run. dense is best for small problems, mfsparse is a matrix free method that trades off speed for memory.");
-		
+	
     try {
         prog.parse_args(argc, argv);
     } catch (const std::exception& err){
@@ -98,17 +98,11 @@ int main(int argc, char* argv[]) {
 
     std::cout<<"Done! Basis dim="<<basis.dim()<<std::endl;
 
-
-
 	using T=double;
 	SymbolicOpSum<T> H_sym;
 
-
     char outfilename_buf[1024];
-
     std::stringstream s;
-
-
 
     if (prog.is_used("--g")){
 
@@ -138,43 +132,63 @@ int main(int argc, char* argv[]) {
 	auto H = LazyOpSum(basis, H_sym);
 
     ////////////////////////////////////////
-    // Do the diagonalisation
-    auto [eigvals, v] = diagonalise_real(H, prog);
+    // run FTLM
+    // Set up FTLM parameters
+    int R = prog.get<int>("--n_randvecs");
+    int ncv = prog.get<int>("--ncv");   // e.g. 100
+    int N_T = prog.get<int>("--n_temps");   // e.g. 100
+    double T_min = prog.get<double>("--T_min");
+    double T_max = prog.get<double>("--T_max");
 
-    std::cout << "Eigenvalues:\n" << eigvals << "\n\n";
-    std::string filename = s.str()+".eigs.h5";
+    // Output message
+    std::cout << "Running FTLM: R=" << R << ", ncv=" << ncv << ", Temps=[" << T_min << ", " << T_max << "] with N_T=" << N_T << std::endl;
+
+    // Create temperature grid
+    // Allocate result containers
+    std::vector<double> Cvs(N_T), Zs(N_T);
+
+    // materialse H
+    std::cout << "Materialising H..." << std::endl;
+    auto H_sp = H.toSparseMatrix();
+
+    // Run it
+    
+    using OpType = Eigen::SparseMatrix<double>;
 
 
-	std::cout << "Writing to\n"<<filename<<std::endl;
+    std::vector<OpType> observables;
+    observables.push_back(H_sp);
+    observables.push_back(H_sp*H_sp);
 
+    ftlm_computer<OpType> calc(observables, H_sp, T_min, T_max, N_T);
+    calc.set_numerical_params(ncv, prog.get<double>("--tol"));
+
+    // 6. Run multiple samples
+    std::random_device rd;
+    std::mt19937 rng(rd());
+    auto num_samples=prog.get<int>("--n_randvecs");
+    for (int ns=0; ns<num_samples; ns++){
+        std::cout<<"[ftlm] Sample "<<ns+1<<"/"<<num_samples << 
+            std::endl;
+        calc.evolve(rng);
+    }
+    std::cout<<std::endl;
+
+    // finite_temperature_lanczos(H, basis.dim(), R, M, Ts, Cvs, Zs);
+
+    std::string filename = s.str() + ".ftlm.h5";
+    std::cout << "Writing FTLM output to " << filename << std::endl;
     hid_t file_id = H5Fcreate(filename.c_str(), H5F_ACC_TRUNC, H5P_DEFAULT, H5P_DEFAULT);
     if (file_id < 0) throw std::runtime_error("Failed to create HDF5 file");
 
-    
-    // Write eigenvalues: shape (n_eigvals,)
+    // Write temperatures
     {
-        hsize_t dims[1] = {static_cast<hsize_t>(eigvals.size())};
-        write_dataset(file_id, "eigenvalues", eigvals.data(), dims, 1);
+        hsize_t dims[1] = {static_cast<hsize_t>(N_T)};
+        write_dataset(file_id, "beta", calc.get_beta_grid().data(), dims, 1);
+        calc.write_to_h5(file_id, 0, "H");
+        calc.write_to_h5(file_id, 1, "H*H");
+        write_integer(file_id, "num_samples", num_samples);
     }
-
-    // Write eigenvectors: shape (dim, n_eigvecs)
-    {
-        hsize_t dims[2] = {static_cast<hsize_t>(v.rows()), static_cast<hsize_t>(v.cols())};
-        write_dataset(file_id, "eigenvectors", v.data(), dims, 2);
-    }
-
-    {
-        fs::path latfile = prog.get<std::string>("lattice_file");
-        write_string_to_hdf5(file_id, "latfile_json", 
-                latfile.filename() );
-        std::string dset_name = prog.is_used("--sector") ?
-             prog.get<std::string>("--sector") : "basis";
-        write_string_to_hdf5(file_id, "dset_name", 
-                dset_name );
-    }
-
-
-
 
 	return 0;
 }
