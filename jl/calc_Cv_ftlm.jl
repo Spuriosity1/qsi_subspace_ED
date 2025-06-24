@@ -39,14 +39,21 @@ Returns:
 - Evals::Matrix{Float64}: n x steps matrix of observable expectations
 """
 function thermal_evolution(H::SparseMatrixCSC, O::Union{SparseMatrixCSC, Function};
-                           Tmin::Float64, n_samples::Int = 1, steps::Int = 100,
+                           Tmin::Float64, Tmax::Float64=1., n_samples::Int = 1, steps::Int = 100,
                            kry_settings::Lanczos = Lanczos(),
                            seed = nothing)
 
+    vals, vecs, info = eigsolve(H, 1, :LM, issymmetric=true)
+    eigval0 = vals[1]
+
+    H -= eigval0 * I # shift the eogvals to avoid overflow
+
+
     N = size(H, 1)
     β_max = 1 / Tmin
-    dβ = β_max / steps
-    βs = collect(0.0:dβ:β_max)
+    β_min = 1 / Tmax
+
+    βs = exp.(range(log(β_min), log(β_max), steps))
 
     if seed !== nothing
         Random.seed!(seed)
@@ -61,13 +68,17 @@ function thermal_evolution(H::SparseMatrixCSC, O::Union{SparseMatrixCSC, Functio
     end
 
     @assert norm(H - adjoint(H)) < 1e-8
-
+    old_β=0
     for (j, β) in enumerate(βs)
         all_ok = true
 
         for i in 1:n_samples
             if j > 1
+                dβ = β - old_β
+                old_β = β
                 ψ[:,i], info = exponentiate(H, -dβ, ψ[:,i], kry_settings)
+
+                ψ[:,i] ./= norm(ψ[:,i])
 
                 if info.converged ==0
                     all_ok=false
@@ -76,7 +87,7 @@ function thermal_evolution(H::SparseMatrixCSC, O::Union{SparseMatrixCSC, Functio
                 end
             end
             Ov = (O isa Function) ? O(ψ[:,i]) : O * ψ[:,i]
-            tmp = real(dot(ψ[:,i], Ov)) / real(dot(ψ[:,i], ψ[:,i]))
+            tmp = real(dot(ψ[:,i], Ov)) #/ real(dot(ψ[:,i], ψ[:,i]))
             sums[j] += tmp
         end
         if !all_ok 
@@ -99,21 +110,27 @@ Returns:
 - Evals::Matrix{Float64}: n x steps matrix of observable expectations
 """
 function dense_thermal_evolution(H::SparseMatrixCSC, O::Union{SparseMatrixCSC, Function};
-    steps::Int = 100, Tmin::Float64,)
+    Tmin::Real, Tmax::Real=1., 
+    steps::Int = 100, 
+    atol=1e-16)
 
     β_max = 1 / Tmin
-    dβ = β_max / steps
-    βs = collect(0.0:dβ:β_max)
+    β_min = 1 / Tmax
+   
+    βs = exp.(range(log(β_min), log(β_max), steps))
 
     H_dense = Matrix(H)
 
-    F = eigen!(H_dense)
+    spectrum = real.(eigvals(H_dense))
     Es = zeros(length(βs))
+    min_E = first(spectrum)
+       
 
     for (j, β) in enumerate(βs)
-        Z = sum( exp.(-β * F.values) )
-        
-        Es[j] = sum( F.values .* exp.(-β * F.values) ) / Z
+        w = exp.(-β .* (spectrum.-min_E))
+        Z = sum(w)
+        Eβ = dot(spectrum, w)
+        Es[j] = Eβ / (Z + eps())
     end
 
     return βs, Es
