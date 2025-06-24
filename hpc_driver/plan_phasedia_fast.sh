@@ -2,7 +2,7 @@
 
 # Check if the user provided an input file
 if [ "$#" -lt 5 ]; then
-    echo "Usage: $0 <latspec> <initial_index> <rotation=IXYZ> <name> <db_repo>"
+    echo "Usage: $0 <latspec> <initial_index> <rotation=IXYZ> <name> <db_repo> < 0.1 0.2 ..."
     exit 1
 fi
 
@@ -36,21 +36,28 @@ fi
 
 echoerr() { echo "$@" 1>&2; }
 
-start=0.2
-stop=2
-step=0.2
-
 index=$2
-for p in $sector_list; do
-	bfile="../basis_partitions/$lattice/$p"
-	for x in `seq $start $step $stop`; do
 
+file1="${NAME}.plan_small"
+file2="${NAME}.plan_large"
+
+if [[ -f $file1 || -f $file2 ]]; then
+	echoerr "ERROR! files $file1 $file2 exist"
+	exit 1
+fi
+
+while read -r x; do
+	echo "x =$x"
+	for p in $sector_list; do
+		bfile="../basis_partitions/$lattice/$p"
 		cmd="python3 ../scripts/phasedia_micro.py $latfile $x --db_file ${DB_REPO}/data${NAME}_$index.db --basis_file $bfile --rotation $ROTATION"
 		if [[ `wc -l $bfile | sed -re 's/([0-9]+).*/\1/'` -lt 100000 ]]; then
-			echo $cmd
+			echo $cmd >> $file1
 		else
-			echoerr $cmd
+			echo $cmd >> $file2
 		fi
 		let index+=1
 	done
-done
+done < /dev/stdin
+
+echo "Wrote files $file1 $file2"

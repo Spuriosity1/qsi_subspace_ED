@@ -5,6 +5,8 @@ project('projected_ed', ['cpp', 'c'],
 )
 
 
+add_project_link_arguments(['-pthread'], language: 'cpp' )
+
 # Compiler flags for 128-bit integer support
 cpp_compiler = meson.get_compiler('cpp')
 host_cpu = host_machine.cpu_family()
@@ -37,6 +39,8 @@ if get_option('buildtype') == 'release'
 elif get_option('buildtype') == 'debug'
   # add_project_arguments(['-fsanitize=address'], language: 'cpp' )
 endif
+
+
 
 hdf5_dep = dependency('hdf5',
   language: 'c',
