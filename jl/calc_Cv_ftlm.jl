@@ -1,11 +1,9 @@
-import Pkg; Pkg.activate("$(@__DIR__)/../")
-
 using MatrixMarket
 using SparseArrays
 using LinearAlgebra
 using KrylovKit
 using Random
-using SparseArrays
+using JLD2, Printf
 
 """
     build_and_load_hamiltonian(exe::String, lattice_file::String;
@@ -138,3 +136,28 @@ end
 
 
 
+function process_file(mtx_file::String, dense::Bool, out_file::String)
+    n_samples = 200
+    Tmin = 1e-5
+
+    kry_settings = Lanczos(krylovdim=20)
+    steps = 300
+
+
+    H = MatrixMarket.mmread(mtx_file)
+    H isa SparseMatrixCSC || error("Matrix is not sparse")
+
+    if dense || size(H, 1) < 100
+        β, Evals = dense_thermal_evolution(H, H; Tmin=Tmin, steps=steps)
+        jldsave(out_file; beta=β, E_expect=Evals, n_samples=1, method="dense")
+    else
+        β, Evals = thermal_evolution(H, H; Tmin=Tmin, 
+            steps=steps,
+            n_samples=n_samples,
+            kry_settings=kry_settings,
+            seed=1000)
+
+        jldsave(out_file; beta=β, E_expect=Evals, n_samples=n_samples, method="sparse", steps=steps)
+    end
+
+end
