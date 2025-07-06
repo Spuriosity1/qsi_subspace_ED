@@ -39,7 +39,7 @@ Returns:
 function thermal_evolution(H::SparseMatrixCSC, O::Union{SparseMatrixCSC, Function};
                            Tmin::Float64, Tmax::Float64=1., n_samples::Int = 1, steps::Int = 100,
                            kry_settings::Lanczos = Lanczos(),
-                           seed = nothing)
+                           seed = nothing, verbose=false)
 
     vals, vecs, info = eigsolve(H, 1, :LM, issymmetric=true)
     eigval0 = vals[1]
@@ -69,6 +69,10 @@ function thermal_evolution(H::SparseMatrixCSC, O::Union{SparseMatrixCSC, Functio
     old_β=0
     for (j, β) in enumerate(βs)
         all_ok = true
+
+        if verbose
+            @info "Timestep $(j) / $(length(βs))"
+        end
 
         for i in 1:n_samples
             if j > 1
@@ -136,26 +140,32 @@ end
 
 
 
-function process_file(mtx_file::String, dense::Bool, out_file::String)
+function process_file(mtx_file::String, dense::Bool, out_file::String; verbose=false)
     n_samples = 200
     Tmin = 1e-5
 
     kry_settings = Lanczos(krylovdim=20)
-    steps = 300
+    steps = 100
 
 
     H = MatrixMarket.mmread(mtx_file)
     H isa SparseMatrixCSC || error("Matrix is not sparse")
 
     if dense || size(H, 1) < 100
+        if verbose
+            @info "Dense diagonalisation, $(steps) steps"
+        end
         β, Evals = dense_thermal_evolution(H, H; Tmin=Tmin, steps=steps)
         jldsave(out_file; beta=β, E_expect=Evals, n_samples=1, method="dense")
     else
+        if verbose
+            @info "Sparse diagonalisation, $(steps) steps"
+        end
         β, Evals = thermal_evolution(H, H; Tmin=Tmin, 
             steps=steps,
             n_samples=n_samples,
             kry_settings=kry_settings,
-            seed=1000)
+            seed=1000, verbose=verbose)
 
         jldsave(out_file; beta=β, E_expect=Evals, n_samples=n_samples, method="sparse", steps=steps)
     end
