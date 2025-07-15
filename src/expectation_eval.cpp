@@ -5,15 +5,20 @@
 std::tuple<std::vector<SymbolicPMROperator>,std::vector<SymbolicPMROperator>,
     std::vector<int>> 
 get_ring_ops(
-const nlohmann::json& jdata) {
+const nlohmann::json& jdata, bool incl_partial) {
 
     std::vector<SymbolicPMROperator> op_list;
     std::vector<SymbolicPMROperator> op_H_list;
     std::vector<int> sl_list;
 
 
+
 	for (const auto& ring : jdata.at("rings")) {
 		std::vector<int> spins = ring.at("member_spin_idx");
+
+        if (!incl_partial && spins.size() != 6){
+            continue;
+        }
 
 		std::vector<char> ops;
 		std::vector<char> conj_ops;

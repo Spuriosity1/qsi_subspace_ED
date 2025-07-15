@@ -146,4 +146,3 @@ std::vector<size_t> lattice::greedy_spin_ordering(int initial_id) const {
     return ordering;
 }
 
-

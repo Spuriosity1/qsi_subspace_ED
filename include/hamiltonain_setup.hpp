@@ -8,6 +8,10 @@
 
 #include "operator.hpp"
 #include "expectation_eval.hpp"
+#include "tetra_graph_io.hpp"
+
+
+
 
 
 inline void build_hamiltonian(SymbolicOpSum<double>& H_sym, 
@@ -30,6 +34,7 @@ inline void build_hamiltonian(SymbolicOpSum<double>& H_sym,
 
     auto [ringL, ringR, sl_list]  = get_ring_ops(jdata);
 
+    // ring exchanges
     for (size_t i=0; i<sl_list.size(); i++){
         auto sl = sl_list[i];
         auto R = ringR[i];
@@ -39,6 +44,7 @@ inline void build_hamiltonian(SymbolicOpSum<double>& H_sym,
         H_sym.add_term(g[sl], L); 
     }
     
+    // Ising terms
     for (const auto& bond : jdata.at("bonds")){
         auto i = bond.at("from_idx").get<int>();
         auto j = bond.at("to_idx").get<int>();
@@ -58,6 +64,44 @@ inline void build_hamiltonian(SymbolicOpSum<double>& H_sym,
                                                      {i, j}));
     }
 
+    try {
+        // lower order terms coupling defects
+        for (const auto& spin_set : jdata.at("neighbour2")){
+            H_sym.add_term(Jpm/2, SymbolicPMROperator({'+','-'}, {spin_set[0], spin_set[1]}));
+            H_sym.add_term(Jpm/2, SymbolicPMROperator({'-','+'}, {spin_set[0], spin_set[1]}));
+
+            std::cout <<"Adding NN Ising term " << 
+                spin_set[0]<<" "<<spin_set[1]
+                <<std::endl;
+        }
+
+
+    } catch (nlohmann::json::out_of_range& e){
+        std::cout<<"No NN terms."<<std::endl;
+    };
+
+
+    double H4_coeff =  Jpm*Jpm/4;
+
+    try {
+        for (const auto& spin_set : jdata.at("neighbour4") ){
+            H_sym.add_term(H4_coeff, SymbolicPMROperator({'+','-','+','-'}, 
+                        {spin_set[0], spin_set[1], spin_set[2], spin_set[3]}
+                        ));
+            H_sym.add_term(H4_coeff, SymbolicPMROperator({'+','-','+','-'}, 
+                        {spin_set[0], spin_set[1], spin_set[2], spin_set[3]}
+                        ));
+
+            std::cout <<"Adding NNNN Ising term " << 
+                spin_set[0]<<" "<<spin_set[1]<<" "<<spin_set[2]<<" "<<spin_set[3]
+                <<std::endl;
+        }
+
+    } catch (nlohmann::json::out_of_range& e){
+std::cout<<"No NNNN terms."<<std::endl;
+
+    };
+        
 }
 
 

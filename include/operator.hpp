@@ -128,7 +128,7 @@ struct ZBasis {
 		}
 	}
 	
-protected:
+    // pls dont modify me without permission :o
 	std::vector<state_t> states;
 	std::unordered_map<state_t, idx_t, Uint128Hash, Uint128Eq> state_to_index;
 };
@@ -182,9 +182,17 @@ struct SymbolicPMROperator {
     // returns sign of only possibly-nonzero entry, modifies J to its index
     int applyIndex(const ZBasis& basis, ZBasis::idx_t& J) const {
 		ZBasis::state_t state = basis[J];
+
 		int _sign = applyState(state);
-        J= basis.idx_of_state(state);
+
+        auto it = basis.state_to_index.find(state);
+        if (it == basis.state_to_index.end()) {
+            return 0;  // state not found in basis
+        }
+        J = it->second;
         return _sign;
+//        J= basis.idx_of_state(state);
+//        return _sign;
     }
     
 	

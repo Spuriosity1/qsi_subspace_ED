@@ -12,8 +12,7 @@
 
 std::tuple<std::vector<SymbolicPMROperator>,std::vector<SymbolicPMROperator>,
     std::vector<int>> 
-get_ring_ops(const nlohmann::json& jdata);
-
+get_ring_ops(const nlohmann::json& jdata, bool incl_partial=false);
 
 /*
 std::pair<std::vector<SymbolicOpSum<double>>,
