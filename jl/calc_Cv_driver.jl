@@ -5,31 +5,6 @@ include("calc_Cv_ftlm.jl")
 using Printf, FilePathsBase, ProgressMeter
 
 
-PROJROOT= joinpath(@__DIR__, "..")
-
-function rename_mtx_as_out(ODIR, mtx_file)
-    fname = basename(mtx_file)
-    base = replace(fname, r"\.mat\.mtx$" => "")
-    return joinpath(ODIR, base * ".jld2")
-end
-
-function process_all(files, ODIR, dense=false) prog = Progress(length(files))
-    Threads.@threads for i in eachindex(files)
-        next!(prog)
-        mtx_file = files[i]
-
-        out_file = rename_mtx_as_out(ODIR, mtx_file)
-
-        @info "Processing: $(basename(mtx_file))"
-        try
-            process_file(mtx_file, dense, out_file) 
-        catch
-            @error "Error processing $(mtx_file)"
-        end
-    end
-    finish!(prog)
-end
-
 function list_and_sort_basis_datasets(filename::String)
     basis_datasets = Dict{String, Int}()
 
@@ -47,6 +22,35 @@ function list_and_sort_basis_datasets(filename::String)
     return basis_datasets
 end
 
+
+PROJROOT= joinpath(@__DIR__, "..")
+
+function rename_mtx_as_out(ODIR, mtx_file)
+    fname = basename(mtx_file)
+    base = replace(fname, r"\.mat\.mtx$" => "")
+    return joinpath(ODIR, base * ".jld2")
+end
+
+function process_all(files, ODIR, dense=false)
+
+    @info "processing $(length(files)) files"
+    prog = Progress(length(files))
+    Threads.@threads for i in eachindex(files)
+        next!(prog)
+        mtx_file = files[i]
+
+        out_file = rename_mtx_as_out(ODIR, mtx_file)
+
+        try
+            process_file(mtx_file, dense, out_file) 
+        catch
+            @error "Error processing $(mtx_file)"
+        end
+    end
+    finish!(prog)
+end
+
+
 proc_one=joinpath(@__DIR__, "..", "jl", "process_one_Cv.jl")
 
 function print_all(files, ODIR, script_name, dense=false)
@@ -55,6 +59,7 @@ function print_all(files, ODIR, script_name, dense=false)
             out_file = rename_mtx_as_out(ODIR, mtx_file)
 
             cmd = `julia -t 1 $proc_one $mtx_file $dense $out_file`
+            println(cmd)
             println(io, join(cmd.exec, " "))
         end
     end
@@ -64,16 +69,15 @@ end
 
 function main()
     if length(ARGS) < 1
-        println("Usage: process_shape.jl <lattice> <Jpm> <Bx> <By> <Bz> [--sectors] [--force] [--dense]")
+        println("Usage: process_shape.jl <lattice_file.json> [--sectors] [--force] [--dense]")
         return
     end
 
     lattice_file = ARGS[1]
-    Jpm_s = ARGS[2]
-    B =ARGS[3:5]
 
     force = "--force" in ARGS
     dense = "--dense" in ARGS
+    calculate = "--calculate" in ARGS
     use_sectors = "--sectors" in ARGS
     
     lattice_stem, ext = splitext(lattice_file)
@@ -90,24 +94,11 @@ function main()
 
 
     dset_sizes = list_and_sort_basis_datasets(basis_file)
-
-    # generate all the .mtx files (<30 mins total)
-    for dset_name in keys(dset_sizes)
-        INDIR = joinpath(PROJROOT,"..", "mtx", lname*dset_name)
-        exe = joinpath(PROJROOT, "build", "build_hamiltonian")
-        
-        isdir(INDIR) || mkpath(INDIR)
-        cmd=`$(exe) $(lattice_file) --Jpm $Jpm_s --B $B -o $(INDIR)`
-        if use_sectors
-            cmd = `$cmd --sector $dset_name`
-        end
-        println(cmd)
-        run(cmd)
-    end
+    println(dset_sizes)
 
 
     script_name = joinpath(@__DIR__, "run_Cv_$(lname).plan")
-    rm(script_name)
+    rm(script_name, force=true)
 
 
     # run the easy ones
@@ -119,7 +110,7 @@ function main()
         for file in filter(f -> endswith(f, ".mat.mtx"), readdir(INDIR; join=true))
             out_file = rename_mtx_as_out(ODIR, file)
             if isfile(out_file) && !force
-                @info "Skipping existing file: $out_file"
+#                 @info "Skipping existing file: $out_file"
                 continue
             end
             push!(files, file)
@@ -127,7 +118,7 @@ function main()
 
         println("Processing $(length(files)) infiles")
 
-        if size < 1_000
+        if size < 1_000 || calculate
             process_all(files, ODIR, dense)
         else
             print_all(files, ODIR, script_name, dense)
