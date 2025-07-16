@@ -196,9 +196,9 @@ compute_cross_correlation(
             const auto& O_m = ops[m];
             for (int j = 0; j < num_vecs; ++j) {
                 const auto psi_j = eigenvectors.col(j);
-                tmp2 = O_l * (O_m * psi_j); // tmp2 = Oₗ Oₘ |ψⱼ⟩
+                tmp2 = (O_m * psi_j); // tmp2 = Oₘ |ψⱼ⟩
                 for (int i = 0; i < num_vecs; ++i) {
-                    const auto psi_i = eigenvectors.col(i);
+                    const auto psi_i = O_l * eigenvectors.col(i);
                     double val = psi_i.dot(tmp2);
                     size_t index = l * num_ops * num_vecs * num_vecs +
                                    m * num_vecs * num_vecs +

@@ -404,6 +404,7 @@ struct LazyOpSum {
 	}
 
 
+
     LazyOpSum operator=(const LazyOpSum& other) = delete;
 
     LazyOpSum(const LazyOpSum& other) : basis(other.basis), ops(other.ops) {
@@ -424,6 +425,7 @@ struct LazyOpSum {
 				y[i] += c * tmp[i];
 		}
 	}
+
 
 
 	// Eigen-compatible wrapper, evaluate y = this * x
@@ -485,6 +487,7 @@ struct LazyOpSum {
 		S.setFromTriplets(triplets.begin(), triplets.end());
 		return S;
 	}
+
 
 	private:
 	coeff_t* tmp; // temp storage
