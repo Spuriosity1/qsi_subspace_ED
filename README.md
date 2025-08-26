@@ -4,7 +4,7 @@ This is a low level template library + set of executables designed to do exact d
 
 The pipeline is as follows:
 
-![](projected ED.drawio.svg)
+![]("projected ED.drawio.svg")
 
 
 Executables:
