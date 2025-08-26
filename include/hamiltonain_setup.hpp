@@ -77,7 +77,7 @@ inline void build_hamiltonian(SymbolicOpSum<double>& H_sym,
 
 
     } catch (nlohmann::json::out_of_range& e){
-        std::cout<<"No NN terms."<<std::endl;
+        std::cout<<"No by hand NN terms."<<std::endl;
     };
 
 
@@ -92,7 +92,7 @@ inline void build_hamiltonian(SymbolicOpSum<double>& H_sym,
                         {spin_set[0], spin_set[1], spin_set[2], spin_set[3]}
                         ));
 
-            std::cout <<"Adding NNNN Ising term " << 
+            std::cout <<"Adding by hand NNNN Ising term " << 
                 spin_set[0]<<" "<<spin_set[1]<<" "<<spin_set[2]<<" "<<spin_set[3]
                 <<std::endl;
         }
