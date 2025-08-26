@@ -122,6 +122,15 @@ eval_observables = executable('eval_observables',
   cpp_args: target_args
   )
 
+
+eval_dsf = executable('eval_dsf',
+  files(['src/eval_dsf.cpp', 'src/expectation_eval.cpp']),
+  dependencies: [g_deps, eigen_dep, spectra_dep],
+  include_directories: inc,
+  cpp_args: target_args
+  )
+
+
 endif 
 endif
 

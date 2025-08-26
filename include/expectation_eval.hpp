@@ -14,6 +14,7 @@ std::tuple<std::vector<SymbolicPMROperator>,std::vector<SymbolicPMROperator>,
     std::vector<int>> 
 get_ring_ops(const nlohmann::json& jdata, bool incl_partial=false);
 
+
 /*
 std::pair<std::vector<SymbolicOpSum<double>>,
     std::vector<int>> 
@@ -95,6 +96,8 @@ void write_cross_corr_vals_h5(
 void write_string_to_hdf5(hid_t file_id, const std::string& dataset_name, const std::string& value);
 
 void write_dataset(hid_t file_id, const char* name, const double* data, hsize_t* dims, int rank);
+
+void write_cplx_dataset(hid_t file_id, const char* name, const std::complex<double>* data, hsize_t* dims, int rank);
 
 
 template<typename T>

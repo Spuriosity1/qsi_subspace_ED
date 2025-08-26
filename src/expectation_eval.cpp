@@ -1,5 +1,6 @@
 #include "expectation_eval.hpp"
 #include <iostream>
+#include <cstddef>  // for offsetof
 
 
 std::tuple<std::vector<SymbolicPMROperator>,std::vector<SymbolicPMROperator>,
@@ -36,6 +37,9 @@ const nlohmann::json& jdata, bool incl_partial) {
 	}
     return std::make_tuple(op_list, op_H_list, sl_list);
 }
+
+
+
 
 using optype=SymbolicOpSum<double>;
 
@@ -248,6 +252,40 @@ void write_dataset(hid_t file_id, const char* name, const double* data, hsize_t*
     H5Dclose(dataset_id);
     H5Sclose(dataspace_id);
 };
+
+
+void write_cplx_dataset(hid_t file_id, const char* name, const std::complex<double>* data, hsize_t* dims, int rank) {
+    // 1. Create dataspace
+    hid_t dataspace_id = H5Screate_simple(rank, dims, nullptr);
+    if (dataspace_id < 0) throw std::runtime_error("Failed to create dataspace");
+
+    // 2. Define HDF5 compound type for complex<double>
+    hid_t complex_type = H5Tcreate(H5T_COMPOUND, sizeof(std::complex<double>));
+
+    herr_t status;
+    status = H5Tinsert(complex_type, "re", 0, H5T_NATIVE_DOUBLE);
+    if (status < 0) throw std::runtime_error("Failed to insert real part");
+
+    status = H5Tinsert(complex_type, "im", sizeof(double), H5T_NATIVE_DOUBLE);
+    if (status < 0) throw std::runtime_error("Failed to insert imaginary part");
+
+    // 3. Create dataset
+    hid_t dataset_id = H5Dcreate2(file_id, name, complex_type,
+                                  dataspace_id, H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT);
+    if (dataset_id < 0) throw std::runtime_error("Failed to create complex dataset");
+
+    // 4. Write data
+    status = H5Dwrite(dataset_id, complex_type, H5S_ALL, H5S_ALL,
+                      H5P_DEFAULT, data);
+    if (status < 0) throw std::runtime_error("Failed to write complex dataset");
+
+    // 5. Clean up
+    H5Dclose(dataset_id);
+    H5Sclose(dataspace_id);
+    H5Tclose(complex_type);
+}
+
+
 
 template<typename T>
 requires std::convertible_to<T, int>
