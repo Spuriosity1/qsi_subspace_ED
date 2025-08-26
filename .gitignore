@@ -10,6 +10,7 @@ test/tmp
 vendor/*
 *.ipynb
 *.swp
+.old
 hpc_driver/track
 basis_partitions
 .DS_Store
