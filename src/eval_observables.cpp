@@ -39,7 +39,7 @@ void obtain_flags(
 
     
 int main(int argc, char* argv[]) {
-	argparse::ArgumentParser prog("build_ham");
+	argparse::ArgumentParser prog("eval_observables");
 	prog.add_argument("output_file");
 	prog.add_argument("--latfile_dir")
         .default_value("../lattice_files");
@@ -70,6 +70,10 @@ int main(int argc, char* argv[]) {
     auto in_datafile=fs::path(prog.get<std::string>("output_file"));
 
     hid_t in_fid = H5Fopen(in_datafile.c_str(), H5F_ACC_RDONLY, H5P_DEFAULT);
+    if (in_fid == H5I_INVALID_HID) {
+        cerr<<"Invalid data file: " <<in_datafile;
+        return 1;
+    }
     
     // loading the relevant data
     std::vector<double> eigvals = read_vector_h5(in_fid, "eigenvalues");

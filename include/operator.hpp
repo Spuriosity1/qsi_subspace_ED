@@ -2,6 +2,7 @@
 
 #include "bittools.hpp"
 #include <exception>
+#include <iostream>
 #include <sstream>
 #include <stdexcept>
 #include <vector>
@@ -108,7 +109,7 @@ struct ZBasis {
 	}
 
 	void load_from_file(const fs::path& bfile, const std::string& dataset="basis"){
-
+        std::cerr << "Loading basis from file " << bfile <<"\n";
         if (bfile.stem().extension() == ".partitioned"){
             assert(bfile.extension() == ".h5");
             states = basis_io::read_basis_hdf5(bfile, dataset.c_str());

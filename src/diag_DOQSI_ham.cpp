@@ -10,7 +10,7 @@ using json = nlohmann::json;
 
 
 int main(int argc, char* argv[]) {
-	argparse::ArgumentParser prog("build_ham");
+	argparse::ArgumentParser prog(argv[0]);
 	prog.add_argument("lattice_file");
 	prog.add_argument("-s", "--sector");
 
