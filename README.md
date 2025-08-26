@@ -4,7 +4,8 @@ This is a low level template library + set of executables designed to do exact d
 
 The pipeline is as follows:
 
-![]("projected ED.drawio.svg")
+![](https://raw.githubusercontent.com/Spuriosity1/qsi_subspace_ED/refs/heads/main/projected%20ED.drawio.svg)
+
 
 
 Executables:
