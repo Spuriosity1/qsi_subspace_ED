@@ -70,7 +70,7 @@ inline void build_hamiltonian(SymbolicOpSum<double>& H_sym,
             H_sym.add_term(Jpm/2, SymbolicPMROperator({'+','-'}, {spin_set[0], spin_set[1]}));
             H_sym.add_term(Jpm/2, SymbolicPMROperator({'-','+'}, {spin_set[0], spin_set[1]}));
 
-            std::cout <<"Adding NN Ising term " << 
+            std::cout <<"Adding by hand NN Ising term " << 
                 spin_set[0]<<" "<<spin_set[1]
                 <<std::endl;
         }

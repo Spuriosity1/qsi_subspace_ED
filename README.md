@@ -16,6 +16,15 @@ ninja -C build
 ninja -C build test # optional
 ```
 
+### Benchmarking
+The bash script bench/benchme.sh (run it from the project root directory) 
+runs a number of calculations on unit cells 1x2xj, for j=1:10. Runtimes
+are spat out as raw ints.
+
+```bash
+bench/benchme.sh 4
+0.01
+```
 
 ## Introduction
 
