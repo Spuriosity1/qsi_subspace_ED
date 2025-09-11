@@ -1,7 +1,8 @@
 #!/usr/bin/env julia
 
 include("calc_Cv_ftlm.jl")
-using Printf, FilePathsBase, ProgressMeter
+using Printf, FilePathsBase
+using ProgressMeter
 
 function rename_mtx_as_out(ODIR, mtx_file)
     fname = basename(mtx_file)
@@ -9,23 +10,23 @@ function rename_mtx_as_out(ODIR, mtx_file)
     return joinpath(ODIR, base * ".jld2")
 end
 
-#function process_all(files, ODIR, dense=false)
-#    prog = Progress(length(files))
-#    Threads.@threads for i in eachindex(files)
-#        next!(prog)
-#        mtx_file = files[i]
-#
-#        out_file = rename_mtx_as_out(ODIR, mtx_file)
-#
-#        @info "Processing: $(basename(mtx_file))"
-#        try
-#            process_file(mtx_file, dense, out_file) 
-#        catch
-#            @error "Error processing $(mtx_file)"
-#        end
-#    end
-#    finish!(prog)
-#end
+function process_all(files, ODIR, dense=false)
+    prog = Progress(length(files))
+    Threads.@threads for i in eachindex(files)
+        next!(prog)
+        mtx_file = files[i]
+
+        out_file = rename_mtx_as_out(ODIR, mtx_file)
+
+        @info "Processing: $(basename(mtx_file))"
+        try
+            process_file(mtx_file, dense, out_file) 
+        catch
+            @error "Error processing $(mtx_file)"
+        end
+    end
+    finish!(prog)
+end
 
 
 function print_all(files, ODIR, shape, dense=false)
@@ -52,7 +53,7 @@ function main()
     shape = ARGS[1]
     force = "--force" in ARGS
     dense = "--dense" in ARGS
-#    calculate = "--calculate" in ARGS
+    calculate = "--calculate" in ARGS
     
 
     INDIR = joinpath(@__DIR__, "..","..", "mtx", shape)
@@ -71,11 +72,11 @@ function main()
 
     println("Processing $(length(files)) infiles")
     
-#    if calculate
-#        process_all(files, ODIR, dense)
-#    else
-    print_all(files, ODIR, shape, dense)
-#    end
+    if calculate
+        process_all(files, ODIR, dense)
+    else
+   print_all(files, ODIR, shape, dense)
+    end
 end
 
 println("Begin")
