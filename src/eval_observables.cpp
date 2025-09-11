@@ -9,58 +9,7 @@
 #include "operator.hpp"
 
 #include "expectation_eval.hpp"
-
-
-
-// Helper function to split a string by a delimiter
-std::vector<std::string> split(const std::string& s, char delimiter) {
-    std::vector<std::string> tokens;
-    std::stringstream ss(s);
-    std::string item;
-    while (std::getline(ss, item, delimiter)) {
-        tokens.push_back(item);
-    }
-    return tokens;
-}
-
-// Extracts key-value pairs of the form key=value from the filename
-std::unordered_map<std::string, std::string> parse_parameters(const std::string& path) {
-    std::unordered_map<std::string, std::string> result;
-
-    // Find the start of the parameter section
-    size_t start = path.find_last_of('/');
-    std::string filename = (start != std::string::npos) ? path.substr(start + 1) : path;
-
-    // Split on '%'
-    std::vector<std::string> parts = split(filename, '%');
-    for (const auto& part : parts) {
-        size_t eq_pos = part.find('=');
-        if (eq_pos != std::string::npos) {
-            std::string key = part.substr(0, eq_pos);
-            std::string value = part.substr(eq_pos + 1);
-            result[key] = value;
-        }
-    }
-
-    return result;
-}
-
-
-std::string read_string_from_hdf5(hid_t file_id, const std::string& dataset_name) {
-    hid_t dset_id = H5Dopen(file_id, dataset_name.c_str(), H5P_DEFAULT);
-    hid_t dtype = H5Dget_type(dset_id);
-
-    char* rdata;  // HDF5 will allocate memory for this
-    H5Dread(dset_id, dtype, H5S_ALL, H5S_ALL, H5P_DEFAULT, &rdata);
-
-    std::string result(rdata);
-    free(rdata);  // Free the memory allocated by HDF5
-
-    H5Tclose(dtype);
-    H5Dclose(dset_id);
-    return result;
-}
-
+#include "admin.hpp"
 
 using json=nlohmann::json;
 using namespace std;
@@ -90,7 +39,7 @@ void obtain_flags(
 
     
 int main(int argc, char* argv[]) {
-	argparse::ArgumentParser prog("build_ham");
+	argparse::ArgumentParser prog("eval_observables");
 	prog.add_argument("output_file");
 	prog.add_argument("--latfile_dir")
         .default_value("../lattice_files");
@@ -121,6 +70,10 @@ int main(int argc, char* argv[]) {
     auto in_datafile=fs::path(prog.get<std::string>("output_file"));
 
     hid_t in_fid = H5Fopen(in_datafile.c_str(), H5F_ACC_RDONLY, H5P_DEFAULT);
+    if (in_fid == H5I_INVALID_HID) {
+        cerr<<"Invalid data file: " <<in_datafile;
+        return 1;
+    }
     
     // loading the relevant data
     std::vector<double> eigvals = read_vector_h5(in_fid, "eigenvalues");
@@ -160,7 +113,6 @@ int main(int argc, char* argv[]) {
     // Create a new file using default properties
     hid_t out_fid = H5Fcreate(in_datafile.replace_extension(".out.h5").c_str(), H5F_ACC_TRUNC, H5P_DEFAULT, H5P_DEFAULT);
     if (out_fid < 0) throw std::runtime_error("Failed to create HDF5 file");
-
 
     {
         // remember what the lattice is

@@ -2,6 +2,7 @@
 
 #include "bittools.hpp"
 #include <exception>
+#include <iostream>
 #include <sstream>
 #include <stdexcept>
 #include <vector>
@@ -108,7 +109,7 @@ struct ZBasis {
 	}
 
 	void load_from_file(const fs::path& bfile, const std::string& dataset="basis"){
-
+        std::cerr << "Loading basis from file " << bfile <<"\n";
         if (bfile.stem().extension() == ".partitioned"){
             assert(bfile.extension() == ".h5");
             states = basis_io::read_basis_hdf5(bfile, dataset.c_str());
@@ -128,7 +129,7 @@ struct ZBasis {
 		}
 	}
 	
-protected:
+    // pls dont modify me without permission :o
 	std::vector<state_t> states;
 	std::unordered_map<state_t, idx_t, Uint128Hash, Uint128Eq> state_to_index;
 };
@@ -182,9 +183,17 @@ struct SymbolicPMROperator {
     // returns sign of only possibly-nonzero entry, modifies J to its index
     int applyIndex(const ZBasis& basis, ZBasis::idx_t& J) const {
 		ZBasis::state_t state = basis[J];
+
 		int _sign = applyState(state);
-        J= basis.idx_of_state(state);
+
+        auto it = basis.state_to_index.find(state);
+        if (it == basis.state_to_index.end()) {
+            return 0;  // state not found in basis
+        }
+        J = it->second;
         return _sign;
+//        J= basis.idx_of_state(state);
+//        return _sign;
     }
     
 	
@@ -396,6 +405,7 @@ struct LazyOpSum {
 	}
 
 
+
     LazyOpSum operator=(const LazyOpSum& other) = delete;
 
     LazyOpSum(const LazyOpSum& other) : basis(other.basis), ops(other.ops) {
@@ -416,6 +426,7 @@ struct LazyOpSum {
 				y[i] += c * tmp[i];
 		}
 	}
+
 
 
 	// Eigen-compatible wrapper, evaluate y = this * x
@@ -477,6 +488,7 @@ struct LazyOpSum {
 		S.setFromTriplets(triplets.begin(), triplets.end());
 		return S;
 	}
+
 
 	private:
 	coeff_t* tmp; // temp storage

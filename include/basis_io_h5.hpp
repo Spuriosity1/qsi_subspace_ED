@@ -81,7 +81,6 @@ inline std::string make_sector_string(const std::vector<int>& sector) {
 
 
 inline std::vector<Uint128> read_basis_hdf5(const std::string& infile,
-
         const char*dset_name = "basis") {
 	// Result vector to store the loaded data
 	std::vector<Uint128> result;

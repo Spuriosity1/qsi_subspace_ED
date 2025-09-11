@@ -46,7 +46,7 @@ if __name__ == "__main__":
     rfh = RingflipHamiltonian(lat, pyrochlore.get_ringflips)
     print("Setting up basis...")
     if a.basis_file is None:
-        bfile = a.lattice_file.replace('.json', '.0.basis.csv')
+        bfile = a.lattice_file.replace('.json', '.0.basis.h5')
     else:
         bfile = a.basis_file
     rfh.load_basis(bfile)

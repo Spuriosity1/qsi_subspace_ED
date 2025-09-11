@@ -69,6 +69,9 @@ struct lattice {
 	
 };
 
+// Returns a vector of 'n' spin ids that connect untrelated spins
+std::vector<std::vector<int>> find_defect_motifs(const nlohmann::json& jdata, int n);
+
 
 namespace tetra_graph_io {
 
