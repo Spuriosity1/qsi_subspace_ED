@@ -176,8 +176,17 @@ struct SymbolicPMROperator {
 
         if ( (s & d) != 0 ) return 0;
         if ( (s & u) != u ) return 0;
+        // X mask makes sense: 
         state ^= X_mask;
-        return sign * (1 - 2 * (popcnt_u128(state & Z_mask) % 2) ); 
+
+        // Explanation: There is a factor of -1 for every spin DOWN (i.e. 0) 
+        // in state & Z_mask, i.e. every 1 in (~state) & Z_mask. 
+        // if there are an even number, we have overall +1. 
+        // If odd, there is overall -1.
+        //
+        //   popcnt_u128((~state) & Z_mask) - spin dn in Z mask 
+        //
+        return sign * (1 - 2 * (popcnt_u128((~state) & Z_mask) % 2) );
 	}
 
     // returns sign of only possibly-nonzero entry, modifies J to its index
