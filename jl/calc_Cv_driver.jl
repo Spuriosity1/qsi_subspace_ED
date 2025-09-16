@@ -2,7 +2,8 @@
 using HDF5
 
 include("calc_Cv_ftlm.jl")
-using Printf, FilePathsBase, ProgressMeter
+using Printf, FilePathsBase
+using ProgressMeter
 
 
 function list_and_sort_basis_datasets(filename::String)
@@ -41,6 +42,7 @@ function process_all(files, ODIR, dense=false)
 
         out_file = rename_mtx_as_out(ODIR, mtx_file)
 
+        @info "Processing: $(basename(mtx_file))"
         try
             process_file(mtx_file, dense, out_file) 
         catch
