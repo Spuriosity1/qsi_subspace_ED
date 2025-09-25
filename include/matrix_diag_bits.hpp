@@ -72,9 +72,9 @@ constexpr Spectra::SortRule default_sort_rule() {
 
 
 template<typename OpType, typename T, ScalarLike S>
-void compute_spectrum_iterative(const T ham, VectorXd& evals, MatrixX<S>& evecs, const argparse::ArgumentParser& settings)
+void compute_spectrum_iterative(const T& ham, VectorXd& evals, MatrixX<S>& evecs, const argparse::ArgumentParser& settings)
 {
-    OpType op(ham);
+    OpType op(ham); // move
 
     // parse ncv and n_eigvals
 	size_t n_eigvals = settings.get<int>("--n_eigvals");
@@ -118,6 +118,24 @@ void compute_spectrum_iterative(const T ham, VectorXd& evals, MatrixX<S>& evecs,
 }
 
 
+
+
+template<typename T, ScalarLike S>
+void compute_eigval0_lanczos(const T& ham, double& eigval, Eigen::VectorXd<S>& evecs, const argparse::ArgumentParser& settings)
+{
+    // parse ncv and n_eigvals
+	size_t n_eigvals = settings.get<int>("--n_eigvals");
+
+    if (n_eigvals != 1) {
+        std::cout << "Large-scale Lanczos method is only giving you one eigenvalue";
+    }
+
+    auto max_it = settings.get<int>("--max_iters");
+    auto tol    = settings.get<double>("--tol"); 
+
+}
+
+
 inline void compute_eigenspectrum_dense(const MatrixXd& ham, Eigen::VectorXd& e, Eigen::MatrixXd& v,
     const argparse::ArgumentParser& settings)
 {
@@ -139,51 +157,58 @@ inline void compute_eigenspectrum_dense(const MatrixXd& ham, Eigen::VectorXd& e,
     }
 }
 
+
+
+
+
 std::pair<VectorXd, MatrixXd>
 inline diagonalise_real(const LazyOpSum<double>& H, const argparse::ArgumentParser &prog) {
-  VectorXd eigvals;
-  MatrixXd eigvecs;
+    VectorXd eigvals;
+    MatrixXd eigvecs;
 
-  std::string algo;
+    std::string algo;
 
-  if (prog.is_used("--algorithm")){
-    algo = prog.get<std::string>("--algorithm");
-  } else {
-      if (H.cols() < 100){
-          algo = "dense";
-      } else if (H.cols() < 10000000){
-          algo = "sparse";
-      } else {
-          algo = "mfsparse";
-      }
-  }
-
-
-  if (algo == "dense") {
-    // materialise
-    std::cout << "Materialising dense matrix..." << std::endl;
-    auto H_densemat = H.toSparseMatrix();
-    std::cout << "Done!" << std::endl;
-
-    compute_eigenspectrum_dense(H_densemat, eigvals, eigvecs, prog);
-  } else if (algo == "sparse") {
-    // materialise
-    std::cout << "Materialising sparse matrix..." << std::endl;
-    auto H_sparsemat = H.toSparseMatrix();
-    std::cout << "Done!" << std::endl;
-
-    compute_spectrum_iterative<Spectra::SparseSymMatProd<double>>(
-        H_sparsemat, eigvals, eigvecs, prog);
-
-    if (prog.get<bool>("--save_matrix")) {
-      Eigen::saveMarket(H_sparsemat, "H.mtx");
-      std::cout << "Saved to H.mtx" << std::endl;
+    if (prog.is_used("--algorithm")){
+        algo = prog.get<std::string>("--algorithm");
+    } else {
+        if (H.cols() < 100){
+            algo = "dense";
+        } else if (H.cols() < 10000000){
+            algo = "sparse";
+        } else {
+            algo = "mfsparse";
+        }
     }
-  } else if (algo == "mfsparse") {
-    compute_spectrum_iterative<LazyOpSumProd<double>>(H, eigvals, eigvecs,
-                                                      prog);
-  }
-  return std::make_pair(eigvals, eigvecs);
+
+
+    if (algo == "dense") {
+        // materialise
+        std::cout << "Materialising dense matrix..." << std::endl;
+        auto H_densemat = H.toSparseMatrix();
+        std::cout << "Done!" << std::endl;
+
+        compute_eigenspectrum_dense(H_densemat, eigvals, eigvecs, prog);
+    } else if (algo == "sparse") {
+        // materialise
+        std::cout << "Materialising sparse matrix..." << std::endl;
+        auto H_sparsemat = H.toSparseMatrix();
+        std::cout << "Done!" << std::endl;
+
+        compute_spectrum_iterative<Spectra::SparseSymMatProd<double>>(
+                H_sparsemat, eigvals, eigvecs, prog);
+
+        if (prog.get<bool>("--save_matrix")) {
+            Eigen::saveMarket(H_sparsemat, "H.mtx");
+            std::cout << "Saved to H.mtx" << std::endl;
+        }
+    } else if (algo == "mfsparse") {
+        compute_spectrum_iterative<LazyOpSumProd<double>>(H, eigvals, eigvecs, prog);
+    } else if (algo == "mfeig0") {
+        throw "Not Implemented";   
+        //    compute_spectrum_lanczos<LazyOpSumProd<double>>(H, eigvals, eigvecs,
+        //                                                      prog);
+    }
+    return std::make_pair(eigvals, eigvecs);
 }
 
 

@@ -49,16 +49,19 @@ hdf5_dep = dependency('hdf5',
 
 json_dep = dependency('nlohmann_json', required: true)
 
-eigen_dep = dependency('Eigen3', method: 'cmake',  modules: ['Eigen3::Eigen'])
+eigen_dep = dependency('Eigen3', method: 'cmake',  modules: ['Eigen3::Eigen'], required: true)
 
 spectra_dep = dependency('spectra', method: 'cmake')
+
+omp_dep = dependency('OpenMP', required: true)
 
 # Local include dir for headers like bittools.hpp, admin.hpp, basis_io
 inc = [ include_directories('include') ]
 
 g_deps = [
   hdf5_dep,
-  json_dep
+  json_dep,
+  omp_dep
 ]
 
 subdir('src')

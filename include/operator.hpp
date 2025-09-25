@@ -209,9 +209,11 @@ struct SymbolicPMROperator {
 	// Apply this operator to an input vector `in` and store result in `out`
 	template <typename Orig, typename Dest>
 	void apply(const ZBasis& basis, const Orig& in, Dest& out) const {	
+        #pragma omp parallel for
 		for (ZBasis::idx_t i = 0; i < basis.dim(); ++i) {
 			ZBasis::idx_t J = i;
             auto c = applyIndex(basis, J) * in[i];
+            #pragma omp atomic
             out[J] += c;
 		}
 	}
