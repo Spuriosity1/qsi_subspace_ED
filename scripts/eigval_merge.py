@@ -5,6 +5,7 @@ import re
 import numpy as np
 from collections import defaultdict
 import argparse
+from tqdm import tqdm
 import subprocess
 
 def find_best_eigen(root_dir, target_B , target_Jpm , N, begin ):
@@ -22,7 +23,10 @@ def find_best_eigen(root_dir, target_B , target_Jpm , N, begin ):
     # List to hold (eigenvalue, sector, index in file)
     eigen_list = []
     
-    for dirpath, dirnames, filenames in os.walk(root_dir):
+    total = sum(1 for _ in os.walk(root_dir))
+
+    for dirpath, dirnames, filenames in tqdm(os.walk(root_dir), total=total, desc="Walking dirs"):
+    # for dirpath, dirnames, filenames in os.walk(root_dir):
         if not os.path.basename(dirpath).startswith(begin):
             continue
         if not re.search(begin+r"basis_s[\d.]+", dirpath):

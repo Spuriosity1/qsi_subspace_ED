@@ -106,19 +106,23 @@ def plot_parallelepiped(ax, a, origin=np.array([0, 0, 0])):
     ax.scatter(points[:, 0], points[:, 1], points[:, 2], s=0)
 
 
-def plot_atoms(ax, p: Lattice, atom_list=None, fmt_dict=None):
+def plot_atoms(ax, p: Lattice, atom_list=None, fmt_dict=None, show_ids=False, wrap=None):
     if atom_list is None:
         atom_list = p.atoms
     if fmt_dict is None:
         gen = ColorAlphabet()
         fmt_dict = {a.sl_name: {'color': gen()} for a in p.primitive.atoms}
+    if wrap is None:
+        wrap = p.wrap_coordinate
     if len(fmt_dict) != len(p.primitive.atoms):
         raise ValueError("Provided format dict must have same number of keys as sublattices")
 
     for j, a in enumerate(atom_list):
         assert a is not None
-        ax.plot(*a.xyz, 'o', **fmt_dict[a.sl_name])
-        ax.text(*a.xyz, j)
+        x = wrap(a.xyz)
+        ax.plot(*x, 'o', **fmt_dict[a.sl_name])
+        if show_ids:
+            ax.text(*x, j)
 
 
 def show_state(ax, lat, state: int, emph=()):
@@ -135,7 +139,7 @@ def show_state(ax, lat, state: int, emph=()):
         ax.text(*a.xyz, j)
 
 
-def plot_bonds(ax, p:Lattice, bond_list=None, fmt_dict=None):
+def plot_bonds(ax, p:Lattice, bond_list=None, fmt_dict=None, wrap=None):
     if bond_list is None:
         bond_list = p.bonds
 
@@ -148,12 +152,15 @@ def plot_bonds(ax, p:Lattice, bond_list=None, fmt_dict=None):
     if len(fmt_dict) != len(bond_sls):
         raise ValueError("Provided format dict must have same number of keys as bond colors")
 
+    if wrap is None:
+        wrap = p.wrap_coordinate
+    
     for b in bond_list:
         x0 = p.atoms[b.from_idx].xyz
         parts = [[x0]]
         denom = 20
         for i in range(denom):
-            x = p.wrap_coordinate(x0 + (i+1)*b.bond_delta/denom)
+            x = wrap(x0 + (i+1)*b.bond_delta/denom)
 
             if (x-parts[-1][-1]).norm() < 2*b.bond_delta.norm()/denom:
                 parts[-1].append(x)
