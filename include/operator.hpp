@@ -21,7 +21,7 @@ namespace fs = std::filesystem;
 
 
 template<typename T>
-concept ScalarLike = std::floating_point<T> ||
+concept RealOrCplx = std::floating_point<T> ||
                  (requires { typename T::value_type; } &&
                   std::is_same_v<T, std::complex<typename T::value_type>> &&
                   std::floating_point<typename T::value_type>);
@@ -213,8 +213,29 @@ struct SymbolicPMROperator {
 		for (ZBasis::idx_t i = 0; i < basis.dim(); ++i) {
 			ZBasis::idx_t J = i;
             auto c = applyIndex(basis, J) * in[i];
-            #pragma omp atomic
+            // Note: each of these is a gneralised permitation, and so
+            // the modified J after applyIndex is uniquely associated with i.
+            // Therefore no atomic guard is needed here.
+            if (c != 0) {
             out[J] += c;
+            }
+		}
+	}
+
+
+	// Apply this operator to an input vector `in` and store a * result in `out`
+	template <typename Orig, typename Dest>
+	void apply(const ZBasis& basis, const Orig& in, Dest& out, double a) const {	
+        #pragma omp parallel for
+		for (ZBasis::idx_t i = 0; i < basis.dim(); ++i) {
+			ZBasis::idx_t J = i;
+            auto c = applyIndex(basis, J) * in[i];
+            // Note: each of these is a gneralised permitation, and so
+            // the modified J after applyIndex is uniquely associated with i.
+            // Therefore no atomic guard is needed here.
+            if (c != 0) {
+            out[J] += a*c;
+            }
 		}
 	}
 
@@ -364,7 +385,7 @@ inline SymbolicPMROperator operator*(int m, const SymbolicPMROperator& other){
 }
 
 
-template<ScalarLike coeff_t>
+template<RealOrCplx coeff_t>
 struct SymbolicOpSum {
 
 	using Op = SymbolicPMROperator;
@@ -389,14 +410,14 @@ struct SymbolicOpSum {
 };
 
 // define a natural algebra of these boys
-template <ScalarLike coeff_t>
+template <RealOrCplx coeff_t>
 SymbolicOpSum<coeff_t> operator*(coeff_t c, SymbolicPMROperator op){
 	SymbolicOpSum<coeff_t> s;
 	s.add_term(c, op);
 	return s;
 }
 
-template <ScalarLike coeff_t>
+template <RealOrCplx coeff_t>
 SymbolicOpSum<coeff_t> operator*(SymbolicPMROperator op, coeff_t c){
 	SymbolicOpSum<coeff_t> s;
 	s.add_term(c, op);
@@ -404,41 +425,41 @@ SymbolicOpSum<coeff_t> operator*(SymbolicPMROperator op, coeff_t c){
 }
 
 
-template <ScalarLike coeff_t>
+template <RealOrCplx coeff_t>
 struct LazyOpSum {
 	using Scalar = coeff_t;
 	explicit LazyOpSum(
 			const ZBasis& basis_, const SymbolicOpSum<coeff_t>& ops_
 			) : basis(basis_), ops(ops_) 
 	{
-		// allocate the temporary storage
-		tmp = new coeff_t[basis.dim()]; 
 	}
-
 
 
     LazyOpSum operator=(const LazyOpSum& other) = delete;
 
     LazyOpSum(const LazyOpSum& other) : basis(other.basis), ops(other.ops) {
-		tmp = new coeff_t[basis.dim()]; 
+		//tmp = new coeff_t[basis.dim()]; 
     }
 
 	~LazyOpSum() {
-		delete[] tmp;
+		//delete[] tmp;
 	}
 
 	// Core evaluator 
+    // Applies y = A x (sets y=0 first)
 	void evaluate(const coeff_t* x, coeff_t* y) const {
 		std::fill(y, y + basis.dim(), coeff_t(0));
 		for (const auto& [c, op_ptr] : ops.terms) {
-			std::fill(tmp, tmp + basis.dim(), coeff_t(0));
-			op_ptr.apply(basis, x, tmp);
-			for (ZBasis::idx_t i = 0; i < basis.dim(); ++i)
-				y[i] += c * tmp[i];
+            op_ptr.apply(basis, x, y, c);
 		}
 	}
 
-
+    // performs y <- Ax + y
+	void evaluate_add(const coeff_t* x, coeff_t* y) const {
+		for (const auto& [c, op_ptr] : ops.terms) {
+            op_ptr.apply(basis, x, y, c);
+		}
+	}
 
 	// Eigen-compatible wrapper, evaluate y = this * x
 	template <typename In, typename Out>
@@ -502,7 +523,7 @@ struct LazyOpSum {
 
 
 	private:
-	coeff_t* tmp; // temp storage
+	// coeff_t* tmp; // temp storage
 	const ZBasis& basis;
 	const SymbolicOpSum<coeff_t> ops;
 };
@@ -528,6 +549,13 @@ private:
 	Eigen::Index xdim;
 };
 
+/* 
+-0.0337312
+-0.0335858
+-0.0335736
+-0.0335723
+-0.0335502
+*/
 
 
 namespace Eigen {

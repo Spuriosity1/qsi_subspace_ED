@@ -11,7 +11,7 @@
 namespace Krylov {
 
 template<typename T>
-concept ScalarLike = std::floating_point<T> ||
+concept RealOrCplx = std::floating_point<T> ||
                  (requires { typename T::value_type; } &&
                   std::is_same_v<T, std::complex<typename T::value_type>> &&
                   std::floating_point<typename T::value_type>);
@@ -37,7 +37,7 @@ void validate_settings(const KrylovSettings& alg){
 // exp(tau * Op) * v
 // for some dim(v) * M 'tall' matrix v.
 // Op *must* be Hermitian.
-template <typename OpType, ScalarLike Scalar>
+template <typename OpType, RealOrCplx Scalar>
 Eigen::VectorXd _impl_krylov_integrate(const OpType& Op,
                                     std::vector<Eigen::VectorXd>& vecs,
                                     double tau,

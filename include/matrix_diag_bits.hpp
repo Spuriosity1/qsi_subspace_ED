@@ -7,6 +7,7 @@
 
 
 #include <Eigen/Eigenvalues>
+#include <Eigen/Core>
 
 #include "Spectra/Util/CompInfo.h"
 #include "operator.hpp"
@@ -71,7 +72,7 @@ constexpr Spectra::SortRule default_sort_rule() {
 }
 
 
-template<typename OpType, typename T, ScalarLike S>
+template<typename OpType, typename T, RealOrCplx S>
 void compute_spectrum_iterative(const T& ham, VectorXd& evals, MatrixX<S>& evecs, const argparse::ArgumentParser& settings)
 {
     OpType op(ham); // move
@@ -115,24 +116,6 @@ void compute_spectrum_iterative(const T& ham, VectorXd& evals, MatrixX<S>& evecs
         std::cerr << "Spectra failed\n";
         throw std::runtime_error("Eigenvalue decomposition failed");
     }
-}
-
-
-
-
-template<typename T, ScalarLike S>
-void compute_eigval0_lanczos(const T& ham, double& eigval, Eigen::VectorXd<S>& evecs, const argparse::ArgumentParser& settings)
-{
-    // parse ncv and n_eigvals
-	size_t n_eigvals = settings.get<int>("--n_eigvals");
-
-    if (n_eigvals != 1) {
-        std::cout << "Large-scale Lanczos method is only giving you one eigenvalue";
-    }
-
-    auto max_it = settings.get<int>("--max_iters");
-    auto tol    = settings.get<double>("--tol"); 
-
 }
 
 

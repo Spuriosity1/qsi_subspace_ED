@@ -6,16 +6,23 @@ test('gen_spinon_basis_spinorder', spinon_tests, args: ['spinorder'])
 
 
 test_uint128 = executable('test_uint128',
-                         'test_uint128.cpp',
-                         include_directories: inc,
-                         install : false)
+  'test_uint128.cpp',
+  include_directories: inc,
+  install : false)
 
 
 test_PMR_operator = executable('test_PMR_operator',
-                         'test_PMR_construct.cpp',
-                         include_directories: inc,
-                         dependencies: [eigen_dep, hdf5_dep],
-                         install : false)
+  'test_PMR_construct.cpp',
+  include_directories: inc,
+  dependencies: [eigen_dep, hdf5_dep],
+  install : false)
+
+test_lanczos = executable('test_lanczos',
+  'test_lanczos.cpp',
+  include_directories: inc,
+  dependencies: g_deps,
+  install: false
+  )
 
 #test_ftlm_ops = executable('test_ftlm_ops','test_ftlm_ops.cpp',
 #                         include_directories: inc,
@@ -55,4 +62,5 @@ test('uint128_edge_cases', test_uint128,
      suite : ['unit', 'edge_cases'])
 
 
+test('test_lanczos', test_lanczos)
 #test('Krylov operations', test_ftlm_ops)

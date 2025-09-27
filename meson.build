@@ -55,13 +55,19 @@ spectra_dep = dependency('spectra', method: 'cmake')
 
 omp_dep = dependency('OpenMP', required: true)
 
+# MRRRR parallel tridiagonal matrix eigensolver
+mr3smp_proj = subproject('mr3smp')
+mr3smp_dep = mr3smp_proj.get_variable('mr3smp_dep')
+
 # Local include dir for headers like bittools.hpp, admin.hpp, basis_io
 inc = [ include_directories('include') ]
 
 g_deps = [
   hdf5_dep,
   json_dep,
-  omp_dep
+  omp_dep,
+  eigen_dep,
+  mr3smp_dep
 ]
 
 subdir('src')

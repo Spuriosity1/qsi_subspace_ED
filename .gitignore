@@ -16,3 +16,4 @@ basis_partitions
 .DS_Store
 driver/rundata
 driver/*.plan
+subprojects/mr3smp
