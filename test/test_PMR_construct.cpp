@@ -65,13 +65,41 @@ void check_zero(const std::string& A, Uint128 initial) {
     require(op.applyState(s) == 0, A + " == 0");
 }
 
+void check_application(const std::string& O, int expected_sign, Uint128 initial, Uint128 final) {
+
+    // basic sanity check
+    SymbolicPMROperator Op(O);
+    ZBasis::state_t s{initial};
+    int sign1 = Op.applyState(s); 
+
+    require_eq(s.uint64[0], final.uint64[0], O + " [ lo expected final state mismatch]");
+    require_eq(s.uint64[1], final.uint64[1], O + " [ hi expected final state mismatch]");
+    require_eq(sign1, expected_sign, O + " [sign mismatch]");
+}
+
 
 void test_apply() {
-    Uint128 all_up = 0;
-    Uint128 all_down(~0ull,~0ull);
 
     Uint128 up = (1ULL << 0);     // site 0 is up
+    Uint128 up64 = {1ULL, 0};    // site 64 is up
     Uint128 down = 0;             // site 0 is down
+
+    // Basic sanity test
+    check_application("0+", 1, down, up);
+    check_application("0-", 1, up, down);
+    check_application("64-", 1, up64, down);
+
+    check_application("0X", 1, down, up);
+    check_application("0X", 1, up, down);
+
+    check_application("0Z", 1, up, up);
+    check_application("0Z", -1, down, down);
+
+    auto psi = up | 7263729ULL;
+    check_application("0Z", 1, psi, psi);
+
+    check_application("64Z", 1, up64, up64);
+    check_application("64Z", -1, down, down);
 
     // Commutation / Anticommutation
     check_equiv_str("0Z 1X", "1X 0Z", +1, up);
@@ -149,6 +177,7 @@ void test_multiply() {
     require(O1*O2 == O1O2, "O1 * O2 behaves as expected");
     
 }
+
 
 // === Entry point with CLI ===
 

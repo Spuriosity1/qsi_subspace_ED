@@ -1,11 +1,38 @@
 # QSI subspace ED
 
+
+## Obtaining and Compiling
+
+### Dependencies
+- HDF5
+- nlohmann::json.
+
+From the root directory:
+```bash
+git clone https://github.com/Spuriosity1/qsi_subspace_ED.git
+cd qsi_subspace_ED
+meson setup build
+ninja -C build
+ninja -C build test # optional
+```
+
+### Benchmarking
+The bash script bench/benchme.sh (run it from the project root directory) 
+runs a number of calculations on unit cells 1x2xj, for j=1:10. Runtimes
+are spat out as raw ints.
+
+```bash
+bench/benchme.sh 4
+0.01
+```
+
+## Introduction
+
 This is a low level template library + set of executables designed to do exact diagonalisaiton within subspaces of spin Hamiltonians. This project was originally motivated by quantum spin ice, however there may be other applications.
 
 The pipeline is as follows:
 
 ![](https://raw.githubusercontent.com/Spuriosity1/qsi_subspace_ED/refs/heads/main/projected%20ED.drawio.svg)
-
 
 
 Executables:
@@ -130,19 +157,5 @@ The main algorithm is depth-first search. For this, we generate a stack of nodes
 
 For completeness, BFS was also implemented in order to generate a set of balanced starting points for the parallel algorithm. 
 
-## Obtaining and Compiling
-
-### Dependencies
-- HDF5
-- nlohmann::json.
-
-From the root directory:
-```bash
-git clone https://github.com/Spuriosity1/qsi_subspace_ED.git
-cd qsi_subspace_ED
-meson setup build
-ninja -C build
-ninja -C build test # optional
-```
 
 
