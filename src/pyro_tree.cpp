@@ -403,7 +403,7 @@ void pyro_vtree_parallel::build_state_tree(){
 #ifdef DEBUG 
     const int CHECKIN_INTERVAL=5;
 #else 
-    const int CHECKIN_INTERVAL=50000000;
+    const int CHECKIN_INTERVAL=5000000;
 #endif
 
     
