@@ -80,6 +80,19 @@ gen_spinon_basis = executable('gen_spinon_basis',spinon_basis_sources,
   dependencies: g_deps,
   include_directories:inc,
   cpp_args: target_args
+ )
+
+
+sbsearch = executable('sbsearch', spinon_basis_big_sources, 
+  dependencies: g_deps,
+  include_directories:inc,
+  cpp_args: target_args
+  )
+
+merge_shards = executable('merge_shards', 'src/merge_shards.cpp',
+  dependencies: g_deps,
+  include_directories:inc,
+  cpp_args: target_args
   )
 
 if eigen_dep.found()
