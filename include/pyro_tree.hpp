@@ -11,6 +11,8 @@
 #include <vector>
 #include <mutex>
 
+#include "shard.hpp"
+
 
 struct vtree_node_t {
 	Uint128 state_thus_far;
@@ -106,10 +108,6 @@ protected:
 };
 
 
-
-
-
-
 struct pyro_vtree_parallel : public lat_container {
 	pyro_vtree_parallel(const lattice &lat, unsigned num_spinon_pairs, 
 			unsigned n_threads = 1)
@@ -135,8 +133,8 @@ protected:
 	unsigned n_threads;
 
 
-    template <typename StackT>
-    void rebalance_stacks(std::vector<StackT>& stacks);
+//    template <typename StackT>
+//    void rebalance_stacks(std::vector<StackT>& stacks);
 
 	bool is_sorted;
 
@@ -157,6 +155,77 @@ protected:
 };
 
 
+// similar to pyro_vtree_parallel, but only does the search part
+struct par_searcher : public lat_container {
+    par_searcher(const lattice& lat, unsigned num_spinon_pairs,
+            unsigned n_threads, const std::vector<size_t>& perm
+            )
+        : lat_container(lat, num_spinon_pairs), perm(perm), n_threads(n_threads)
+    {}
+
+    void initialise_shards(
+            const std::string &out_dir, const std::string &job_tag,
+            size_t buf_entries = (1<<20)
+            ){
+        // ensure that out_dir exists
+        std::filesystem::create_directories(out_dir);
+
+        std::string shard_prefix;
+        shard_prefix = out_dir + "/shard-" + job_tag + "-";
+        shards.clear();
+        shards.reserve(n_threads);
+        for (unsigned t = 0; t < n_threads; ++t) {
+            auto path = shard_prefix + std::to_string(t) + ".bin";
+            shards.emplace_back(new ShardWriter(path, buf_entries));
+        }
+        this->job_tag = job_tag;
+        this->out_dir = out_dir;
+
+    }
+
+    void build_state_tree();
+
+    void finalise_shards(){
+        for (auto &w : shards) {
+            if (w) w->finalize(true);
+        }
+ // construct manifest file
+        nlohmann::json manifest;
+        manifest["job_tag"] = job_tag;
+        manifest["n_shards"] = shards.size();
+        manifest["shards"] = nlohmann::json::array();
+
+         std::string shard_prefix = out_dir + "/shard-" + job_tag + "-";
+        for (unsigned t = 0; t < shards.size(); ++t) {
+            manifest["shards"].push_back(shard_prefix + std::to_string(t) + ".bin.done");
+        }
+
+        // write manifest to file
+        std::string manifest_path = out_dir + "/manifest-" + job_tag + ".json";
+        std::ofstream ofs(manifest_path);
+        ofs << manifest.dump(2) << std::endl;
+        ofs.close();
+    }
+
+//    const std::string shard_prefix;
+
+protected:
+    const std::vector<size_t>& perm;
+    std::string job_tag, out_dir;
+
+	void _build_state_dfs(cust_stack &node_stack, unsigned thread_id,
+			unsigned long max_stack_size = (1ul << 40));
+	void _build_state_bfs(std::queue<vtree_node_t>& node_stack, 
+		unsigned long max_queue_len);
+
+	unsigned n_threads;
+    std::vector<std::unique_ptr<ShardWriter>> shards;
+	std::vector<std::thread> threads;
+	std::vector<cust_stack> job_stacks;
+
+    static constexpr unsigned INITIAL_DEPTH_FACTOR = 5;
+
+};
 
 
 

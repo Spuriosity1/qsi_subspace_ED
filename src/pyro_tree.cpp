@@ -349,7 +349,7 @@ _build_state_dfs(cust_stack& node_stack,
 // the complicated parallel code
 
 template <typename StackT>
-void pyro_vtree_parallel::rebalance_stacks(std::vector<StackT>& stacks) {
+void rebalance_stacks(std::vector<StackT>& stacks) {
 
     std::vector<vtree_node_t> all_jobs;
 
@@ -512,5 +512,113 @@ void pyro_vtree_parallel::write_basis_hdf5(const std::string& outfilename){
 }
 
 
+////////////
+/// Lower level: sbsearch related functions
+
+
+
+void par_searcher::build_state_tree(){
+	// strategy: fork nodes until we exceed the thread pool	
+	// BFS to keep the layer of all threads roughly the same
+	std::queue<vtree_node_t> starting_nodes;
+	starting_nodes.push(vtree_node_t({0,0,0}));
+	_build_state_bfs(starting_nodes, n_threads*INITIAL_DEPTH_FACTOR);
+
+	n_threads = std::min(n_threads, static_cast<unsigned>(starting_nodes.size()));
+	printf("Set up execution with %u threads\n", n_threads);
+
+	// now farm out to different threads
+	shards.resize(n_threads);
+	job_stacks.resize(n_threads);
+
+	std::cout<<starting_nodes.size()<<" starting states.\n";
+    unsigned thread_id=0;
+    while(!starting_nodes.empty()){
+		job_stacks[thread_id].push(starting_nodes.front());
+		starting_nodes.pop();
+        thread_id = (thread_id+1) % n_threads;
+    }
+    
+#ifdef DEBUG 
+    const int CHECKIN_INTERVAL=5;
+#else 
+    const int CHECKIN_INTERVAL=50000000;
+#endif
+
+    std::atomic<bool> work_to_do{true};
+
+
+    auto on_completion = [this, &work_to_do]() noexcept
+    { 
+        rebalance_stacks(job_stacks);
+        work_to_do = any_full(job_stacks);
+    };
+    std::barrier sync_point(n_threads, on_completion);
+
+    for (unsigned tid = 0; tid < n_threads; ++tid) {
+        threads.emplace_back([this, tid, &sync_point, &work_to_do]() {
+            auto& local_stack = job_stacks[tid];
+            while(work_to_do) {
+                size_t counter;
+                for (counter=0; 
+                    !local_stack.empty() && counter < CHECKIN_INTERVAL;
+                    counter++) 
+                {
+                    if (local_stack.top().curr_spin == lat.spins.size()) {
+                        shards[tid]->push(permute(local_stack.top().state_thus_far, perm));
+                        local_stack.pop();
+                    } else {
+                        fork_state(local_stack);
+                    }
+                }
+
+//                std::cout << "[" << tid << "] processed " << counter <<"\n";
+                sync_point.arrive_and_wait();
+            } 
+        });
+    };
+ 
+    // Wait for all threads to finish
+    for (auto& t : threads) {
+        t.join();
+    }
+
+	// make sure the queue was cleared
+	for (auto& q : job_stacks){
+		if (!q.empty()){
+			throw std::logic_error("Queue not cleared, likely exceeded iteration limit");
+		}
+	}
+
+}
+
+
+void par_searcher::
+_build_state_bfs(std::queue<vtree_node_t>& node_stack, 
+		unsigned long max_queue_len){
+	if (shards.size() == 0){ shards.resize(1); }
+	while (!node_stack.empty() && node_stack.size() < max_queue_len){
+		if (node_stack.front().curr_spin == lat.spins.size()){
+			shards[0]->push(permute(node_stack.front().state_thus_far, perm));
+			node_stack.pop();
+		} else {
+			fork_state(node_stack);
+		}
+	}
+}
+
+void par_searcher::
+_build_state_dfs(cust_stack& node_stack, 
+		unsigned thread_id, 
+		unsigned long max_queue_len){
+	while (!node_stack.empty() && node_stack.size() < max_queue_len){
+		if (node_stack.top().curr_spin == lat.spins.size()){
+			shards[thread_id]->push(permute(node_stack.top().state_thus_far, perm));
+			node_stack.pop();
+		} else {
+			fork_state(node_stack);
+		}
+	}
+}
 
 
