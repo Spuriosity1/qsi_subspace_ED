@@ -3,7 +3,7 @@
 
 #include <nlohmann/json.hpp>
 #include <ostream>
-#include "hamiltonain_setup.hpp"
+#include "hamiltonian_setup.hpp"
 
 #include "ftlm.hpp"
 

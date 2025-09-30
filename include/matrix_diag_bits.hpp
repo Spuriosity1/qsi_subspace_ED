@@ -182,6 +182,14 @@ inline diagonalise_real(const LazyOpSum<double>& H, const argparse::ArgumentPars
   } else if (algo == "mfsparse") {
     compute_spectrum_iterative<LazyOpSumProd<double>>(H, eigvals, eigvecs,
                                                       prog);
+  } else if (algo == "mf-large") {
+      if (prog.get<int>("--n_eigvals") != 1){
+          throw std::runtime_error("n_eigvals must be 1 for mf-large");
+      }
+
+      if (prog.get<int>("--n_eigvecs")){
+          throw std::runtime_error("n_eigvecs must be 1 for mf-large");
+      }
   }
   return std::make_pair(eigvals, eigvecs);
 }

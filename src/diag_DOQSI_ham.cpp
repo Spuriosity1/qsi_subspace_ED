@@ -2,11 +2,10 @@
 
 
 #include <nlohmann/json.hpp>
-#include "hamiltonain_setup.hpp"
+#include "hamiltonian_setup.hpp"
 
 
 using json = nlohmann::json;
-
 
 
 int main(int argc, char* argv[]) {
@@ -43,12 +42,12 @@ int main(int argc, char* argv[]) {
 		.scan<'i', int>();
 	prog.add_argument("--n_eigvals", "-n")
 		.help("Number of eigenvlaues to compute")
-		.default_value(5)
+		.default_value(1)
 		.scan<'i', int>();
 
 	prog.add_argument("--n_eigvecs", "-N")
 		.help("Number of eigenvectors to store (must be <= n_eigvals)")
-		.default_value(4)
+		.default_value(1)
 		.scan<'i', int>();
 	prog.add_argument("--n_spinons")
         .default_value(0)
@@ -68,7 +67,7 @@ int main(int argc, char* argv[]) {
         .scan<'g', double>();
 
     prog.add_argument("--algorithm", "-a")
-        .choices("dense","sparse","mfsparse")
+        .choices("dense","sparse","mfsparse","mf-large")
         .help("Variant of ED algorithm to run. dense is best for small problems, mfsparse is a matrix free method that trades off speed for memory.");
 		
     try {

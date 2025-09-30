@@ -2,7 +2,7 @@
 
 
 #include <nlohmann/json.hpp>
-#include "hamiltonain_setup.hpp"
+#include "hamiltonian_setup.hpp"
 
 
 using json = nlohmann::json;
