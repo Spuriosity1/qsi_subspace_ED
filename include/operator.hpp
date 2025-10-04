@@ -1,6 +1,7 @@
 #pragma once
 
 #include "bittools.hpp"
+#include <complex>
 #include <exception>
 #include <iostream>
 #include <sstream>
@@ -21,7 +22,7 @@ namespace fs = std::filesystem;
 
 
 template<typename T>
-concept ScalarLike = std::floating_point<T> ||
+concept RealOrCplx = std::floating_point<T> ||
                  (requires { typename T::value_type; } &&
                   std::is_same_v<T, std::complex<typename T::value_type>> &&
                   std::floating_point<typename T::value_type>);
@@ -209,10 +210,33 @@ struct SymbolicPMROperator {
 	// Apply this operator to an input vector `in` and store result in `out`
 	template <typename Orig, typename Dest>
 	void apply(const ZBasis& basis, const Orig& in, Dest& out) const {	
+        #pragma omp parallel for
 		for (ZBasis::idx_t i = 0; i < basis.dim(); ++i) {
 			ZBasis::idx_t J = i;
             auto c = applyIndex(basis, J) * in[i];
+            // Note: each of these is a gneralised permitation, and so
+            // the modified J after applyIndex is uniquely associated with i.
+            // Therefore no atomic guard is needed here.
+            if (c != 0) {
             out[J] += c;
+            }
+		}
+	}
+
+
+	// Apply this operator to an input vector `in` and store a * result in `out`
+	template <typename Orig, typename Dest>
+	void apply(const ZBasis& basis, const Orig& in, Dest& out, double a) const {	
+        #pragma omp parallel for
+		for (ZBasis::idx_t i = 0; i < basis.dim(); ++i) {
+			ZBasis::idx_t J = i;
+            auto c = applyIndex(basis, J) * in[i];
+            // Note: each of these is a gneralised permitation, and so
+            // the modified J after applyIndex is uniquely associated with i.
+            // Therefore no atomic guard is needed here.
+            if (c != 0) {
+            out[J] += a*c;
+            }
 		}
 	}
 
@@ -362,7 +386,7 @@ inline SymbolicPMROperator operator*(int m, const SymbolicPMROperator& other){
 }
 
 
-template<ScalarLike coeff_t>
+template<RealOrCplx coeff_t>
 struct SymbolicOpSum {
 
 	using Op = SymbolicPMROperator;
@@ -387,159 +411,18 @@ struct SymbolicOpSum {
 };
 
 // define a natural algebra of these boys
-template <ScalarLike coeff_t>
+template <RealOrCplx coeff_t>
 SymbolicOpSum<coeff_t> operator*(coeff_t c, SymbolicPMROperator op){
 	SymbolicOpSum<coeff_t> s;
 	s.add_term(c, op);
 	return s;
 }
 
-template <ScalarLike coeff_t>
+template <RealOrCplx coeff_t>
 SymbolicOpSum<coeff_t> operator*(SymbolicPMROperator op, coeff_t c){
 	SymbolicOpSum<coeff_t> s;
 	s.add_term(c, op);
 	return s;
 }
-
-
-template <ScalarLike coeff_t>
-struct LazyOpSum {
-	using Scalar = coeff_t;
-	explicit LazyOpSum(
-			const ZBasis& basis_, const SymbolicOpSum<coeff_t>& ops_
-			) : basis(basis_), ops(ops_) 
-	{
-		// allocate the temporary storage
-		tmp = new coeff_t[basis.dim()]; 
-	}
-
-
-
-    LazyOpSum operator=(const LazyOpSum& other) = delete;
-
-    LazyOpSum(const LazyOpSum& other) : basis(other.basis), ops(other.ops) {
-		tmp = new coeff_t[basis.dim()]; 
-    }
-
-	~LazyOpSum() {
-		delete[] tmp;
-	}
-
-	// Core evaluator 
-	void evaluate(const coeff_t* x, coeff_t* y) const {
-		std::fill(y, y + basis.dim(), coeff_t(0));
-		for (const auto& [c, op_ptr] : ops.terms) {
-			std::fill(tmp, tmp + basis.dim(), coeff_t(0));
-			op_ptr.apply(basis, x, tmp);
-			for (ZBasis::idx_t i = 0; i < basis.dim(); ++i)
-				y[i] += c * tmp[i];
-		}
-	}
-
-
-
-	// Eigen-compatible wrapper, evaluate y = this * x
-	template <typename In, typename Out>
-	void applyTo(const In& x, Out& y) const {
-		Eigen::Map<const Eigen::VectorXd> x_vec(x.data(), basis.dim());
-		Eigen::Map<Eigen::VectorXd> y_vec(y.data(), basis.dim());
-		evaluate(x_vec.data(), y_vec.data());
-	}
-	
-	// Eigen glue
-	Eigen::Index rows() const { return basis.dim(); }
-	Eigen::Index cols() const { return basis.dim(); }
-
-	
-	// Enable Eigen’s operator*
-	template <typename Rhs>
-	friend Eigen::Product<LazyOpSum, Rhs, Eigen::AliasFreeProduct>
-	operator*(const LazyOpSum& lhs, const Eigen::MatrixBase<Rhs>& rhs) {
-		return Eigen::Product<LazyOpSum, Rhs, Eigen::AliasFreeProduct>(lhs, rhs.derived());
-	}	
-
-	// Dense matrix matrialiser
-	Eigen::Matrix<coeff_t, Eigen::Dynamic, Eigen::Dynamic>
-	toDenseMatrix() const {
-		Eigen::Index N = basis.dim();
-		Eigen::Matrix<coeff_t, Eigen::Dynamic, Eigen::Dynamic> M(N, N);
-
-		Eigen::VectorXd x = Eigen::VectorXd::Zero(N);
-		Eigen::VectorXd y(N);
-		for (Eigen::Index j = 0; j < N; ++j) {
-			x[j] = coeff_t(1);
-			applyTo(x, y);
-			M.col(j) = y;
-			x[j] = coeff_t(0);
-		}
-		return M;
-	}
-
-	// Sparse matrix materialiser
-	Eigen::SparseMatrix<coeff_t>
-	toSparseMatrix(coeff_t tol = 1e-14) const {
-		Eigen::Index N = basis.dim();
-		std::vector<Eigen::Triplet<coeff_t>> triplets;
-
-		// Eigen::VectorXd x = Eigen::VectorXd::Zero(N);
-		// Eigen::VectorXd y(N);
-
-		for (Eigen::Index j = 0; j < N; ++j) {
-            for (auto& [c, op] : ops.terms){
-				ZBasis::idx_t J = j;
-                coeff_t res = c * op.applyIndex(basis, J);
-                if (std::abs(res) > tol )
-                    triplets.emplace_back(J, j, res);
-            }
-
-		}
-		Eigen::SparseMatrix<coeff_t> S(N, N);
-		S.setFromTriplets(triplets.begin(), triplets.end());
-		return S;
-	}
-
-
-	private:
-	coeff_t* tmp; // temp storage
-	const ZBasis& basis;
-	const SymbolicOpSum<coeff_t> ops;
-};
-
-template <typename coeff_t>
-class LazyOpSumProd {
-public:
-	using Scalar = coeff_t;
-
-	LazyOpSumProd(const LazyOpSum<coeff_t>& op_)
-	    : op(op_), xdim(op_.rows()) {}
-
-	// Spectra expects raw pointers
-	void perform_op(const coeff_t* x_in, coeff_t* y_out) const {
-		op.evaluate(x_in, y_out);
-	}
-
-	Eigen::Index rows() const { return xdim; }
-	Eigen::Index cols() const { return xdim; }
-
-private:
-	const LazyOpSum<coeff_t>& op;
-	Eigen::Index xdim;
-};
-
-
-
-namespace Eigen {
-	template<typename coeff_t, typename Rhs>
-	struct Product<LazyOpSum<coeff_t>, Rhs, AliasFreeProduct> :
-		public Matrix<coeff_t, Dynamic, 1>
-	{
-		Product(const LazyOpSum<coeff_t>& op, const Rhs& rhs)
-			: Matrix<coeff_t, Dynamic, 1>(op.rows())
-		{
-			op.applyTo(rhs, *this);
-		}
-	};
-}
-
 
 

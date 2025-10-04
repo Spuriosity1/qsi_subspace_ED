@@ -7,14 +7,17 @@
 
 
 #include <Eigen/Eigenvalues>
+#include <Eigen/Core>
 
 #include "Spectra/Util/CompInfo.h"
-#include "operator.hpp"
+#include "operator_matrix.hpp"
 #include <Spectra/SymEigsSolver.h>
 #include <Spectra/SymEigsShiftSolver.h>
 #include <Spectra/GenEigsSolver.h>
 #include <Spectra/MatOp/SparseSymMatProd.h>
 #include <Spectra/MatOp/SparseGenMatProd.h>
+
+#include "lanczos.hpp"
 
 #include <unsupported/Eigen/SparseExtra>
 
@@ -71,10 +74,10 @@ constexpr Spectra::SortRule default_sort_rule() {
 }
 
 
-template<typename OpType, typename T, ScalarLike S>
-void compute_spectrum_iterative(const T ham, VectorXd& evals, MatrixX<S>& evecs, const argparse::ArgumentParser& settings)
+template<typename OpType, typename T, RealOrCplx S>
+void compute_spectrum_iterative(const T& ham, VectorXd& evals, MatrixX<S>& evecs, const argparse::ArgumentParser& settings)
 {
-    OpType op(ham);
+    OpType op(ham); // move
 
     // parse ncv and n_eigvals
 	size_t n_eigvals = settings.get<int>("--n_eigvals");
@@ -139,59 +142,94 @@ inline void compute_eigenspectrum_dense(const MatrixXd& ham, Eigen::VectorXd& e,
     }
 }
 
+
+
+
+
 std::pair<VectorXd, MatrixXd>
 inline diagonalise_real(const LazyOpSum<double>& H, const argparse::ArgumentParser &prog) {
-  VectorXd eigvals;
-  MatrixXd eigvecs;
 
-  std::string algo;
+    std::string algo;
 
-  if (prog.is_used("--algorithm")){
-    algo = prog.get<std::string>("--algorithm");
-  } else {
-      if (H.cols() < 100){
-          algo = "dense";
-      } else if (H.cols() < 10000000){
-          algo = "sparse";
-      } else {
-          algo = "mfsparse";
-      }
-  }
-
-
-  if (algo == "dense") {
-    // materialise
-    std::cout << "Materialising dense matrix..." << std::endl;
-    auto H_densemat = H.toSparseMatrix();
-    std::cout << "Done!" << std::endl;
-
-    compute_eigenspectrum_dense(H_densemat, eigvals, eigvecs, prog);
-  } else if (algo == "sparse") {
-    // materialise
-    std::cout << "Materialising sparse matrix..." << std::endl;
-    auto H_sparsemat = H.toSparseMatrix();
-    std::cout << "Done!" << std::endl;
-
-    compute_spectrum_iterative<Spectra::SparseSymMatProd<double>>(
-        H_sparsemat, eigvals, eigvecs, prog);
-
-    if (prog.get<bool>("--save_matrix")) {
-      Eigen::saveMarket(H_sparsemat, "H.mtx");
-      std::cout << "Saved to H.mtx" << std::endl;
+    if (prog.is_used("--algorithm")){
+        algo = prog.get<std::string>("--algorithm");
+    } else {
+        if (H.cols() < 100){
+            algo = "dense";
+        } else if (H.cols() < 10000000){
+            algo = "sparse";
+        } else {
+            algo = "mfsparse";
+        }
     }
-  } else if (algo == "mfsparse") {
-    compute_spectrum_iterative<LazyOpSumProd<double>>(H, eigvals, eigvecs,
-                                                      prog);
-  } else if (algo == "mf-large") {
-      if (prog.get<int>("--n_eigvals") != 1){
-          throw std::runtime_error("n_eigvals must be 1 for mf-large");
-      }
 
-      if (prog.get<int>("--n_eigvecs")){
-          throw std::runtime_error("n_eigvecs must be 1 for mf-large");
-      }
-  }
-  return std::make_pair(eigvals, eigvecs);
+    if (algo == "mfeig0") {
+        if (prog.get<bool>("--save_matrix")) {
+            std::cout << "refusing to save matrix (matrix-free option selected" << std::endl;
+        }
+        if (prog.get<int>("--n_eigvals") != 1){
+            throw std::runtime_error("n_eigvals must be 1 for mf-large");
+        }
+
+        if (prog.get<int>("--n_eigvecs") != 1){
+            throw std::runtime_error("n_eigvecs must be 1 for mf-large");
+        }
+
+        double E0;
+        std::vector<double> eigvec;
+
+        LanczosSettings sett;
+        sett.krylov_dim = prog.get<int>("--ncv");
+        sett.verbosity = 2;
+        sett.min_iterations = 10;
+        sett.calc_eigenvector = true;
+        sett.x0_seed = prog.get<int>("--rng_seed");
+        sett.abs_tol = pow(10,prog.get<int>("--atol"));
+        sett.rel_tol = pow(10,prog.get<int>("--rtol"));
+
+
+        auto res = eigval0_lanczos<LazyOpSum<double>, double>(H, E0, eigvec, sett);
+
+        return std::make_pair(
+        Eigen::Map<const Eigen::VectorXd>(&E0, 1),
+        Eigen::Map<const Eigen::MatrixXd>(&eigvec[0], eigvec.size(),1));
+
+        //    compute_spectrum_lanczos<LazyOpSumProd<double>>(H, eigvals, eigvecs,
+        //                                                      prog);
+    
+    } else {   
+        VectorXd eigvals;
+        MatrixXd eigvecs;
+        if (algo == "dense") {
+            // materialise
+            std::cout << "Materialising..." << std::endl;
+            auto H_mat = H.toSparseMatrix();
+            std::cout << "Done!" << std::endl;
+
+            compute_eigenspectrum_dense(H_mat, eigvals, eigvecs, prog);
+        } else if (algo == "sparse") {
+            // materialise
+            std::cout << "Materialising sparse matrix..." << std::endl;
+            auto H_sparsemat = H.toSparseMatrix();
+            std::cout << "Done!" << std::endl;
+
+            compute_spectrum_iterative<Spectra::SparseSymMatProd<double>>(
+                    H_sparsemat, eigvals, eigvecs, prog);
+            if (prog.get<bool>("--save_matrix")) {
+                Eigen::saveMarket(H_sparsemat, "H.mtx");
+                std::cout << "Saved to H.mtx" << std::endl;
+            }
+        } else if (algo == "mfsparse") {
+            compute_spectrum_iterative<LazyOpSumProd<double>>(H, eigvals, eigvecs, prog);
+            if (prog.get<bool>("--save_matrix")) {
+                std::cout << "refusing to save matrix (matrix-free option selected" << std::endl;
+            }
+        } else {
+            throw std::runtime_error("Unrecognised algorithm name (this is a bug)");
+        }
+
+        return std::make_pair(eigvals, eigvecs);
+    }
 }
 
 

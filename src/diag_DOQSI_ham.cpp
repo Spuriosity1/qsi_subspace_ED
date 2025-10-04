@@ -36,9 +36,23 @@ int main(int argc, char* argv[]) {
         .required()
         .help("output directory");
 
+    // NUMERICAL BS
 	prog.add_argument("--ncv", "-k")
-		.help("Krylov dimension, shoufl be > 2*n_eigvals")
+		.help("Krylov dimension, should be > 2*n_eigvals")
 		.default_value(15)
+		.scan<'i', int>();
+	prog.add_argument("--atol")
+		.help("Absolute convergence tolerance, specify as exponent e.g. -8 = 10^-8")
+		.default_value(-8)
+		.scan<'i', int>();
+	prog.add_argument("--rtol")
+		.help("Relative tolerance, specify as exponent e.g. -8 = 10^-8")
+		.default_value(-8)
+		.scan<'i', int>();
+
+	prog.add_argument("--rng_seed", "-s")
+		.help("Seed used to generate random Lanczos vectors.")
+		.default_value(0)
 		.scan<'i', int>();
 	prog.add_argument("--n_eigvals", "-n")
 		.help("Number of eigenvlaues to compute")
@@ -67,7 +81,7 @@ int main(int argc, char* argv[]) {
         .scan<'g', double>();
 
     prog.add_argument("--algorithm", "-a")
-        .choices("dense","sparse","mfsparse","mf-large")
+        .choices("dense","sparse","mfsparse","mfeig0")
         .help("Variant of ED algorithm to run. dense is best for small problems, mfsparse is a matrix free method that trades off speed for memory.");
 		
     try {

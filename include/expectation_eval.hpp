@@ -5,7 +5,7 @@
 #include <vector>
 #include <string>
 #include <hdf5.h>
-#include "operator.hpp"
+#include "operator_matrix.hpp"
 
 #include <nlohmann/json.hpp>
 
