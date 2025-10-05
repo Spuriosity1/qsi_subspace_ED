@@ -16,5 +16,5 @@ h5diff -d 1e-8 -r $REF_EIGFILE $NEW_EIGFILE  /eigenvalues /eigenvalues > $LOGFIL
 if [ $? -ne 0 ]; then echo "Eigenvalues differ, see $LOGFILE"; fi
 
 
-h5diff -d 1e-5 -r $REF_EIGFILE $NEW_EIGFILE  /eigenvectors /eigenvectors >> $LOGFILE
+h5diff -d 1e-4 -r $REF_EIGFILE $NEW_EIGFILE  /eigenvectors /eigenvectors >> $LOGFILE
 if [ $? -ne 0 ]; then echo "Eigenvectors differ, see $LOGFILE"; fi

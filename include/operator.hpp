@@ -200,7 +200,7 @@ struct SymbolicPMROperator {
 		int _sign = applyState(state);
 
         auto it = basis.state_to_index.find(state);
-        if (it == basis.state_to_index.end()) {
+        if (it == basis.state_to_index.end()) [[unlikely]] {
             return 0;  // state not found in basis
         }
         J = it->second;
