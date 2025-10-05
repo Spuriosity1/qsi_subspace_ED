@@ -120,7 +120,7 @@ if eigen_dep.found()
 if spectra_dep.found()
 
 expectation_eval = static_library('expectation_eval', ['src/expectation_eval.cpp', 'src/operator_matrix.cpp'],
-  dependencies: [g_deps, eigen_dep, spectra_dep],
+  dependencies: [g_deps, eigen_dep, omp_dep, spectra_dep],
   include_directories: inc,
   cpp_args: target_args
   )
