@@ -112,11 +112,11 @@ merge_shards = executable('merge_shards', 'src/merge_shards.cpp',
 
 if eigen_dep.found()
 
-#gen_projected_basis = executable('gen_projected_basis', files('src/gen_projected_basis.cpp'), 
-#  dependencies: [g_deps, eigen_dep],
-#  include_directories:inc,
-#  cpp_args: target_args
-#  )
+gen_projected_basis = executable('gen_projected_basis', files('src/gen_projected_basis.cpp'), 
+  dependencies: [g_deps, eigen_dep, abseil_dep],
+  include_directories:inc,
+  cpp_args: target_args
+  )
 
 if spectra_dep.found()
 
