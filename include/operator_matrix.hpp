@@ -80,14 +80,20 @@ struct LazyOpSum {
 		// Eigen::VectorXd x = Eigen::VectorXd::Zero(N);
 		// Eigen::VectorXd y(N);
 
-		for (Eigen::Index j = 0; j < N; ++j) {
-            for (auto& [c, op] : ops.terms){
+		for (ZBasis::idx_t j = 0; j < N; ++j) {
+            for (auto& [c, op] : ops.off_diag_terms){
 				ZBasis::idx_t J = j;
                 coeff_t res = c * op.applyIndex(basis, J);
                 if (std::abs(res) > tol )
                     triplets.emplace_back(J, j, res);
             }
 
+            double acc = 0;
+
+            for (auto& [c, op] : ops.diagonal_terms){
+                acc += c * op.applyIndex(basis, j);
+            }
+            triplets.emplace_back(j, j, acc);
 		}
 		Eigen::SparseMatrix<coeff_t> S(N, N);
 		S.setFromTriplets(triplets.begin(), triplets.end());
@@ -95,7 +101,10 @@ struct LazyOpSum {
 	}
 
 
-	private:
+protected:
+    void evaluate_add_diagonal(const coeff_t* x, coeff_t* y) const;
+    void evaluate_add_off_diag(const coeff_t* x, coeff_t* y) const;
+
 	// coeff_t* tmp; // temp storage
 	const ZBasis& basis;
 	const SymbolicOpSum<coeff_t> ops;

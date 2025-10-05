@@ -193,6 +193,10 @@ struct SymbolicPMROperator {
         return sign * (1 - 2 * (popcnt_u128((~state) & Z_mask) % 2) );
 	}
 
+    bool is_diagonal() const {
+        return X_mask == ZBasis::state_t(0);
+    }
+
     // returns sign of only possibly-nonzero entry, modifies J to its index
     int applyIndex(const ZBasis& basis, ZBasis::idx_t& J) const {
 		ZBasis::state_t state = basis[J];
@@ -388,18 +392,23 @@ struct SymbolicOpSum {
     }
 
     SymbolicOpSum(const Op& o){
-        terms.emplace_back(1.0,o);
+        add_term(1.0, o);
     }
 
 	void add_term(coeff_t c, const Op& op) {
-		terms.emplace_back(c, op); // copies are fine
+        if (op.is_diagonal()){
+            diagonal_terms.emplace_back(c, op); // copies are fine
+        } else {
+            off_diag_terms.emplace_back(c, op);
+        }
 	}
 
 	void operator+=(const Op& op) {
-        terms.emplace_back(1.0,op);
+        add_term(1.0, op);
 	}
 
-	std::vector<std::pair<coeff_t, Op >> terms;
+	std::vector<std::pair<coeff_t, Op >> diagonal_terms;
+	std::vector<std::pair<coeff_t, Op >> off_diag_terms;
 };
 
 // define a natural algebra of these boys

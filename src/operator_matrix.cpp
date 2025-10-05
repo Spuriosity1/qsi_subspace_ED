@@ -3,9 +3,10 @@
 
 // performs y <- Ax + y
 template <RealOrCplx coeff_t>
-void LazyOpSum<coeff_t>::evaluate_add(const coeff_t* x, coeff_t* y) const {
+void LazyOpSum<coeff_t>::evaluate_add_off_diag(const coeff_t* x, coeff_t* y) const {
     static const size_t CHUNK_SIZE = 10000;
-    for (const auto& term : ops.terms) {
+
+    for (const auto& term : ops.off_diag_terms) {
         const auto& c = term.first;   // Extract before parallel region
         const auto& op = term.second;
         
@@ -41,6 +42,36 @@ void LazyOpSum<coeff_t>::evaluate_add(const coeff_t* x, coeff_t* y) const {
             }       
         }
     }
+}
+
+
+
+// performs y <- Ax + y
+template <RealOrCplx coeff_t>
+void LazyOpSum<coeff_t>::evaluate_add_diagonal(const coeff_t* x, coeff_t* y) const {
+    for (const auto& term : ops.off_diag_terms) {
+        const auto& c = term.first;   
+        const auto& op = term.second;
+
+        #pragma omp for schedule(dynamic, basis.dim()) nowait
+        for (ZBasis::idx_t i = 0; i < basis.dim(); ++i) {
+            ZBasis::idx_t J = i;
+            coeff_t dy = c * x[i] * static_cast<double>(op.applyIndex(basis, J));
+            assert(J == i);
+            // completely in place, no J collisions
+            y[J] += dy;
+        }
+        
+    }
+}
+
+
+
+
+template <RealOrCplx coeff_t>
+void LazyOpSum<coeff_t>::evaluate_add(const coeff_t* x, coeff_t* y) const {
+    evaluate_add_off_diag(x, y);
+    evaluate_add_diagonal(x, y);
 }
 
 // explicit template instantiations
