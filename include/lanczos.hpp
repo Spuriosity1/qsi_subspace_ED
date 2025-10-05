@@ -22,7 +22,7 @@ S inner(const std::vector<S>& u, const std::vector<S>& v) {
 
     S result = 0;
 
-    #pragma omp parallel for reduction(+:result)
+    #pragma omp parallel for reduction(+:result) 
     for (std::size_t i = 0; i < u.size(); i++) {
         result += u[i] * v[i];
     }

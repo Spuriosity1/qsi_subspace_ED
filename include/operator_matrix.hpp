@@ -32,8 +32,8 @@ struct LazyOpSum {
 
     // performs y <- Ax + y
 	void evaluate_add(const coeff_t* x, coeff_t* y) const {
-		for (const auto& [c, op_ptr] : ops.terms) {
-            op_ptr.apply(basis, x, y, c);
+		for (const auto& [c, op] : ops.terms) {
+            op.apply_add(basis, x, y, c);
 		}
 	}
 

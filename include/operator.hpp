@@ -209,34 +209,23 @@ struct SymbolicPMROperator {
 	
 	// Apply this operator to an input vector `in` and store result in `out`
 	template <typename Orig, typename Dest>
-	void apply(const ZBasis& basis, const Orig& in, Dest& out) const {	
-        #pragma omp parallel for
-		for (ZBasis::idx_t i = 0; i < basis.dim(); ++i) {
-			ZBasis::idx_t J = i;
-            auto c = applyIndex(basis, J) * in[i];
-            // Note: each of these is a gneralised permitation, and so
-            // the modified J after applyIndex is uniquely associated with i.
-            // Therefore no atomic guard is needed here.
-            if (c != 0) {
-            out[J] += c;
-            }
-		}
-	}
+	void apply_add(const ZBasis& basis, const Orig& in, Dest& out) const {	
+        apply_add(basis, in, out, 1.);
+        // is this even used?
+    }
 
 
-	// Apply this operator to an input vector `in` and store a * result in `out`
+	// Apply this operator to an input vector `in` and add a * result in `out`
 	template <typename Orig, typename Dest>
-	void apply(const ZBasis& basis, const Orig& in, Dest& out, double a) const {	
-        #pragma omp parallel for
-		for (ZBasis::idx_t i = 0; i < basis.dim(); ++i) {
+	void apply_add(const ZBasis& basis, const Orig& in, Dest& out, double a) const {
+        #pragma omp parallel for schedule(static)
+        for (ZBasis::idx_t i = 0; i < basis.dim(); ++i) {
 			ZBasis::idx_t J = i;
             auto c = applyIndex(basis, J) * in[i];
             // Note: each of these is a gneralised permitation, and so
             // the modified J after applyIndex is uniquely associated with i.
             // Therefore no atomic guard is needed here.
-            if (c != 0) {
             out[J] += a*c;
-            }
 		}
 	}
 
