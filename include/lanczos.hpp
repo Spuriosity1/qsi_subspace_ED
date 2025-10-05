@@ -2,6 +2,7 @@
 #include <Eigen/Eigenvalues>
 #include <complex>
 #include <random>
+#include "timeit.hpp"
 
 extern "C"{
     // hack
@@ -434,7 +435,7 @@ LanczosResult lanczos_iterate(const H& ham,
             mul(u, -beta);
         }
         // u += A * v
-        ham.evaluate_add(v.data(), u.data());
+        TIMEIT("u += Av ", ham.evaluate_add(v.data(), u.data());)
 
         // α_j = <v_j | u>
         double alpha = innerReal(v, u);
@@ -452,7 +453,7 @@ LanczosResult lanczos_iterate(const H& ham,
         // u contains the old v_{j} for next iteration
         mul(v, 1/beta);
 
-        if (settings.verbosity > 2) {
+        if (settings.verbosity > 1) {
             std::cout << "Iter "<< j << " a[j]="<<alpha<<" b[j]="<<beta << "\n";
         }
 
@@ -462,7 +463,7 @@ LanczosResult lanczos_iterate(const H& ham,
          // Convergence test: compute current eigenvalue estimate
         if (j >= settings.min_iterations && j % settings.convergence_check_interval == 0) {
             check_lanczos_convergence<_S>(alphas, betas, eigval, j, settings, retval);
-            if (settings.verbosity > 1) {
+            if (settings.verbosity > 0) {
                 std::cout << "Iter "<< j << " eigval error " << retval.eigval_error << "\n";
             }
 
