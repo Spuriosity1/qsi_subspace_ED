@@ -49,17 +49,18 @@ void LazyOpSum<coeff_t>::evaluate_add_off_diag(const coeff_t* x, coeff_t* y) con
 // performs y <- Ax + y
 template <RealOrCplx coeff_t>
 void LazyOpSum<coeff_t>::evaluate_add_diagonal(const coeff_t* x, coeff_t* y) const {
-    for (const auto& term : ops.off_diag_terms) {
+    for (const auto& term : ops.diagonal_terms) {
         const auto& c = term.first;   
         const auto& op = term.second;
 
-        #pragma omp for schedule(dynamic, basis.dim()) nowait
+        assert(op.is_diagonal());
+
+        #pragma omp parallel for schedule(static)
         for (ZBasis::idx_t i = 0; i < basis.dim(); ++i) {
-            ZBasis::idx_t J = i;
-            coeff_t dy = c * x[i] * static_cast<double>(op.applyIndex(basis, J));
-            assert(J == i);
-            // completely in place, no J collisions
-            y[J] += dy;
+            ZBasis::state_t psi = basis[i];
+            coeff_t dy = c * x[i] * static_cast<double>(op.applyState(psi));
+            // completely in place, no i collisions
+            y[i] += dy;
         }
         
     }

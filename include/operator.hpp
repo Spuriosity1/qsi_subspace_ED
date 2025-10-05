@@ -212,7 +212,6 @@ struct SymbolicPMROperator {
 //        J= basis.idx_of_state(state);
 //        return _sign;
     }
-    
 	
 //	// Apply this operator to an input vector `in` and store result in `out`
 //	template <typename Orig, typename Dest>
