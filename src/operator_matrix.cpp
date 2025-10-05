@@ -5,9 +5,10 @@
 template <RealOrCplx coeff_t>
 void LazyOpSum<coeff_t>::evaluate_add(const coeff_t* x, coeff_t* y) const {
     static const size_t CHUNK_SIZE = 10000;
-    for (const auto& [c, op] : ops.terms) {
-        std::vector<int> process_chunk;
-        process_chunk.reserve(basis.dim() / CHUNK_SIZE);
+    for (const auto& term : ops.terms) {
+        const auto& c = term.first;   // Extract before parallel region
+        const auto& op = term.second;
+        
         #pragma omp parallel
         {
             std::vector<std::pair<ZBasis::idx_t, coeff_t>> local_updates;

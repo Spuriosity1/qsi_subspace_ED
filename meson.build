@@ -14,6 +14,7 @@ host_cpu = host_machine.cpu_family()
 target_args = []
 
 if get_option('buildtype') == 'release'
+  add_project_arguments('-DNDEBUG', language: ['c', 'cpp'])
   if host_cpu.startswith('x86')
     if cpp_compiler.has_argument('-mavx2')
       target_args += ['-mavx2']
