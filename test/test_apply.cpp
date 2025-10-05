@@ -67,6 +67,7 @@ int main(int argc, char* argv[]){
     std::mt19937 rng(seed);
     set_random_unit(v, rng);
 
-    TIMEIT("u <- Av", H.evaluate_add(v.data(), u.data());)
+    TIMEIT("u += Av", H.evaluate_add(v.data(), u.data());)
+//    TIMEIT("u <- Av", H.evaluate(v.data(), u.data());)
     return 0;
 }

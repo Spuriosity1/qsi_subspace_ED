@@ -14,7 +14,7 @@ test_uint128 = executable('test_uint128',
 test_PMR_operator = executable('test_PMR_operator',
   'test_PMR_construct.cpp',
   include_directories: inc,
-  dependencies: [eigen_dep, hdf5_dep, omp_dep],
+  dependencies: [eigen_dep, abseil_dep, hdf5_dep, omp_dep],
   install : false)
 
 test_lanczos = executable('test_lanczos',

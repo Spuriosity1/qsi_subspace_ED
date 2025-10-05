@@ -7,6 +7,7 @@
 #include <sstream>
 #include <stdexcept>
 #include <vector>
+#include <absl/container/flat_hash_map.h>
 
 #ifdef __APPLE__ // patch broken NEON optimization
 #define EIGEN_DONT_VECTORIZE
@@ -130,9 +131,9 @@ struct ZBasis {
 		}
 	}
 	
-    // pls dont modify me without permission :o
 	std::vector<state_t> states;
-	std::unordered_map<state_t, idx_t, Uint128Hash, Uint128Eq> state_to_index;
+	//std::unordered_map<state_t, idx_t, Uint128Hash, Uint128Eq> state_to_index;
+    absl::flat_hash_map<state_t, idx_t> state_to_index;
 };
 
 
@@ -207,27 +208,27 @@ struct SymbolicPMROperator {
     }
     
 	
-	// Apply this operator to an input vector `in` and store result in `out`
-	template <typename Orig, typename Dest>
-	void apply_add(const ZBasis& basis, const Orig& in, Dest& out) const {	
-        apply_add(basis, in, out, 1.);
-        // is this even used?
-    }
-
-
-	// Apply this operator to an input vector `in` and add a * result in `out`
-	template <typename Orig, typename Dest>
-	void apply_add(const ZBasis& basis, const Orig& in, Dest& out, double a) const {
-        #pragma omp parallel for schedule(static)
-        for (ZBasis::idx_t i = 0; i < basis.dim(); ++i) {
-			ZBasis::idx_t J = i;
-            auto c = applyIndex(basis, J) * in[i];
-            // Note: each of these is a gneralised permitation, and so
-            // the modified J after applyIndex is uniquely associated with i.
-            // Therefore no atomic guard is needed here.
-            out[J] += a*c;
-		}
-	}
+//	// Apply this operator to an input vector `in` and store result in `out`
+//	template <typename Orig, typename Dest>
+//	void apply_add(const ZBasis& basis, const Orig& in, Dest& out) const {	
+//        apply_add(basis, in, out, 1.);
+//        // is this even used?
+//    }
+//
+//
+//	// Apply this operator to an input vector `in` and add a * result in `out`
+//	template <typename Orig, typename Dest>
+//	void apply_add(const ZBasis& basis, const Orig& in, Dest& out, double a) const {
+//        #pragma omp parallel for schedule(static)
+//        for (ZBasis::idx_t i = 0; i < basis.dim(); ++i) {
+//			ZBasis::idx_t J = i;
+//            auto c = applyIndex(basis, J) * in[i];
+//            // Note: each of these is a generalised permutation, and so
+//            // the modified J after applyIndex is uniquely associated with i.
+//            // Therefore no atomic guard is needed here.
+//            out[J] += a*c;
+//		}
+//	}
 
 	ZBasis::idx_t highest_set_bit() const {
 		return ::highest_set_bit(X_mask | Z_mask | down_mask | up_mask);

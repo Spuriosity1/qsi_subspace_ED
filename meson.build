@@ -55,7 +55,11 @@ spectra_dep = dependency('spectra', method: 'cmake')
 
 omp_dep = dependency('OpenMP', required: true)
 
-# MRRRR parallel tridiagonal matrix eigensolver
+#abseil_dep = dependency('absl', method: 'cmake', modules: ['absl::flat_hash_map'], required: true)
+abseil_proj = subproject('abseil-cpp')
+abseil_dep = abseil_proj.get_variable('absl_container_dep')
+
+# MRRR parallel tridiagonal matrix eigensolver
 mr3smp_proj = subproject('mr3smp')
 mr3smp_dep = mr3smp_proj.get_variable('mr3smp_dep')
 
@@ -67,7 +71,8 @@ g_deps = [
   json_dep,
   omp_dep,
   eigen_dep,
-  mr3smp_dep
+  mr3smp_dep,
+  abseil_dep
 ]
 
 subdir('src')
@@ -114,7 +119,7 @@ if eigen_dep.found()
 
 if spectra_dep.found()
 
-expectation_eval = static_library('expectation_eval', ['src/expectation_eval.cpp'],
+expectation_eval = static_library('expectation_eval', ['src/expectation_eval.cpp', 'src/operator_matrix.cpp'],
   dependencies: [g_deps, eigen_dep, spectra_dep],
   include_directories: inc,
   cpp_args: target_args
@@ -140,6 +145,7 @@ build_hamiltonian = executable('build_hamiltonian',
   files(['src/build_hamiltonian.cpp', 'src/expectation_eval.cpp']),
   dependencies: [g_deps, eigen_dep, spectra_dep],
   include_directories: inc,
+  link_with: expectation_eval,
   cpp_args: target_args
   )
 
@@ -153,8 +159,9 @@ build_hamiltonian = executable('build_hamiltonian',
 
 eval_observables = executable('eval_observables',
   files(['src/eval_observables.cpp', 'src/expectation_eval.cpp']),
-  dependencies: [g_deps, eigen_dep, spectra_dep],
+  dependencies: [g_deps, eigen_dep, omp_dep, spectra_dep],
   include_directories: inc,
+  link_with: expectation_eval,
   cpp_args: target_args
   )
 
@@ -163,6 +170,7 @@ eval_dsf = executable('eval_dsf',
   files(['src/eval_dsf.cpp', 'src/expectation_eval.cpp']),
   dependencies: [g_deps, eigen_dep, spectra_dep],
   include_directories: inc,
+  link_with: expectation_eval,
   cpp_args: target_args
   )
 

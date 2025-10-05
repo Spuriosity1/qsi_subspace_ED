@@ -52,6 +52,13 @@ union Uint128 {
     constexpr bool operator>(const Uint128& other) const {
         return uint128 > other.uint128;
     }
+    
+    template <typename H>
+    friend H AbslHashValue(H h, const Uint128& c) {
+        return H::combine(std::move(h), c.uint128);
+        //return H::combine(std::move(h), c.uint64[0], c.uint64[1]);
+    }
+
 };
 
 

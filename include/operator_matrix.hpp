@@ -25,17 +25,14 @@ struct LazyOpSum {
 
 	// Core evaluator 
     // Applies y = A x (sets y=0 first)
-	void evaluate(const coeff_t* x, coeff_t* y) const {
+	void evaluate(const coeff_t* x, coeff_t* y) const
+    {
 		std::fill(y, y + basis.dim(), coeff_t(0));
         this->evaluate_add(x, y);
 	}
 
     // performs y <- Ax + y
-	void evaluate_add(const coeff_t* x, coeff_t* y) const {
-		for (const auto& [c, op] : ops.terms) {
-            op.apply_add(basis, x, y, c);
-		}
-	}
+	void evaluate_add(const coeff_t* x, coeff_t* y) const; 
 
 	// Eigen-compatible wrapper, evaluate y = this * x
 	template <typename In, typename Out>
