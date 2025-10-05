@@ -371,7 +371,14 @@ void check_lanczos_convergence(
     res.converged= false;
 }
 
+template<RealOrCplx _S>
+void set_random_unit(std::vector<_S>& v, std::mt19937& rng) {
+    std::normal_distribution<double> dist(0.0, 1.0);
+    for (auto& x : v) x = dist(rng);
 
+    double nrm = norm(v);
+    for (auto& x : v) x /= nrm;
+}
 
 
 // Runs the Lanczos recurrence
@@ -389,11 +396,7 @@ LanczosResult lanczos_iterate(const H& ham,
     // Generating the starting vector
     v.resize(ham.cols());
     std::mt19937 rng(settings.x0_seed);
-    std::normal_distribution<double> dist(0.0, 1.0);
-    for (auto& x : v) x = dist(rng);
-
-    double nrm = norm(v);
-    for (auto& x : v) x /= nrm;
+    set_random_unit(v, rng);
 
     // v = current v_j (input normalized)
     // u = scratch/previous/next (rotates role each step)

@@ -114,10 +114,17 @@ if eigen_dep.found()
 
 if spectra_dep.found()
 
-diag_DOQSI_ham = executable('diag_DOQSI_ham',
-  files(['src/diag_DOQSI_ham.cpp', 'src/expectation_eval.cpp']),
+expectation_eval = static_library('expectation_eval', ['src/expectation_eval.cpp'],
   dependencies: [g_deps, eigen_dep, spectra_dep],
   include_directories: inc,
+  cpp_args: target_args
+  )
+
+diag_DOQSI_ham = executable('diag_DOQSI_ham',
+  files(['src/diag_DOQSI_ham.cpp']),
+  dependencies: [g_deps, eigen_dep, spectra_dep],
+  include_directories: inc,
+  link_with: expectation_eval,
   cpp_args: target_args
   )
 

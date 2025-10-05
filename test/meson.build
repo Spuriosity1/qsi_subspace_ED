@@ -14,13 +14,21 @@ test_uint128 = executable('test_uint128',
 test_PMR_operator = executable('test_PMR_operator',
   'test_PMR_construct.cpp',
   include_directories: inc,
-  dependencies: [eigen_dep, hdf5_dep],
+  dependencies: [eigen_dep, hdf5_dep, omp_dep],
   install : false)
 
 test_lanczos = executable('test_lanczos',
   'test_lanczos.cpp',
   include_directories: inc,
   dependencies: g_deps,
+  install: false
+  )
+
+test_apply = executable('test_apply',
+  'test_apply.cpp',
+  include_directories: inc,
+  dependencies: [g_deps, eigen_dep, spectra_dep],
+  link_with: expectation_eval,
   install: false
   )
 
