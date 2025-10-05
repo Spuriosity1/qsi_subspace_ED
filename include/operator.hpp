@@ -95,11 +95,13 @@ struct ZBasis {
 		return states[idx];
 	}
 
-	size_t insert_states(const std::vector<state_t>& others,
+    // Inserts the states "others" into the basis, remembering the inserted states 
+    // 'new_states'
+	size_t insert_states(const std::vector<state_t>& to_insert,
 			std::vector<state_t>& new_states){
 		new_states.resize(0);
 		size_t n_insertions = 0;
-		for (auto& s : others){
+		for (auto& s : to_insert){
 			// skip if we know about it already
 			if (state_to_index.find(s) != state_to_index.end()) continue;
 			state_to_index[s] = states.size();

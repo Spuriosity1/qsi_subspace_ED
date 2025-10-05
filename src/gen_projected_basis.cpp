@@ -9,6 +9,7 @@
 #include "bittools.hpp"
 #include "basis_io.hpp"
 #include "operator.hpp"
+#include <absl/container/flat_hash_map.h>
 
 
 using namespace std;
@@ -37,6 +38,7 @@ struct constr_explorer : public ZBasis {
 		this->sort();
 		basis_io::write_basis_hdf5(states, outfilename);
 	}
+
 
 	protected:
 	std::vector<SymbolicPMROperator> opset;
@@ -84,6 +86,8 @@ void constr_explorer::build_states(ZBasis::state_t init) {
 		for (auto& psi : prev_set){
 			for (const auto &o : opset) {
 				if (o.applyState(psi) != 0) {
+                    std::cout << "Generated psi=";
+                    printHex(std::cout, psi) << "\n";
 					tmp.push_back(psi);
 				}
 			}
@@ -107,10 +111,12 @@ int main (int argc, char *argv[]) {
 	std::string infilename(argv[1]);
 
 	Uint128 seed_state;
-	size_t nchar = std::sscanf(argv[2], "0x%" PRIx64 "0x%" PRIx64, &seed_state.uint64[1], &seed_state.uint64[0]);
+	size_t nchar = std::sscanf(argv[2], "0x%" PRIx64 ",0x%" PRIx64, &seed_state.uint64[1], &seed_state.uint64[0]);
 	if (nchar != 2){
 		cerr<<"Failed to parse argv[2] as a seed state: got "<<argv[2]<<endl;
 	}
+    std::cout << "Loaded seed state";
+    printHex(std::cout, seed_state) << "\n";
 
 
 	std::string ext = ".0";

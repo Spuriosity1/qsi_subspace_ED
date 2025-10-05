@@ -1,10 +1,12 @@
 #pragma once
 
 #include <concepts>
+#include <iomanip>
 #include <vector>
 #include <cstdint>
 #include <cstdio>
 #include <string>
+#include <iostream>
 
 
 union Uint128 {
@@ -170,4 +172,23 @@ inline Uint128 permute(const Uint128& x, const std::vector<T>& I) {
         y |= ((x >> n) & 1) << to;
     }
     return y;
+}
+
+
+// Alternative: Hexadecimal output operator
+inline std::ostream& printHex(std::ostream& os, const Uint128& val) {
+    std::ios_base::fmtflags flags = os.flags();
+    
+    os << "0x" << std::hex << std::setfill('0');
+    
+    // Print high 64 bits if non-zero
+    if (val.uint64[1] != 0) {
+        os << val.uint64[1];
+        os << std::setw(16) << val.uint64[0];
+    } else {
+        os << val.uint64[0];
+    }
+    
+    os.flags(flags);
+    return os;
 }
