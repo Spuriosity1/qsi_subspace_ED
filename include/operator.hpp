@@ -67,6 +67,36 @@ opstring: %zu, spin_ids: %zu", opstring.size(), spin_ids.size());
 	}
 };
 
+//
+//struct UInt128map {
+//	using state_t = Uint128; // type which stores the computational basis state
+//	using idx_t = uint64_t;  // the type to use for the indices themselves
+//                            
+//    // strategy: Use a configurable num. of MSB to place concrete brackets
+//    UInt128map(){};
+//    
+//    void initialise(const std::vector<state_t>& states, int n_spins, int num_radix=10);
+//
+//protected:
+//    int n_spins; // the index of the highest set bit in states
+//                 // e.g. 100100 -> 5, as in (psi >> 5) & 0x1
+//    int n_radix;
+//    
+//    // Given psi, define a topl-level index a = (psi.uin64[1] & hi_mask) >> hi_shift
+//    // bounds[] gives 
+//    // such that psi (if present) is in [states[a], states[b]).
+//    std::vector<idx_t> bounds;
+//
+//    int hi_shift;
+//    uint64_t hi_mask;
+//
+//
+//    void initialise_lt64(const std::vector<state_t>& states);
+//    void initialise_gt64(const std::vector<state_t>& states);
+//};
+//
+
+struct SymbolicPMROperator;
 
 
 // Wrapper for a std::vector implementing indexable set semantics
@@ -76,7 +106,6 @@ struct ZBasis {
 	using state_t = Uint128; // type which stores the computational basis state
 	using idx_t = uint64_t;  // the type to use for the indices themselves
 
-
 	ZBasis(){}
 
 	size_t dim() const {
@@ -84,13 +113,8 @@ struct ZBasis {
 	}
 
 	// returns the index of a particular basis state
-	idx_t idx_of_state(const state_t& state) const {
-		auto it = state_to_index.find(state);
-		if (it == state_to_index.end()){
-			throw state_not_found_error(state);
-		}
-		return it->second;
-	}
+	idx_t idx_of_state(const state_t& state) const;
+
 	inline state_t operator[](idx_t idx) const {
 		return states[idx];
 	}
@@ -98,44 +122,17 @@ struct ZBasis {
     // Inserts the states "others" into the basis, remembering the inserted states 
     // 'new_states'
 	size_t insert_states(const std::vector<state_t>& to_insert,
-			std::vector<state_t>& new_states){
-		new_states.resize(0);
-		size_t n_insertions = 0;
-		for (auto& s : to_insert){
-			// skip if we know about it already
-			if (state_to_index.find(s) != state_to_index.end()) continue;
-			state_to_index[s] = states.size();
-			states.push_back(s);
-			new_states.push_back(s);
-			n_insertions++;
-		}
-		return n_insertions;
-	}
+			std::vector<state_t>& new_states);
 
-	void load_from_file(const fs::path& bfile, const std::string& dataset="basis"){
-        std::cerr << "Loading basis from file " << bfile <<"\n";
-        if (bfile.stem().extension() == ".partitioned"){
-            assert(bfile.extension() == ".h5");
-            states = basis_io::read_basis_hdf5(bfile, dataset.c_str());
-        } else if (bfile.extension() == ".h5"){
-            assert(dataset=="basis");
-			states = basis_io::read_basis_hdf5(bfile); 
-		} else if (bfile.extension() == ".csv"){
-            assert(dataset=="basis");
-			states = basis_io::read_basis_csv(bfile); 
-		} else {
-			throw std::runtime_error(
-					"Bad basis format: file must end with .csv or .h5");
-		}
+	void load_from_file(const fs::path& bfile, const std::string& dataset="basis");
 
-		for (idx_t i=0; i<states.size(); i++){
-			state_to_index[states[i]] = i;
-		}
-	}
-	
+    bool search(const state_t& state, idx_t& J) const;
+
+protected:
 	std::vector<state_t> states;
 	//std::unordered_map<state_t, idx_t, Uint128Hash, Uint128Eq> state_to_index;
-    absl::flat_hash_map<state_t, idx_t> state_to_index;
+	//std::map<state_t, idx_t> state_to_index;
+    //absl::flat_hash_map<state_t, idx_t> state_to_index;
 };
 
 
@@ -203,12 +200,8 @@ struct SymbolicPMROperator {
 
 		int _sign = applyState(state);
 
-        auto it = basis.state_to_index.find(state);
-        if (it == basis.state_to_index.end()) [[unlikely]] {
-            return 0;  // state not found in basis
-        }
-        J = it->second;
-        return _sign;
+        int res = basis.search(state, J);
+        return _sign * res; // *0 in case of miss
 //        J= basis.idx_of_state(state);
 //        return _sign;
     }

@@ -23,10 +23,10 @@ struct constr_explorer : public ZBasis {
 
 	void sort() {
 		std::sort(states.begin(), states.end());
-		state_to_index.clear();
-		for (idx_t i=0; i<states.size(); i++){
-			state_to_index[states[i]] = i;
-		}
+//		state_to_index.clear();
+//		for (idx_t i=0; i<states.size(); i++){
+//			state_to_index[states[i]] = i;
+//		}
 
 	}
 

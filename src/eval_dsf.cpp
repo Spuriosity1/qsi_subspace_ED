@@ -22,8 +22,8 @@ void calc_Sz_rep(
     const ZBasis& basis,
     size_t spin_i
     ){
-    for (int i=0; i<basis.dim(); i++){
-        auto state = basis.states[i];
+    for (ZBasis::idx_t i=0; i<basis.dim(); i++){
+        auto state = basis[i];
         Sz_diagvals[i] = 1.0 * ((state & spin_i) != 0) -0.5;
         // note for later: could in principle shift by 1/2 for a factor of 2 speedup
     }

@@ -1,7 +1,7 @@
 project('projected_ed', ['cpp', 'c'],
   version: '1.0.0',
   meson_version : '>= 1.3.0',
-  default_options : [ 'warning_level=3', 'buildtype=release', 'cpp_std=c++2a' ]
+  default_options : [ 'warning_level=2', 'buildtype=release', 'cpp_std=c++2a' ]
 )
 
 
@@ -112,7 +112,7 @@ merge_shards = executable('merge_shards', 'src/merge_shards.cpp',
 
 if eigen_dep.found()
 
-gen_projected_basis = executable('gen_projected_basis', files('src/gen_projected_basis.cpp'), 
+gen_projected_basis = executable('gen_projected_basis', files('src/gen_projected_basis.cpp', 'src/operator.cpp'), 
   dependencies: [g_deps, eigen_dep, abseil_dep],
   include_directories:inc,
   cpp_args: target_args
@@ -120,7 +120,7 @@ gen_projected_basis = executable('gen_projected_basis', files('src/gen_projected
 
 if spectra_dep.found()
 
-expectation_eval = static_library('expectation_eval', ['src/expectation_eval.cpp', 'src/operator_matrix.cpp'],
+expectation_eval = static_library('expectation_eval', ['src/expectation_eval.cpp', 'src/operator_matrix.cpp', 'src/operator.cpp'],
   dependencies: [g_deps, eigen_dep, omp_dep, spectra_dep],
   include_directories: inc,
   cpp_args: target_args
