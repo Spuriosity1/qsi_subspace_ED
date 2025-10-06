@@ -7,7 +7,7 @@
 #include <sstream>
 #include <stdexcept>
 #include <vector>
-#include <absl/container/flat_hash_map.h>
+//#include <absl/container/flat_hash_map.h>
 
 #ifdef __APPLE__ // patch broken NEON optimization
 #define EIGEN_DONT_VECTORIZE

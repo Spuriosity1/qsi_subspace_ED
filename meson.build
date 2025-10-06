@@ -57,8 +57,8 @@ spectra_dep = dependency('spectra', method: 'cmake')
 omp_dep = dependency('OpenMP', required: true)
 
 #abseil_dep = dependency('absl', method: 'cmake', modules: ['absl::flat_hash_map'], required: true)
-abseil_proj = subproject('abseil-cpp')
-abseil_dep = abseil_proj.get_variable('absl_container_dep')
+#abseil_proj = subproject('abseil-cpp')
+#abseil_dep = abseil_proj.get_variable('absl_container_dep')
 
 # MRRR parallel tridiagonal matrix eigensolver
 mr3smp_proj = subproject('mr3smp')
@@ -72,8 +72,8 @@ g_deps = [
   json_dep,
   omp_dep,
   eigen_dep,
-  mr3smp_dep,
-  abseil_dep
+  mr3smp_dep
+#  abseil_dep
 ]
 
 subdir('src')
@@ -113,7 +113,7 @@ merge_shards = executable('merge_shards', 'src/merge_shards.cpp',
 if eigen_dep.found()
 
 gen_projected_basis = executable('gen_projected_basis', files('src/gen_projected_basis.cpp', 'src/operator.cpp'), 
-  dependencies: [g_deps, eigen_dep, abseil_dep],
+  dependencies: [g_deps, eigen_dep],
   include_directories:inc,
   cpp_args: target_args
   )
