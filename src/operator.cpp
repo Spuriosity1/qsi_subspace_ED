@@ -1,62 +1,5 @@
 #include "operator.hpp"
 #include <omp.h>
-//
-//void UInt128map::initialise(const std::vector<state_t>& states, int n_spins,
-//        int n_radix) {
-//    // do-once fn. can be as slow as you like
-//    // well not really. Insist that the radix fits wholly within either 'hi' or 'lo'
-//    // for better performance
-//
-//    // n.b. assumes psi >> n_spins = 0 
-//    this->n_spins = n_spins;
-//    this->n_radix = n_radix;
-//    
-//    if ( n_spins <= 64 ){
-//        if ( n_radix > n_spins ) {
-//            throw std::logic_error("Radix cannot be greater than # spins");
-//        }
-//        initialise_lt64(states);
-//    } else {
-//        if ( n_radix > n_spins - 64 ) {
-//            throw std::logic_error("Radix cannot be greater than # spins - 64");
-//        }
-//
-//        initialise_gt64(states);
-//    }
-//}
-//
-//void UInt128map::initialise_lt64(const std::vector<state_t>& states){
-//    for (idx_t i=0; i<states.size(); i++){
-//        
-//    }
-//}
-//
-//
-//void UInt128map::initialise_gt64(const std::vector<state_t>& states){
-//    bounds.reserve((1 << n_radix) + 1);
-//    bounds.resize(0);
-//    for (int super=0; super <= (1<<n_radix); super++){
-//        bounds[super] 
-//    }
-//
-//    hi_shift = (n_spins - 64 - n_radix);
-//    hi_mask = ~(0ull) >> (64 - n_radix) << hi_shift;
-//    // masks off only the radix bits
-//
-//    for (idx_t i=0; i<states.size(); i++){
-//        uint64_t super = (states[i].uint64[1] & hi_mask) >> hi_shift;
-//
-//    }
-//}
-
-bool ZBasisHashmap::search(const state_t& state, idx_t& J) const {
-//    J = phash(state);
-    auto it = state_to_index.find(state);
-    if (it == state_to_index.end())    return false;
-    J = it->second; 
-    return true;
-}
-
 
 bool ZBasisBST::search(const state_t& state, idx_t& J) const {
 //    auto it = std::lower_bound(states.begin(), states.end(), state);
@@ -176,73 +119,10 @@ void ZBasisBase::load_from_file(const fs::path& bfile, const std::string& datase
     }
 }
 
-void ZBasisHashmap::load_from_file(const fs::path& bfile, const std::string& dataset){
-    this->ZBasisBase::load_from_file(bfile, dataset);
-    build_index();
-}
 
 void ZBasisInterp::load_from_file(const fs::path& bfile, const std::string& dataset){
     this->ZBasisBase::load_from_file(bfile, dataset);
     find_bounds();
-}
-
-/*
-void print_timings(const pthash::build_timings& timings){
-
-    double total_microseconds = timings.partitioning_microseconds +
-                                timings.mapping_ordering_microseconds +
-                                timings.searching_microseconds + timings.encoding_microseconds;
-
-    std::cout << "=== Construction time breakdown:\n";
-    std::cout << "    partitioning: " << timings.partitioning_microseconds / 1000000.0
-        << " [sec]"
-        << " (" << (timings.partitioning_microseconds * 100.0 / total_microseconds)
-        << "%)" << std::endl;
-    std::cout << "    mapping+ordering: " << timings.mapping_ordering_microseconds / 1000000.0
-        << " [sec]"
-        << " (" << (timings.mapping_ordering_microseconds * 100.0 / total_microseconds)
-        << "%)" << std::endl;
-    std::cout << "    searching: " << timings.searching_microseconds / 1000000.0 << " [sec]"
-        << " (" << (timings.searching_microseconds * 100.0 / total_microseconds) << "%)"
-        << std::endl;
-    //        std::cout << "    encoding: " << encoding_microseconds / 1000000.0 << " [sec]"
-    //                  << " (" << (encoding_microseconds * 100.0 / total_microseconds) << "%)"
-    //                  << std::endl;
-    std::cout << "    total: " << total_microseconds / 1000000.0 << " [sec]" << std::endl;
-}
-*/
-
-void ZBasisHashmap::build_index() {
-    for (idx_t J=0; J<dim(); J++){
-        state_to_index[states[J]]=J;
-    }
-
-//    // stage 1: construct the perfect hash fn
-//    pthash::build_configuration config;
-//    config.seed = 1234567890;
-//    config.lambda = 5;
-//    config.alpha = 0.97;
-//    config.verbose = true;
-//    config.avg_partition_size = 100000;
-//    config.num_threads = 4;
-//    config.dense_partitioning = true;
-//
-//    auto timings = phash.build_in_internal_memory(states.begin(), states.size(), config);
-//    print_timings(timings);
-//
-//    std::vector<state_t> tmp_states;
-//    tmp_states.resize(states.size());
-//    std::swap(tmp_states, states);
-//    std::cout <<"Original size "<<states.size() <<" phash size "<<phash.table_size()<<"\n";
-//
-//    idx_lookup.resize(phash.table_size());
-//    // tmp_states now contains all the original states
-//    for (idx_t J=0; J<dim(); J++){
-//        auto state = tmp_states[J];
-//        auto state_hash = phash(state);
-//        states[state_hash] = state;
-////        idx_lookup[state_hash] = J;
-//    }
 }
 
 

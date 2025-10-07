@@ -146,10 +146,10 @@ namespace Eigen {
 
 
 	template<typename coeff_t, typename Rhs>
-	struct Product<LazyOpSum<coeff_t, ZBasisHashmap>, Rhs, AliasFreeProduct> :
+	struct Product<LazyOpSum<coeff_t, ZBasisInterp>, Rhs, AliasFreeProduct> :
 		public Matrix<coeff_t, Dynamic, 1>
 	{
-		Product(const LazyOpSum<coeff_t, ZBasisHashmap>& op, const Rhs& rhs)
+		Product(const LazyOpSum<coeff_t, ZBasisInterp>& op, const Rhs& rhs)
 			: Matrix<coeff_t, Dynamic, 1>(op.rows())
 		{
 			op.applyTo(rhs, *this);

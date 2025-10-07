@@ -3,6 +3,7 @@
 
 #include <nlohmann/json.hpp>
 #include "hamiltonian_setup.hpp"
+#include "operator.hpp"
 
 
 using json = nlohmann::json;
@@ -105,7 +106,7 @@ int main(int argc, char* argv[]) {
 
 	// Step 2: Load basis from H5
     std::cout<<"Loading basis..."<<std::endl;
-	ZBasisBST basis;
+	ZBasisInterp basis;
 
     load_basis(basis, prog);
 

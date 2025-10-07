@@ -7,7 +7,6 @@
 #include <sstream>
 #include <stdexcept>
 #include <vector>
-#include <absl/container/flat_hash_map.h>
 
 #ifdef __APPLE__ // patch broken NEON optimization
 #define EIGEN_DONT_VECTORIZE
@@ -166,23 +165,6 @@ struct ZBasisInterp : public ZBasisBST {
     std::unordered_map<uint64_t, std::pair<idx_t, idx_t>> bounds;
 
     void find_bounds(); // finds the bounds
-};
-
-
-// Overrides search function to use a perfec hash fn
-// Instead of sorting the states, it reorders them according to the hashmap
-// so phash(this->states[idx]) = idx
-struct ZBasisHashmap : public ZBasisBase {
-    void load_from_file(const fs::path& bfile, const std::string& dataset="basis");
-
-    bool search(const state_t& state, idx_t& J) const;
-protected:
-//    pthash_type phash;
-    
-	//std::unordered_map<state_t, idx_t, Uint128Hash, Uint128Eq> state_to_index;
-	//std::map<state_t, idx_t> state_to_index;
-    absl::flat_hash_map<state_t, idx_t> state_to_index;
-    void build_index(); // constructs f and reorders states
 };
 
 
