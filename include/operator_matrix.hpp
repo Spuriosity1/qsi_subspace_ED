@@ -3,11 +3,11 @@
 
 // Local sparse methods for converting SymbolicOpSums to concrete matrices
 
-template <RealOrCplx coeff_t>
+template <RealOrCplx coeff_t, Basis B>
 struct LazyOpSum {
 	using Scalar = coeff_t;
 	explicit LazyOpSum(
-			const ZBasis& basis_, const SymbolicOpSum<coeff_t>& ops_
+			const B& basis_, const SymbolicOpSum<coeff_t>& ops_
 			) : basis(basis_), ops(ops_) 
 	{
 	}
@@ -74,15 +74,15 @@ struct LazyOpSum {
 	// Sparse matrix materialiser
 	Eigen::SparseMatrix<coeff_t>
 	toSparseMatrix(coeff_t tol = 1e-14) const {
-		Eigen::Index N = basis.dim();
+        ZBasisBase::idx_t N = basis.dim();
 		std::vector<Eigen::Triplet<coeff_t>> triplets;
 
 		// Eigen::VectorXd x = Eigen::VectorXd::Zero(N);
 		// Eigen::VectorXd y(N);
 
-		for (ZBasis::idx_t j = 0; j < N; ++j) {
+		for (ZBasisBase::idx_t j = 0; j < N; ++j) {
             for (auto& [c, op] : ops.off_diag_terms){
-				ZBasis::idx_t J = j;
+				ZBasisBase::idx_t J = j;
                 coeff_t res = c * op.applyIndex(basis, J);
                 if (std::abs(res) > tol )
                     triplets.emplace_back(J, j, res);
@@ -106,16 +106,16 @@ protected:
     void evaluate_add_off_diag(const coeff_t* x, coeff_t* y) const;
 
 	// coeff_t* tmp; // temp storage
-	const ZBasis& basis;
+	const B& basis;
 	const SymbolicOpSum<coeff_t> ops;
 };
 
-template <typename coeff_t>
+template <typename coeff_t, Basis B>
 class LazyOpSumProd {
 public:
 	using Scalar = coeff_t;
 
-	LazyOpSumProd(const LazyOpSum<coeff_t>& op_)
+	LazyOpSumProd(const LazyOpSum<coeff_t, B>& op_)
 	    : op(op_), xdim(op_.rows()) {}
 
 	// Spectra expects raw pointers
@@ -127,17 +127,29 @@ public:
 	Eigen::Index cols() const { return xdim; }
 
 private:
-	const LazyOpSum<coeff_t>& op;
+	const LazyOpSum<coeff_t, B>& op;
 	Eigen::Index xdim;
 };
 
 
 namespace Eigen {
 	template<typename coeff_t, typename Rhs>
-	struct Product<LazyOpSum<coeff_t>, Rhs, AliasFreeProduct> :
+	struct Product<LazyOpSum<coeff_t, ZBasisBST>, Rhs, AliasFreeProduct> :
 		public Matrix<coeff_t, Dynamic, 1>
 	{
-		Product(const LazyOpSum<coeff_t>& op, const Rhs& rhs)
+		Product(const LazyOpSum<coeff_t, ZBasisBST>& op, const Rhs& rhs)
+			: Matrix<coeff_t, Dynamic, 1>(op.rows())
+		{
+			op.applyTo(rhs, *this);
+		}
+	};
+
+
+	template<typename coeff_t, typename Rhs>
+	struct Product<LazyOpSum<coeff_t, ZBasisHashmap>, Rhs, AliasFreeProduct> :
+		public Matrix<coeff_t, Dynamic, 1>
+	{
+		Product(const LazyOpSum<coeff_t, ZBasisHashmap>& op, const Rhs& rhs)
 			: Matrix<coeff_t, Dynamic, 1>(op.rows())
 		{
 			op.applyTo(rhs, *this);

@@ -63,7 +63,7 @@ inline void partition_basis_hdf5(const std::string& infile, const std::array<Uin
         hsize_t total_rows = dims[0];
         
         for (hsize_t start_row = 0; start_row < total_rows; start_row += CHUNK_SIZE) {
-            printf("[ part ] row %12ld / %12ld (%.0f %%) \r", start_row, total_rows, 100.0*start_row/total_rows);
+            printf("[ part ] row %12lld / %12lld (%.0f %%) \r", start_row, total_rows, 100.0*start_row/total_rows);
             hsize_t current_chunk_size = std::min(CHUNK_SIZE, total_rows - start_row);
             
             // Define hyperslab for current chunk

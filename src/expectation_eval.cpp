@@ -130,10 +130,10 @@ double compute_expectation(
     return  psi_j.dot( op * psi_i);
 }
 
-
+template<Basis B>
 double compute_expectation(
     const Eigen::MatrixXd& eigenvectors,
-    const LazyOpSum<double>& op,
+    const LazyOpSum<double,B>& op,
     int i, int j
 ) {
     const auto& psi_i = eigenvectors.col(i);
@@ -165,7 +165,7 @@ compute_all_expectations(
 }
 
 
-
+//explicit instantiations
 template std::vector<double>
 compute_all_expectations<Eigen::SparseMatrix<double>>(
     const Eigen::MatrixXd& eigenvectors,
@@ -174,9 +174,16 @@ compute_all_expectations<Eigen::SparseMatrix<double>>(
 
 
 template std::vector<double>
-compute_all_expectations<LazyOpSum<double>>(
+compute_all_expectations<LazyOpSum<double, ZBasisBST>>(
     const Eigen::MatrixXd& eigenvectors,
-    const std::vector<LazyOpSum<double>>& ops
+    const std::vector<LazyOpSum<double, ZBasisBST>>& ops
+    );
+
+
+template std::vector<double>
+compute_all_expectations<LazyOpSum<double, ZBasisHashmap>>(
+    const Eigen::MatrixXd& eigenvectors,
+    const std::vector<LazyOpSum<double, ZBasisHashmap>>& ops
     );
 
 
@@ -225,9 +232,16 @@ compute_cross_correlation<Eigen::SparseMatrix<double>>(
 
 
 template std::vector<double>
-compute_cross_correlation<LazyOpSum<double>>(
+compute_cross_correlation<LazyOpSum<double, ZBasisBST>>(
     const Eigen::MatrixXd& eigenvectors,
-    const std::vector<LazyOpSum<double>>& ops
+    const std::vector<LazyOpSum<double, ZBasisBST>>& ops
+    );
+
+
+template std::vector<double>
+compute_cross_correlation<LazyOpSum<double, ZBasisHashmap>>(
+    const Eigen::MatrixXd& eigenvectors,
+    const std::vector<LazyOpSum<double, ZBasisHashmap>>& ops
     );
 
 

@@ -14,6 +14,8 @@
 #define EIGEN_DISABLE_NEON
 #endif
 
+#include <pthash.hpp>
+
 #include <Eigen/Core>
 #include <Eigen/Sparse>
 #include <basis_io.hpp>
@@ -98,53 +100,82 @@ opstring: %zu, spin_ids: %zu", opstring.size(), spin_ids.size());
 
 struct SymbolicPMROperator;
 
+struct cust_xxhash_128 {
+    typedef pthash::hash128 hash_type;
 
-// Wrapper for a std::vector implementing indexable set semantics
-// Represents a set of Sz product states spanning some subspace
-struct ZBasis {
+    static inline pthash::hash128 hash(const Uint128& val, uint64_t seed) {
+        return XXH128(reinterpret_cast<char const*>(&val), sizeof(val), seed);
+        //return pthash::hash128(val.uint64[0], val.uint64[1]);
+    }
+};
 
-	using state_t = Uint128; // type which stores the computational basis state
-	using idx_t = uint64_t;  // the type to use for the indices themselves
 
-	ZBasis(){}
+typedef pthash::dense_partitioned_phf<cust_xxhash_128,    // base hasher
+                              pthash::opt_bucketer,  // bucketer
+                              pthash::R_int,         // encoder type
+                              true>          // minimal
+    pthash_type;
+
+
+struct ZBasisBase {
+    using state_t = Uint128; // type which stores the computational basis state
+    using idx_t = uint64_t;  // the type to use for the indices themselves
 
 	size_t dim() const {
 		return states.size();
 	}
 
-	// returns the index of a particular basis state
-	idx_t idx_of_state(const state_t& state) const;
-
 	inline state_t operator[](idx_t idx) const {
 		return states[idx];
 	}
+
+	void load_from_file(const fs::path& bfile, const std::string& dataset="basis");
+
+    protected:
+        std::vector<state_t> states;
+};
+
+template<typename T>
+concept Basis =  std::derived_from<T, ZBasisBase> &&
+requires (T b, const ZBasisBase::state_t& state, ZBasisBase::idx_t& J) {
+    { b.search(state, J) } -> std::same_as<bool>;
+};
+
+
+// Wrapper for a std::vector implementing indexable set semantics
+// Represents a set of Sz product states spanning some subspace
+struct ZBasisBST : public ZBasisBase
+{
+	// returns the index of a particular basis state
+    // throws an error if not present
+	idx_t idx_of_state(const state_t& state) const;
 
     // Inserts the states "others" into the basis, remembering the inserted states 
     // 'new_states'
 	size_t insert_states(const std::vector<state_t>& to_insert,
 			std::vector<state_t>& new_states);
 
-	void load_from_file(const fs::path& bfile, const std::string& dataset="basis");
-
     bool search(const state_t& state, idx_t& J) const;
-
-protected:
-	std::vector<state_t> states;
-	//std::unordered_map<state_t, idx_t, Uint128Hash, Uint128Eq> state_to_index;
-	//std::map<state_t, idx_t> state_to_index;
-    //absl::flat_hash_map<state_t, idx_t> state_to_index;
 };
 
 
-inline int highest_set_bit(ZBasis::state_t x) {
-    if (x == 0) return -1;
+// Overrides search function to use a perfec hash fn
+// Instead of sorting the states, it reorders them according to the hashmap
+// so phash(this->states[idx]) = idx
+struct ZBasisHashmap : public ZBasisBase {
+    void load_from_file(const fs::path& bfile, const std::string& dataset="basis");
 
-    if (x.uint64[1] != 0) {
-        return 64 + 63 - __builtin_clzll(x.uint64[1]);
-    } else {
-        return 63 - __builtin_clzll(x.uint64[0]);
-    }
-}
+    bool search(const state_t& state, idx_t& J) const;
+protected:
+    pthash_type phash;
+    std::vector<uint64_t> idx_lookup;
+	//std::unordered_map<state_t, idx_t, Uint128Hash, Uint128Eq> state_to_index;
+	//std::map<state_t, idx_t> state_to_index;
+    //absl::flat_hash_map<state_t, idx_t> state_to_index;
+    void build_index(); // constructs f and reorders states
+};
+
+
 
 // Operators are instantiated relative to some basis, they keep 
 // a reference to it.
@@ -170,7 +201,7 @@ struct SymbolicPMROperator {
 
     // Mutates the uint128 state into Z X ([S+][S-] | [S-] [S+]) *state
     // and returns overall sign
-	inline int applyState(ZBasis::state_t& state) const {
+	inline int applyState(ZBasisBase::state_t& state) const {
         const auto s = state.uint128;
         const auto d = down_mask.uint128;
         const auto u = up_mask.uint128;
@@ -191,47 +222,23 @@ struct SymbolicPMROperator {
 	}
 
     bool is_diagonal() const {
-        return X_mask == ZBasis::state_t(0);
+        return X_mask == ZBasisBase::state_t(0);
     }
 
     // returns sign of only possibly-nonzero entry, modifies J to its index
-    int applyIndex(const ZBasis& basis, ZBasis::idx_t& J) const {
-		ZBasis::state_t state = basis[J];
+    template<Basis BasisType>
+    int applyIndex(const BasisType& basis, ZBasisBase::idx_t& J) const {
+		ZBasisBase::state_t state = basis[J];
 
 		int _sign = applyState(state);
 
         int res = basis.search(state, J);
         return _sign * res; // *0 in case of miss
-//        J= basis.idx_of_state(state);
-//        return _sign;
     }
 	
-//	// Apply this operator to an input vector `in` and store result in `out`
-//	template <typename Orig, typename Dest>
-//	void apply_add(const ZBasis& basis, const Orig& in, Dest& out) const {	
-//        apply_add(basis, in, out, 1.);
-//        // is this even used?
-//    }
-//
-//
-//	// Apply this operator to an input vector `in` and add a * result in `out`
-//	template <typename Orig, typename Dest>
-//	void apply_add(const ZBasis& basis, const Orig& in, Dest& out, double a) const {
-//        #pragma omp parallel for schedule(static)
-//        for (ZBasis::idx_t i = 0; i < basis.dim(); ++i) {
-//			ZBasis::idx_t J = i;
-//            auto c = applyIndex(basis, J) * in[i];
-//            // Note: each of these is a generalised permutation, and so
-//            // the modified J after applyIndex is uniquely associated with i.
-//            // Therefore no atomic guard is needed here.
-//            out[J] += a*c;
-//		}
-//	}
-
-	ZBasis::idx_t highest_set_bit() const {
+	ZBasisBase::idx_t highest_set_bit() const {
 		return ::highest_set_bit(X_mask | Z_mask | down_mask | up_mask);
 	}
-
 
     inline bool operator==(const SymbolicPMROperator& other) const {
         return X_mask == other.X_mask &&
@@ -278,10 +285,10 @@ struct SymbolicPMROperator {
     }
 
 protected:
-	ZBasis::state_t X_mask = 0;
-	ZBasis::state_t Z_mask = 0;
-	ZBasis::state_t down_mask = 0; // init_state & down_mask must be zero
-	ZBasis::state_t up_mask = 0; // init_state & up_mask must be == up_mask
+	ZBasisBase::state_t X_mask = 0;
+	ZBasisBase::state_t Z_mask = 0;
+	ZBasisBase::state_t down_mask = 0; // init_state & down_mask must be zero
+	ZBasisBase::state_t up_mask = 0; // init_state & up_mask must be == up_mask
     int sign=1;
 private:
     static std::pair<std::vector<char>, std::vector<int>> parseSpec(const std::string& spec) {

@@ -36,7 +36,7 @@ get_partial_vol_ops(
 
 // Computes cross terms ⟨ψ_i| O |ψ_j⟩ for given i and j for operator O
 double compute_expectation(
-    const ZBasis& basis,
+    const ZBasisBST& basis,
     const Eigen::MatrixXd& eigenvectors,
     const Eigen::SparseMatrix<double>& op,
     int i, int j
@@ -44,7 +44,7 @@ double compute_expectation(
 
 
 double compute_expectation(
-    const ZBasis& basis,
+    const ZBasisBST& basis,
     const Eigen::MatrixXd& eigenvectors,
     const SymbolicPMROperator& op,
     int i, int j

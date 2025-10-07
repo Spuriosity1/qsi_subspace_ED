@@ -145,9 +145,9 @@ inline void compute_eigenspectrum_dense(const MatrixXd& ham, Eigen::VectorXd& e,
 
 
 
-
+template<Basis basis_t>
 std::pair<VectorXd, MatrixXd>
-inline diagonalise_real(const LazyOpSum<double>& H, const argparse::ArgumentParser &prog) {
+inline diagonalise_real(const LazyOpSum<double, basis_t>& H, const argparse::ArgumentParser &prog) {
 
     std::string algo;
 
@@ -188,7 +188,8 @@ inline diagonalise_real(const LazyOpSum<double>& H, const argparse::ArgumentPars
         sett.rel_tol = pow(10,prog.get<int>("--rtol"));
 
 
-        auto res = eigval0_lanczos<LazyOpSum<double>, double>(H, E0, eigvec, sett);
+        auto res = eigval0_lanczos<LazyOpSum<double, basis_t>, double>(H, E0, eigvec, sett);
+//        res.converged;
 
         return std::make_pair(
         Eigen::Map<const Eigen::VectorXd>(&E0, 1),
@@ -220,7 +221,7 @@ inline diagonalise_real(const LazyOpSum<double>& H, const argparse::ArgumentPars
                 std::cout << "Saved to H.mtx" << std::endl;
             }
         } else if (algo == "mfsparse") {
-            compute_spectrum_iterative<LazyOpSumProd<double>>(H, eigvals, eigvecs, prog);
+            compute_spectrum_iterative<LazyOpSumProd<double, basis_t>>(H, eigvals, eigvecs, prog);
             if (prog.get<bool>("--save_matrix")) {
                 std::cout << "refusing to save matrix (matrix-free option selected" << std::endl;
             }

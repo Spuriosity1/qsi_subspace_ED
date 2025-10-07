@@ -126,12 +126,6 @@ constexpr inline bool operator==(const Uint128& x, const Uint128& y){
     return x.uint128 == y.uint128;
 }
 
-template <typename T>
-constexpr inline Uint128 operator>>(Uint128 x, T idx){
-    Uint128 res(x);
-    res.uint128 = res.uint128 >> idx;
-    return res;
-}
 
 constexpr inline Uint128 operator|(Uint128 x, const Uint128& y){
 	x.uint64[0] |= y.uint64[0];
@@ -140,13 +134,33 @@ constexpr inline Uint128 operator|(Uint128 x, const Uint128& y){
 }
 	
 
+template <typename T>
+requires std::convertible_to<T, int>
+constexpr inline std::enable_if_t<std::is_integral_v<T>, Uint128> 
+operator>>(Uint128 x, T idx){
+    Uint128 res(x);
+    res.uint128 = res.uint128 >> idx;
+    return res;
+}
 
 template <typename T>
 requires std::convertible_to<T, int>
-constexpr inline Uint128 operator<<(Uint128 x, T idx){
+constexpr inline std::enable_if_t<std::is_integral_v<T>, Uint128> 
+operator<<(Uint128 x, T idx){
     Uint128 res(x);
     res.uint128 = res.uint128 << idx;
     return res;
+}
+
+
+inline int highest_set_bit(const Uint128& x) {
+    if (x == 0) return -1;
+
+    if (x.uint64[1] != 0) {
+        return 64 + 63 - __builtin_clzll(x.uint64[1]);
+    } else {
+        return 63 - __builtin_clzll(x.uint64[0]);
+    }
 }
 
 

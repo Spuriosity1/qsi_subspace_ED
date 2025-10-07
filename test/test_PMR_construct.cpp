@@ -28,7 +28,7 @@ void require_eq(T A, T B, const std::string& msg) {
 void check_equiv(const std::vector<char>& Aop, const std::vector<char>& Bop,
                  int expected_sign, Uint128 initial, int site = 0) {
 
-    ZBasis::state_t sa{initial}, sb{initial};
+    ZBasisBase::state_t sa{initial}, sb{initial};
     std::vector<int> idsA, idsB;
     for (size_t i = 0; i < Aop.size(); ++i) idsA.push_back(site);
     for (size_t i = 0; i < Bop.size(); ++i) idsB.push_back(site);
@@ -50,7 +50,7 @@ void check_equiv(const std::vector<char>& Aop, const std::vector<char>& Bop,
 
 
 void check_equiv_str(const std::string& A, const std::string& B, int expected_sign, Uint128 initial) {
-    ZBasis::state_t sa{initial}, sb{initial};
+    ZBasisBase::state_t sa{initial}, sb{initial};
     SymbolicPMROperator opA(A), opB(B);
     int signA = opA.applyState(sa);
     int signB = opB.applyState(sb);
@@ -60,7 +60,7 @@ void check_equiv_str(const std::string& A, const std::string& B, int expected_si
 }
 
 void check_zero(const std::string& A, Uint128 initial) {
-    ZBasis::state_t s{initial};
+    ZBasisBase::state_t s{initial};
     SymbolicPMROperator op(A);
     require(op.applyState(s) == 0, A + " == 0");
 }
@@ -69,7 +69,7 @@ void check_application(const std::string& O, int expected_sign, Uint128 initial,
 
     // basic sanity check
     SymbolicPMROperator Op(O);
-    ZBasis::state_t s{initial};
+    ZBasisBase::state_t s{initial};
     int sign1 = Op.applyState(s); 
 
     require_eq(s.uint64[0], final.uint64[0], O + " [ lo expected final state mismatch]");

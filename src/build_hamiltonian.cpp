@@ -62,7 +62,7 @@ int main(int argc, char* argv[]) {
 
 	// Step 2: Load basis from H5
     std::cout<<"Loading basis..."<<std::endl;
-	ZBasis basis;
+	ZBasisBST basis;
 
     load_basis(basis, prog);
 

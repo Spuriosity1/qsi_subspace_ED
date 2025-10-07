@@ -19,10 +19,10 @@ using namespace std;
 // calculates a diagonal vector rep of S^z_i
 void calc_Sz_rep(
     std::vector<double>& Sz_diagvals,
-    const ZBasis& basis,
+    const ZBasisBST& basis,
     size_t spin_i
     ){
-    for (ZBasis::idx_t i=0; i<basis.dim(); i++){
+    for (ZBasisBase::idx_t i=0; i<basis.dim(); i++){
         auto state = basis[i];
         Sz_diagvals[i] = 1.0 * ((state & spin_i) != 0) -0.5;
         // note for later: could in principle shift by 1/2 for a factor of 2 speedup
@@ -52,7 +52,7 @@ const std::array<Eigen::Vector3d, 4> local_sz = {
 
 inline std::vector<std::complex<double>> compute_scalar_Szz_of_omega(
     const Eigen::MatrixXd& eigvecs,
-    const ZBasis& basis,
+    const ZBasisBST& basis,
     const nlohmann::json& jdata,
     const std::vector<Eigen::Vector3d>& k_vals
     )
@@ -148,7 +148,7 @@ int main(int argc, char* argv[]) {
 
     cout<<"Importing basis... "<<flush;
 
-	ZBasis basis;
+	ZBasisBST basis;
     // NOTE n_spinons not handled properly
     basis.load_from_file( get_basis_file(latfile, 0, dset_name!="basis"), 
             dset_name

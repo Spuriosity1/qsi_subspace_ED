@@ -210,7 +210,7 @@ inline void tridiagonalise(
 
     // type safety is for fucking NERDS
     /* Use MRRR to compute eigenvalues and -vectors */
-    int info = mrrr(
+    mrrr(
                 (char*)("Vectors"), 
                 (char*)("All"),
             &n, D.data(), E.data(),

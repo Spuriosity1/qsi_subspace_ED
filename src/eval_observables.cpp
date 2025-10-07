@@ -37,6 +37,8 @@ void obtain_flags(
     }
 }
 
+typedef ZBasisBST basis_t;
+
     
 int main(int argc, char* argv[]) {
 	argparse::ArgumentParser prog("eval_observables");
@@ -97,7 +99,7 @@ int main(int argc, char* argv[]) {
 
     cout<<"Importing basis... "<<flush;
 
-	ZBasis basis;
+	basis_t basis;
     // NOTE n_spinons not handled properly
     basis.load_from_file( get_basis_file(latfile, 0, dset_name!="basis"), 
             dset_name
@@ -129,7 +131,7 @@ int main(int argc, char* argv[]) {
     auto [ringL, ringR, sl] = get_ring_ops(jdata);
 
     // convert the symols into actual matrices 
-    std::vector<LazyOpSum<double>> lazy_ring_operators;
+    std::vector<LazyOpSum<double, basis_t>> lazy_ring_operators;
     std::vector<Eigen::SparseMatrix<double>> ring_operators;
     ring_operators.reserve(ringL.size());
 
@@ -172,7 +174,7 @@ int main(int argc, char* argv[]) {
         std::array<std::vector<double>, 4> partial_vol;
         for (int sl=0; sl<4; sl++){
             auto par_vol_operators = get_partial_vol_ops(jdata, ringL, sl); 
-            std::vector<LazyOpSum<double>> lazy_par_vol_ops;
+            std::vector<LazyOpSum<double, basis_t>> lazy_par_vol_ops;
             for (auto& v : par_vol_operators){
                 lazy_par_vol_ops.emplace_back(basis, v);
             }

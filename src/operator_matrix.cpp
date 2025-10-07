@@ -2,8 +2,8 @@
 #include <omp.h>
 
 // performs y <- Ax + y
-template <RealOrCplx coeff_t>
-void LazyOpSum<coeff_t>::evaluate_add_off_diag(const coeff_t* x, coeff_t* y) const {
+template <RealOrCplx coeff_t, Basis B>
+void LazyOpSum<coeff_t, B>::evaluate_add_off_diag(const coeff_t* x, coeff_t* y) const {
     static const size_t CHUNK_SIZE = 10000;
 
     for (const auto& term : ops.off_diag_terms) {
@@ -12,12 +12,12 @@ void LazyOpSum<coeff_t>::evaluate_add_off_diag(const coeff_t* x, coeff_t* y) con
         
         #pragma omp parallel
         {
-            std::vector<std::pair<ZBasis::idx_t, coeff_t>> local_updates;
+            std::vector<std::pair<ZBasisBase::idx_t, coeff_t>> local_updates;
             local_updates.reserve(CHUNK_SIZE);
 
             #pragma omp for schedule(dynamic, CHUNK_SIZE) nowait
-            for (ZBasis::idx_t i = 0; i < basis.dim(); ++i) {
-                ZBasis::idx_t J = i;
+            for (ZBasisBase::idx_t i = 0; i < basis.dim(); ++i) {
+                ZBasisBase::idx_t J = i;
                 coeff_t dy = c * x[i] * static_cast<double>(op.applyIndex(basis, J));
                 local_updates.emplace_back(J, dy);
 
@@ -47,8 +47,8 @@ void LazyOpSum<coeff_t>::evaluate_add_off_diag(const coeff_t* x, coeff_t* y) con
 
 
 // performs y <- Ax + y
-template <RealOrCplx coeff_t>
-void LazyOpSum<coeff_t>::evaluate_add_diagonal(const coeff_t* x, coeff_t* y) const {
+template <RealOrCplx coeff_t, Basis B>
+void LazyOpSum<coeff_t, B>::evaluate_add_diagonal(const coeff_t* x, coeff_t* y) const {
     for (const auto& term : ops.diagonal_terms) {
         const auto& c = term.first;   
         const auto& op = term.second;
@@ -56,8 +56,8 @@ void LazyOpSum<coeff_t>::evaluate_add_diagonal(const coeff_t* x, coeff_t* y) con
         assert(op.is_diagonal());
 
         #pragma omp parallel for schedule(static)
-        for (ZBasis::idx_t i = 0; i < basis.dim(); ++i) {
-            ZBasis::state_t psi = basis[i];
+        for (ZBasisBase::idx_t i = 0; i < basis.dim(); ++i) {
+            ZBasisBase::state_t psi = basis[i];
             coeff_t dy = c * x[i] * static_cast<double>(op.applyState(psi));
             // completely in place, no i collisions
             y[i] += dy;
@@ -69,12 +69,13 @@ void LazyOpSum<coeff_t>::evaluate_add_diagonal(const coeff_t* x, coeff_t* y) con
 
 
 
-template <RealOrCplx coeff_t>
-void LazyOpSum<coeff_t>::evaluate_add(const coeff_t* x, coeff_t* y) const {
+template <RealOrCplx coeff_t, Basis basis_t>
+void LazyOpSum<coeff_t, basis_t>::evaluate_add(const coeff_t* x, coeff_t* y) const {
     evaluate_add_off_diag(x, y);
     evaluate_add_diagonal(x, y);
 }
 
 // explicit template instantiations
-template struct LazyOpSum<double>;
+template struct LazyOpSum<double, ZBasisBST>;
+template struct LazyOpSum<double, ZBasisHashmap>;
 // template struct LazyOpSum<std::complex<double>>;

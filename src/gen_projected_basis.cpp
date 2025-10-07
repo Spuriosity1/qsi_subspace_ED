@@ -9,17 +9,16 @@
 #include "bittools.hpp"
 #include "basis_io.hpp"
 #include "operator.hpp"
-#include <absl/container/flat_hash_map.h>
 
 
 using namespace std;
 using json=nlohmann::json;
 
 
-struct constr_explorer : public ZBasis {
+struct constr_explorer : public ZBasisBST {
 	constr_explorer(const nlohmann::json& data);
 
-	void build_states(ZBasis::state_t init);
+	void build_states(ZBasisBST::state_t init);
 
 	void sort() {
 		std::sort(states.begin(), states.end());
@@ -72,9 +71,9 @@ constr_explorer::constr_explorer(const nlohmann::json& jdata){
 // Apply all possible rings and insert of any new states are found.
 // Repeaat until we stop finding new states.
 // Simple enough to parallelise
-void constr_explorer::build_states(ZBasis::state_t init) {
-	std::vector<ZBasis::state_t> tmp;
-	std::vector<ZBasis::state_t> prev_set = {init};
+void constr_explorer::build_states(ZBasisBST::state_t init) {
+	std::vector<ZBasisBST::state_t> tmp;
+	std::vector<ZBasisBST::state_t> prev_set = {init};
 
 	size_t iter_no = 0;
 

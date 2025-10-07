@@ -1,11 +1,13 @@
 project('projected_ed', ['cpp', 'c'],
   version: '1.0.0',
   meson_version : '>= 1.3.0',
-  default_options : [ 'warning_level=2', 'buildtype=release', 'cpp_std=c++2a' ]
+  default_options : [ 'warning_level=1', 'buildtype=release', 'cpp_std=c++2a' ]
 )
 
+cmake = import('cmake')
 
-add_project_link_arguments(['-pthread', '-lstdc++'], language: 'cpp' )
+# add_project_arguments(['
+add_project_link_arguments(['-pthread', '-lstdc++', '-lto'], language: 'cpp' )
 
 # Compiler flags for 128-bit integer support
 cpp_compiler = meson.get_compiler('cpp')
@@ -25,14 +27,14 @@ if get_option('buildtype') == 'release'
       target_args += ['-msse2']
     endif
   elif host_cpu.startswith('aarch64') or host_cpu.startswith('arm')
-    if cpp_compiler.has_argument('-mfpu=neon')
-      target_args += ['-mfpu=neon']
-    elif cpp_compiler.has_argument('-march=armv8-a+simd')
-      target_args += ['-march=armv8-a+simd']
-    endif
-    if cpp_compiler.has_argument('-march=armv8-a+sha3')
-      target_args += ['-march=armv8-a+sha3']
-    endif
+    #    if cpp_compiler.has_argument('-mfpu=neon')
+    #      target_args += ['-mfpu=neon']
+    #    elif cpp_compiler.has_argument('-march=armv8-a+simd')
+    #      target_args += ['-march=armv8-a+simd']
+    #    endif
+    #    if cpp_compiler.has_argument('-march=armv8-a+sha3')
+    #      target_args += ['-march=armv8-a+sha3']
+    #    endif
   endif
 
   target_args += ['-DNDEBUG']
@@ -50,7 +52,7 @@ hdf5_dep = dependency('hdf5',
 
 json_dep = dependency('nlohmann_json', required: true)
 
-eigen_dep = dependency('Eigen3', method: 'cmake',  modules: ['Eigen3::Eigen'], required: true)
+eigen_dep = dependency('Eigen3', method: 'cmake',  modules: ['Eigen3::Eigen'], required: true).as_system()
 
 spectra_dep = dependency('spectra', method: 'cmake')
 
@@ -64,6 +66,31 @@ omp_dep = dependency('OpenMP', required: true)
 mr3smp_proj = subproject('mr3smp')
 mr3smp_dep = mr3smp_proj.get_variable('mr3smp_dep')
 
+
+# Add the missing include directories
+#bits_inc = include_directories(
+#  'subprojects/pthash/external/bits/include',
+#  'subprojects/pthash/external/bits/external/essentials/include'
+#)
+
+cmake_opts = cmake.subproject_options()
+cmake_opts.add_cmake_defines({
+  'CMAKE_SOURCE_DIR': '/dummy/path/not/equal',
+  'ENABLE_WERROR': 'OFF'
+})
+
+pthash_proj = cmake.subproject('pthash', options: cmake_opts)
+
+# Create a combined dependency
+#pthash_dep =  declare_dependency(
+#  dependencies: [
+#    pthash_proj.dependency('PTHASH'),
+#    pthash_proj.dependency('BITS')
+#    ]
+#  )
+
+pthash_dep = pthash_proj.dependency('PTHASH')
+
 # Local include dir for headers like bittools.hpp, admin.hpp, basis_io
 inc = [ include_directories('include') ]
 
@@ -72,7 +99,8 @@ g_deps = [
   json_dep,
   omp_dep,
   eigen_dep,
-  mr3smp_dep
+  mr3smp_dep,
+  pthash_dep
 #  abseil_dep
 ]
 
@@ -112,9 +140,19 @@ merge_shards = executable('merge_shards', 'src/merge_shards.cpp',
 
 if eigen_dep.found()
 
-gen_projected_basis = executable('gen_projected_basis', files('src/gen_projected_basis.cpp', 'src/operator.cpp'), 
+
+operator_lib = static_library('operator_lib', ['src/operator_matrix.cpp', 'src/operator.cpp'],
+  dependencies: [g_deps, eigen_dep, omp_dep ],
+  include_directories: inc,
+  cpp_args: target_args
+  )
+
+
+
+gen_projected_basis = executable('gen_projected_basis', files('src/gen_projected_basis.cpp'), 
   dependencies: [g_deps, eigen_dep],
   include_directories:inc,
+  link_with: operator_lib,
   cpp_args: target_args
   )
 
@@ -123,6 +161,7 @@ if spectra_dep.found()
 expectation_eval = static_library('expectation_eval', ['src/expectation_eval.cpp', 'src/operator_matrix.cpp', 'src/operator.cpp'],
   dependencies: [g_deps, eigen_dep, omp_dep, spectra_dep],
   include_directories: inc,
+  link_with: operator_lib,
   cpp_args: target_args
   )
 
@@ -134,14 +173,6 @@ diag_DOQSI_ham = executable('diag_DOQSI_ham',
   cpp_args: target_args
   )
 
-
-#gs_DOQSI_ham = executable('gs_DOQSI_ham',
-#  files(['src/gs_DOQSI_ham.cpp', 'src/expectation_eval.cpp']),
-#  dependencies: [g_deps, eigen_dep, spectra_dep],
-#  include_directories: inc,
-#  cpp_args: target_args
-#  )
-#
 build_hamiltonian = executable('build_hamiltonian',
   files(['src/build_hamiltonian.cpp', 'src/expectation_eval.cpp']),
   dependencies: [g_deps, eigen_dep, spectra_dep],
