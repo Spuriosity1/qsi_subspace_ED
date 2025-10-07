@@ -50,7 +50,10 @@
 //}
 
 bool ZBasisHashmap::search(const state_t& state, idx_t& J) const {
-    J = phash(state);
+//    J = phash(state);
+    auto it = state_to_index.find(state);
+    if (it == state_to_index.end())    return false;
+    J = it->second; 
     return true;
 }
 
@@ -181,7 +184,7 @@ void ZBasisInterp::load_from_file(const fs::path& bfile, const std::string& data
     find_bounds();
 }
 
-
+/*
 void print_timings(const pthash::build_timings& timings){
 
     double total_microseconds = timings.partitioning_microseconds +
@@ -205,35 +208,39 @@ void print_timings(const pthash::build_timings& timings){
     //                  << std::endl;
     std::cout << "    total: " << total_microseconds / 1000000.0 << " [sec]" << std::endl;
 }
+*/
 
 void ZBasisHashmap::build_index() {
-
-    // stage 1: construct the perfect hash fn
-    pthash::build_configuration config;
-    config.seed = 1234567890;
-    config.lambda = 5;
-    config.alpha = 0.97;
-    config.verbose = true;
-    config.avg_partition_size = 100000;
-    config.num_threads = 4;
-    config.dense_partitioning = true;
-
-    auto timings = phash.build_in_internal_memory(states.begin(), states.size(), config);
-    print_timings(timings);
-
-    std::vector<state_t> tmp_states;
-    tmp_states.resize(states.size());
-    std::swap(tmp_states, states);
-    std::cout <<"Original size "<<states.size() <<" phash size "<<phash.table_size()<<"\n";
-
-    idx_lookup.resize(phash.table_size());
-    // tmp_states now contains all the original states
     for (idx_t J=0; J<dim(); J++){
-        auto state = tmp_states[J];
-        auto state_hash = phash(state);
-        states[state_hash] = state;
-//        idx_lookup[state_hash] = J;
+        state_to_index[states[J]]=J;
     }
+
+//    // stage 1: construct the perfect hash fn
+//    pthash::build_configuration config;
+//    config.seed = 1234567890;
+//    config.lambda = 5;
+//    config.alpha = 0.97;
+//    config.verbose = true;
+//    config.avg_partition_size = 100000;
+//    config.num_threads = 4;
+//    config.dense_partitioning = true;
+//
+//    auto timings = phash.build_in_internal_memory(states.begin(), states.size(), config);
+//    print_timings(timings);
+//
+//    std::vector<state_t> tmp_states;
+//    tmp_states.resize(states.size());
+//    std::swap(tmp_states, states);
+//    std::cout <<"Original size "<<states.size() <<" phash size "<<phash.table_size()<<"\n";
+//
+//    idx_lookup.resize(phash.table_size());
+//    // tmp_states now contains all the original states
+//    for (idx_t J=0; J<dim(); J++){
+//        auto state = tmp_states[J];
+//        auto state_hash = phash(state);
+//        states[state_hash] = state;
+////        idx_lookup[state_hash] = J;
+//    }
 }
 
 

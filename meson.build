@@ -58,9 +58,9 @@ spectra_dep = dependency('spectra', method: 'cmake')
 
 omp_dep = dependency('OpenMP', required: true)
 
-#abseil_dep = dependency('absl', method: 'cmake', modules: ['absl::flat_hash_map'], required: true)
-#abseil_proj = subproject('abseil-cpp')
-#abseil_dep = abseil_proj.get_variable('absl_container_dep')
+abseil_dep = dependency('absl', method: 'cmake', modules: ['absl::flat_hash_map'], required: true)
+abseil_proj = subproject('abseil-cpp')
+abseil_dep = abseil_proj.get_variable('absl_container_dep')
 
 # MRRR parallel tridiagonal matrix eigensolver
 mr3smp_proj = subproject('mr3smp')
@@ -79,17 +79,10 @@ cmake_opts.add_cmake_defines({
   'ENABLE_WERROR': 'OFF'
 })
 
-pthash_proj = cmake.subproject('pthash', options: cmake_opts)
-
-# Create a combined dependency
-#pthash_dep =  declare_dependency(
-#  dependencies: [
-#    pthash_proj.dependency('PTHASH'),
-#    pthash_proj.dependency('BITS')
-#    ]
-#  )
-
-pthash_dep = pthash_proj.dependency('PTHASH')
+#pthash_proj = cmake.subproject('pthash', options: cmake_opts)
+#
+#
+#pthash_dep = pthash_proj.dependency('PTHASH')
 
 # Local include dir for headers like bittools.hpp, admin.hpp, basis_io
 inc = [ include_directories('include') ]
@@ -100,8 +93,8 @@ g_deps = [
   omp_dep,
   eigen_dep,
   mr3smp_dep,
-  pthash_dep
-#  abseil_dep
+#  pthash_dep
+  abseil_dep
 ]
 
 subdir('src')

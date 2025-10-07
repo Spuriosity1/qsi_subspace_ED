@@ -7,14 +7,14 @@
 #include <sstream>
 #include <stdexcept>
 #include <vector>
-//#include <absl/container/flat_hash_map.h>
+#include <absl/container/flat_hash_map.h>
 
 #ifdef __APPLE__ // patch broken NEON optimization
 #define EIGEN_DONT_VECTORIZE
 #define EIGEN_DISABLE_NEON
 #endif
 
-#include <pthash.hpp>
+//#include <pthash.hpp>
 
 #include <Eigen/Core>
 #include <Eigen/Sparse>
@@ -100,6 +100,7 @@ opstring: %zu, spin_ids: %zu", opstring.size(), spin_ids.size());
 
 struct SymbolicPMROperator;
 
+/*
 struct cust_xxhash_128 {
     typedef pthash::hash128 hash_type;
 
@@ -115,7 +116,7 @@ typedef pthash::dense_partitioned_phf<cust_xxhash_128,    // base hasher
                               pthash::R_int,         // encoder type
                               true>          // minimal
     pthash_type;
-
+*/
 
 struct ZBasisBase {
     using state_t = Uint128; // type which stores the computational basis state
@@ -176,11 +177,11 @@ struct ZBasisHashmap : public ZBasisBase {
 
     bool search(const state_t& state, idx_t& J) const;
 protected:
-    pthash_type phash;
-    std::vector<uint64_t> idx_lookup;
+//    pthash_type phash;
+    
 	//std::unordered_map<state_t, idx_t, Uint128Hash, Uint128Eq> state_to_index;
 	//std::map<state_t, idx_t> state_to_index;
-    //absl::flat_hash_map<state_t, idx_t> state_to_index;
+    absl::flat_hash_map<state_t, idx_t> state_to_index;
     void build_index(); // constructs f and reorders states
 };
 

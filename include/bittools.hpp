@@ -64,11 +64,11 @@ union Uint128 {
         return uint128 >= other.uint128;
     }
     
-//    template <typename H>
-//    friend H AbslHashValue(H h, const Uint128& c) {
-//        return H::combine(std::move(h), c.uint128);
-//        //return H::combine(std::move(h), c.uint64[0], c.uint64[1]);
-//    }
+    template <typename H>
+    friend H AbslHashValue(H h, const Uint128& c) {
+        return H::combine(std::move(h), c.uint128);
+        //return H::combine(std::move(h), c.uint64[0], c.uint64[1]);
+    }
 
 };
 
