@@ -158,6 +158,15 @@ struct ZBasisBST : public ZBasisBase
     bool search(const state_t& state, idx_t& J) const;
 };
 
+struct ZBasisInterp : public ZBasisBST {
+    void load_from_file(const fs::path& bfile, const std::string& dataset="basis");
+    bool search(const state_t& state, idx_t& J) const;
+    protected:
+    std::unordered_map<uint64_t, std::pair<idx_t, idx_t>> bounds;
+
+    void find_bounds(); // finds the bounds
+};
+
 
 // Overrides search function to use a perfec hash fn
 // Instead of sorting the states, it reorders them according to the hashmap

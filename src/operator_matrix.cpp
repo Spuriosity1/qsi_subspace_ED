@@ -10,36 +10,42 @@ void LazyOpSum<coeff_t, B>::evaluate_add_off_diag(const coeff_t* x, coeff_t* y) 
         const auto& c = term.first;   // Extract before parallel region
         const auto& op = term.second;
         
+//        std::vector<std::vector<std::pair<ZBasisBase::idx_t, coeff_t>>> thread_updates(omp_get_max_threads());
         #pragma omp parallel
         {
-            std::vector<std::pair<ZBasisBase::idx_t, coeff_t>> local_updates;
-            local_updates.reserve(CHUNK_SIZE);
+//            std::vector<std::pair<ZBasisBase::idx_t, coeff_t>> local_updates;
+//            local_updates.reserve(CHUNK_SIZE);
 
-            #pragma omp for schedule(dynamic, CHUNK_SIZE) nowait
+            #pragma omp for schedule(static) nowait
             for (ZBasisBase::idx_t i = 0; i < basis.dim(); ++i) {
                 ZBasisBase::idx_t J = i;
-                coeff_t dy = c * x[i] * static_cast<double>(op.applyIndex(basis, J));
-                local_updates.emplace_back(J, dy);
+                auto sign = op.applyIndex(basis, J);
+//                local_updates.emplace_back(J, dy);
+                double dy = c * x[i] * static_cast<double>(sign);
+                if (sign != 0) {
+                    #pragma omp atomic
+                    y[J] += dy;
+                }
 
                 // Flush when chunk is full
-                if (local_updates.size() >= CHUNK_SIZE) {
-                    #pragma omp critical
-                    {
-                        for (const auto& [idx, val] : local_updates) {
-                            y[idx] += val;
-                        }
-                    }
-                    local_updates.clear();
-                }
+//                if (local_updates.size() >= CHUNK_SIZE) {
+//                    #pragma omp critical
+//                    {
+//                        for (const auto& [idx, val] : local_updates) {
+//                            y[idx] += val;
+//                        }
+//                    }
+//                    local_updates.clear();
+//                }
             }
-            
-            // flush remaining updates
-            #pragma omp critical
-            {
-                for (const auto& [idx, val] : local_updates) {
-                    y[idx] += val;
-                }
-            }       
+//            
+//            // flush remaining updates
+//            #pragma omp critical
+//            {
+//                for (const auto& [idx, val] : local_updates) {
+//                    y[idx] += val;
+//                }
+//            }       
         }
     }
 }
@@ -77,5 +83,6 @@ void LazyOpSum<coeff_t, basis_t>::evaluate_add(const coeff_t* x, coeff_t* y) con
 
 // explicit template instantiations
 template struct LazyOpSum<double, ZBasisBST>;
+template struct LazyOpSum<double, ZBasisInterp>;
 template struct LazyOpSum<double, ZBasisHashmap>;
 // template struct LazyOpSum<std::complex<double>>;

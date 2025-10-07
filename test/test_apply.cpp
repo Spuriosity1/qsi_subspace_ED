@@ -37,7 +37,8 @@ int main(int argc, char* argv[]){
     unsigned int seed = prog.get<unsigned int>("--seed");
 
 	ZBasisBST basis;
-	ZBasisHashmap basis_h;
+    ZBasisInterp basis_i;
+//	ZBasisHashmap basis_h;
    
 	// Step 1: Load ring data from JSON
     auto lattice_file = prog.get<std::string>("lattice_file");
@@ -54,9 +55,14 @@ int main(int argc, char* argv[]){
     load_basis(basis, prog);
     std::cout<<"[BST]  Done! Basis dim="<<basis.dim()<<std::endl;
 
-    std::cout<<"[Hash] Loading basis..."<<std::endl;
-    load_basis(basis_h, prog);
-    std::cout<<"[Hash] Done! "<<std::endl;
+
+    std::cout<<"[inter]  Loading basis..."<<std::endl;
+    load_basis(basis_i, prog);
+    std::cout<<"[inter]  Done! Basis dim="<<basis.dim()<<std::endl;
+
+//    std::cout<<"[Hash] Loading basis..."<<std::endl;
+//    load_basis(basis_h, prog);
+//    std::cout<<"[Hash] Done! "<<std::endl;
 
 	using T=double;
 	SymbolicOpSum<T> H_sym;
@@ -65,7 +71,8 @@ int main(int argc, char* argv[]){
     build_hamiltonian(H_sym, jdata, gv);
 
     auto H_bst = LazyOpSum(basis, H_sym);
-    auto H_hash = LazyOpSum(basis_h, H_sym);
+    auto H_inte = LazyOpSum(basis_i, H_sym);
+//    auto H_hash = LazyOpSum(basis_h, H_sym);
 
     std::vector<double> v, u1, u2;
     v.resize(basis.dim());
@@ -79,8 +86,9 @@ int main(int argc, char* argv[]){
 
     std::cout<<"[BST]  Apply..."<<std::endl;
     TIMEIT("u += Av", H_bst.evaluate_add(v.data(), u1.data());)
-    std::cout<<"[Hash] Apply..."<<std::endl;
-    TIMEIT("u += Av", H_hash.evaluate_add(v.data(), u2.data());)
-//    TIMEIT("u <- Av", H.evaluate(v.data(), u.data());)
+    std::cout<<"[interp]  Apply..."<<std::endl;
+    TIMEIT("u += Av", H_inte.evaluate_add(v.data(), u1.data());)
+//    std::cout<<"[Hash] Apply..."<<std::endl;
+//    TIMEIT("u += Av", H_hash.evaluate_add(v.data(), u2.data());)
     return 0;
 }

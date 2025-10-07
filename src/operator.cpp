@@ -54,9 +54,11 @@ bool ZBasisHashmap::search(const state_t& state, idx_t& J) const {
     return true;
 }
 
+
 bool ZBasisBST::search(const state_t& state, idx_t& J) const {
 //    auto it = std::lower_bound(states.begin(), states.end(), state);
 //    return it;
+    const __uint128_t* arr = reinterpret_cast<const __uint128_t*>(states.data());
     size_t left = 0, right = states.size() - 1;
 
     static const size_t CACHE_SIZE=32;
@@ -64,15 +66,77 @@ bool ZBasisBST::search(const state_t& state, idx_t& J) const {
     while (right - left > CACHE_SIZE) {
         size_t mid = (left + right) / 2;
         
-        if (states[mid] < state) left = mid + 1;
+        if (arr[mid] < state.uint128) left = mid + 1;
         else right = mid;
     }
 
     for (J = left; J <= right; J++) {
-        if (states[J] == state) return true;
+        if (arr[J] == state.uint128) return true;
+    }
+
+    // manual unroll BS (actually saves noticeable time???)
+    for (J = left; J + 3 <= right; J += 4) {
+        if (arr[J] == state) {  return true; }
+        if (arr[J+1] == state) { J = J+1; return true; }
+        if (arr[J+2] == state) { J = J+2; return true; }
+        if (arr[J+3] == state) { J = J+3; return true; }
+    }
+    for (; J <= right; ++J) {
+        if (arr[J] == state) { J = J; return true; }
     }
     return false; // not found;
 }
+
+
+
+bool ZBasisInterp::search(const state_t& state, idx_t& J) const {
+//    auto it = std::lower_bound(states.begin(), states.end(), state);
+//    return it;
+//
+    const __uint128_t* arr = reinterpret_cast<const __uint128_t*>(states.data());
+    auto [left, right] = bounds.at(state.uint64[1]);
+
+    static const size_t CACHE_SIZE=32;
+    
+    while (right - left > CACHE_SIZE) {
+        size_t mid = (left + right) / 2;
+        
+        if (arr[mid] < state.uint128) left = mid + 1;
+        else right = mid;
+    }
+
+    for (J = left; J <= right; J++) {
+        if (arr[J] == state.uint128) return true;
+    }
+
+    for (J = left; J + 3 <= right; J += 4) {
+        if (arr[J] == state) { J = J; return true; }
+        if (arr[J+1] == state) { J = J+1; return true; }
+        if (arr[J+2] == state) { J = J+2; return true; }
+        if (arr[J+3] == state) { J = J+3; return true; }
+    }
+    for (; J <= right; ++J) {
+        if (arr[J] == state) { J = J; return true; }
+    }
+    return false; // not found;
+}
+
+
+void ZBasisInterp::find_bounds(){
+    bounds.clear();
+    for (idx_t J=0; J<dim(); J++){
+        uint64_t state_hi = states[J].uint64[1];
+        if (bounds.contains(state_hi)){
+            bounds[state_hi].second = J;
+        } else {
+            bounds[state_hi].first = J;
+            bounds[state_hi].second = J;
+        }
+    }
+    
+}
+
+
 
 size_t ZBasisBST::insert_states(const std::vector<ZBasisBST::state_t>& to_insert,
         std::vector<ZBasisBST::state_t>& new_states){
@@ -110,6 +174,11 @@ void ZBasisBase::load_from_file(const fs::path& bfile, const std::string& datase
 void ZBasisHashmap::load_from_file(const fs::path& bfile, const std::string& dataset){
     this->ZBasisBase::load_from_file(bfile, dataset);
     build_index();
+}
+
+void ZBasisInterp::load_from_file(const fs::path& bfile, const std::string& dataset){
+    this->ZBasisBase::load_from_file(bfile, dataset);
+    find_bounds();
 }
 
 

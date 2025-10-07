@@ -102,8 +102,6 @@ void axpy( std::vector<T>& u,
                       const std::vector<T>& v,
                       T c) {
 
-    std::complex<T> result{0, 0};
-
     #pragma omp parallel for
     for (std::size_t i = 0; i < u.size(); i++) {
         u[i] += c * v[i];
@@ -117,8 +115,6 @@ void sub( std::vector<T>& u,
                       const std::vector<T>& v,
                       T c) {
 
-    std::complex<T> result{0, 0};
-
     #pragma omp parallel for
     for (std::size_t i = 0; i < u.size(); i++) {
         u[i] -= c * v[i];
@@ -129,8 +125,6 @@ void sub( std::vector<T>& u,
 // does v <- c * u
 template<typename T>
 void mul( std::vector<T>& v, std::vector<T>& u, T c) {
-    std::complex<T> result{0, 0};
-
     #pragma omp parallel for
     for (std::size_t i = 0; i < u.size(); i++) {
         v[i] = u[i] * c;
@@ -141,8 +135,6 @@ void mul( std::vector<T>& v, std::vector<T>& u, T c) {
 // does in place c * v
 template<typename T>
 void mul( std::vector<T>& v, T c) {
-    std::complex<T> result{0, 0};
-
     #pragma omp parallel for
     for (std::size_t i = 0; i < v.size(); i++) {
         v[i] *= c;
