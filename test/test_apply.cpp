@@ -74,21 +74,40 @@ int main(int argc, char* argv[]){
     auto H_inte = LazyOpSum(basis_i, H_sym);
     auto H_hash = LazyOpSum(basis_h, H_sym);
 
-    std::vector<double> v, u1, u2;
+    std::vector<double> v, u1, u2, u3;
     v.resize(basis.dim());
+
     u1.resize(basis.dim());
     u2.resize(basis.dim());
+    u3.resize(basis.dim());
     std::mt19937 rng(seed);
     set_random_unit(v, rng);
 
     std::fill(u1.begin(), u1.end(), 0);
     std::fill(u2.begin(), u2.end(), 0);
+    std::fill(u3.begin(), u3.end(), 0);
 
     std::cout<<"[BST]  Apply..."<<std::endl;
     TIMEIT("u += Av", H_bst.evaluate_add(v.data(), u1.data());)
     std::cout<<"[interp]  Apply..."<<std::endl;
-    TIMEIT("u += Av", H_inte.evaluate_add(v.data(), u1.data());)
+    TIMEIT("u += Av", H_inte.evaluate_add(v.data(), u2.data());)
     std::cout<<"[Hash] Apply..."<<std::endl;
-    TIMEIT("u += Av", H_hash.evaluate_add(v.data(), u2.data());)
+    TIMEIT("u += Av", H_hash.evaluate_add(v.data(), u3.data());)
+
+    double tol =1e-9;
+    for (int i=0;  i<basis.dim(); i++){
+        if( abs(u1[i] - u2[i]) > tol ){
+            std::cout<<"BST !+= interp\n";
+            return 1;
+        }
+    }
+
+    for (int i=0;  i<basis.dim(); i++){
+        if( abs(u1[i] - u3[i]) > tol ){
+            std::cout<<"BST !+= Hash\n";
+            return 2;
+        }
+    }
+    std::cout <<"All algos agree";
     return 0;
 }

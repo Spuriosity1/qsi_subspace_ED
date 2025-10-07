@@ -104,8 +104,10 @@ bool ZBasisInterp::search(const state_t& state, idx_t& J) const {
     while (right - left > CACHE_SIZE) {
         size_t mid = (left + right) / 2;
         
-        if (arr[mid] < state.uint128) left = mid + 1;
-        else right = mid;
+        if (*reinterpret_cast<const uint64_t*>(arr + mid) < state.uint64[0]) 
+            left = mid + 1;
+        else 
+            right = mid;
     }
 
     for (J = left; J <= right; J++) {
