@@ -50,9 +50,9 @@ int main(int argc, char* argv[]){
 	jfile >> jdata;
 
 
-    std::cout<<"[BST] Loading basis..."<<std::endl;
+    std::cout<<"[BST]  Loading basis..."<<std::endl;
     load_basis(basis, prog);
-    std::cout<<"[BST] Done! Basis dim="<<basis.dim()<<std::endl;
+    std::cout<<"[BST]  Done! Basis dim="<<basis.dim()<<std::endl;
 
     std::cout<<"[Hash] Loading basis..."<<std::endl;
     load_basis(basis_h, prog);
@@ -77,7 +77,9 @@ int main(int argc, char* argv[]){
     std::fill(u1.begin(), u1.end(), 0);
     std::fill(u2.begin(), u2.end(), 0);
 
+    std::cout<<"[BST]  Apply..."<<std::endl;
     TIMEIT("u += Av", H_bst.evaluate_add(v.data(), u1.data());)
+    std::cout<<"[Hash] Apply..."<<std::endl;
     TIMEIT("u += Av", H_hash.evaluate_add(v.data(), u2.data());)
 //    TIMEIT("u <- Av", H.evaluate(v.data(), u.data());)
     return 0;
