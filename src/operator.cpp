@@ -4,10 +4,11 @@
 bool ZBasisBST::search(const state_t& state, idx_t& J) const {
 //    auto it = std::lower_bound(states.begin(), states.end(), state);
 //    return it;
+    
     const __uint128_t* arr = reinterpret_cast<const __uint128_t*>(states.data());
-    size_t left = 0, right = states.size() - 1;
+    int64_t left = 0, right = states.size() - 1;
 
-    static const size_t CACHE_SIZE=32;
+    static const int64_t CACHE_SIZE=32;
     
     while (right - left > CACHE_SIZE) {
         size_t mid = (left + right) / 2;
@@ -28,7 +29,7 @@ bool ZBasisBST::search(const state_t& state, idx_t& J) const {
         if (arr[J+3] == state) { J = J+3; return true; }
     }
     for (; J <= right; ++J) {
-        if (arr[J] == state) { J = J; return true; }
+        if ( J >= 0 && arr[J] == state) { return true; }
     }
     return false; // not found;
 }
@@ -42,10 +43,10 @@ bool ZBasisInterp::search(const state_t& state, idx_t& J) const {
     const __uint128_t* arr = reinterpret_cast<const __uint128_t*>(states.data());
     auto [left, right] = bounds.at(state.uint64[1]);
 
-    static const size_t CACHE_SIZE=32;
+    static const idx_t CACHE_SIZE=32;
     
     while (right - left > CACHE_SIZE) {
-        size_t mid = (left + right) / 2;
+        idx_t mid = (left + right) / 2;
         
         if (*reinterpret_cast<const uint64_t*>(arr + mid) < state.uint64[0]) 
             left = mid + 1;
@@ -64,7 +65,7 @@ bool ZBasisInterp::search(const state_t& state, idx_t& J) const {
         if (arr[J+3] == state) { J = J+3; return true; }
     }
     for (; J <= right; ++J) {
-        if (arr[J] == state) { J = J; return true; }
+        if (J>=0 && arr[J] == state) { return true; }
     }
     return false; // not found;
 }
@@ -85,20 +86,52 @@ void ZBasisInterp::find_bounds(){
 }
 
 
-
-size_t ZBasisBST::insert_states(const std::vector<ZBasisBST::state_t>& to_insert,
-        std::vector<ZBasisBST::state_t>& new_states){
-    new_states.resize(0);
+// Inserts "to_insert" into the basis, storing the new states in new_states.
+// Ensures they are inserted in sorted order.
+size_t ZBasisBST::insert_states(std::vector<ZBasisBST::state_t>& to_insert){
     size_t n_insertions = 0;
-    for (auto& s : to_insert){
-        ZBasisBST::idx_t tmp;
-        // skip if we know about it already
-        if (this->search(s, tmp)) continue;
-//        state_to_index[s] = states.size();
-        states.push_back(s);
-        new_states.push_back(s);
-        n_insertions++;
+
+    // sort to_insert and remove duplicates
+    std::sort(to_insert.begin(), to_insert.end());
+    to_insert.erase(std::unique(to_insert.begin(), to_insert.end()), to_insert.end());
+
+    std::vector<ZBasisBST::state_t> merged;
+    merged.reserve(states.size() + to_insert.size());
+    
+    auto it_old = states.begin();
+    auto it_new = to_insert.begin();
+
+    while (it_old != states.end() && it_new != to_insert.end()){
+        if (*it_new < *it_old) {
+            // New unique state to insert
+            merged.push_back(*it_new);
+            ++n_insertions;
+            ++it_new;
+        } else if (*it_old < *it_new) {
+            merged.push_back(*it_old);
+            ++it_old;
+        } else {
+            // Duplicate; keep existing
+            merged.push_back(*it_old);
+            ++it_old;
+            ++it_new;
+        }
     }
+
+    // Append any remaining new states
+    while (it_new != to_insert.end()) {
+        merged.push_back(*it_new);
+        ++n_insertions;
+        ++it_new;
+    }
+
+    // Append remaining old states
+    while (it_old != states.end()) {
+        merged.push_back(*it_old);
+        ++it_old;
+    }
+    
+    states.swap(merged);
     return n_insertions;
 }
 

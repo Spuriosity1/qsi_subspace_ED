@@ -119,7 +119,7 @@ typedef pthash::dense_partitioned_phf<cust_xxhash_128,    // base hasher
 
 struct ZBasisBase {
     using state_t = Uint128; // type which stores the computational basis state
-    using idx_t = uint64_t;  // the type to use for the indices themselves
+    using idx_t = int64_t;  // the type to use for the indices themselves
 
 	size_t dim() const {
 		return states.size();
@@ -151,9 +151,8 @@ struct ZBasisBST : public ZBasisBase
 	idx_t idx_of_state(const state_t& state) const;
 
     // Inserts the states "others" into the basis, remembering the inserted states 
-    // 'new_states'
-	size_t insert_states(const std::vector<state_t>& to_insert,
-			std::vector<state_t>& new_states);
+    // 'new_states'. Leaves "to_insert" holding a de-duplicated, sorted version of its original state.
+	size_t insert_states(std::vector<state_t>& to_insert);
 
     bool search(const state_t& state, idx_t& J) const;
 };

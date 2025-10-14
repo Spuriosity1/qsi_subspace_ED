@@ -58,22 +58,11 @@ spectra_dep = dependency('spectra', method: 'cmake')
 
 omp_dep = dependency('OpenMP', required: true)
 
-#abseil_dep = dependency('absl', method: 'cmake', modules: ['absl::flat_hash_map'])
-#if not abseil_dep.found()
-#  abseil_proj = subproject('abseil-cpp')
-#  abseil_dep = abseil_proj.get_variable('absl_container_dep')
-#endif
 
 # MRRR parallel tridiagonal matrix eigensolver
 mr3smp_proj = subproject('mr3smp')
 mr3smp_dep = mr3smp_proj.get_variable('mr3smp_dep')
 
-
-# Add the missing include directories
-#bits_inc = include_directories(
-#  'subprojects/pthash/external/bits/include',
-#  'subprojects/pthash/external/bits/external/essentials/include'
-#)
 
 cmake_opts = cmake.subproject_options()
 cmake_opts.add_cmake_defines({
@@ -81,10 +70,6 @@ cmake_opts.add_cmake_defines({
   'ENABLE_WERROR': 'OFF'
 })
 
-#pthash_proj = cmake.subproject('pthash', options: cmake_opts)
-#
-#
-#pthash_dep = pthash_proj.dependency('PTHASH')
 
 # Local include dir for headers like bittools.hpp, admin.hpp, basis_io
 inc = [ include_directories('include') ]
@@ -94,9 +79,7 @@ g_deps = [
   json_dep,
   omp_dep,
   eigen_dep,
-  mr3smp_dep,
-#  pthash_dep
-#  abseil_dep
+  mr3smp_dep
 ]
 
 subdir('src')
@@ -144,7 +127,7 @@ operator_lib = static_library('operator_lib', ['src/operator_matrix.cpp', 'src/o
 
 
 
-gen_projected_basis = executable('gen_projected_basis', files('src/gen_projected_basis.cpp'), 
+polyring_basis = executable('polyring_basis', files('src/polyring_basis.cpp'), 
   dependencies: [g_deps, eigen_dep],
   include_directories:inc,
   link_with: operator_lib,

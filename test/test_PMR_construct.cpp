@@ -80,9 +80,9 @@ void check_application(const std::string& O, int expected_sign, Uint128 initial,
 
 void test_apply() {
 
-    Uint128 up = (1ULL << 0);     // site 0 is up
+    Uint128 up =   {0,1ULL};     // site 0 is up
     Uint128 up64 = {1ULL, 0};    // site 64 is up
-    Uint128 down = 0;             // site 0 is down
+    Uint128 down = 0;             // all sites down
 
     // Basic sanity test
     check_application("0+", 1, down, up);
@@ -98,9 +98,15 @@ void test_apply() {
     auto psi = up | 7263729ULL;
     check_application("0Z", 1, psi, psi);
 
-    check_application("64Z", 1, up64, up64);
+    check_application("64Z",  1, up64, up64);
     check_application("64Z", -1, down, down);
 
+    Uint128 L = {0, 0b111010};
+    Uint128 R = {0, 0b110101};
+    // Ring application
+    check_application("0+ 1- 2+ 3-", 1, L, R);
+    check_application("0- 1+ 2- 3+", 1, R, L);
+                                  
     // Commutation / Anticommutation
     check_equiv_str("0Z 1X", "1X 0Z", +1, up);
     check_equiv_str("0Z 0X", "0X 0Z", -1, up);
@@ -147,6 +153,8 @@ void test_apply() {
 
     // X- == +-
     check_equiv_str("0X 0-", "0+ 0-", +1, down);
+
+
 }
 
 void test_multiply() {
@@ -177,6 +185,8 @@ void test_multiply() {
     require(O1*O2 == O1O2, "O1 * O2 behaves as expected");
     
 }
+
+
 
 
 // === Entry point with CLI ===

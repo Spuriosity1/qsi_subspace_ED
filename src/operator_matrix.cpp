@@ -72,7 +72,28 @@ void LazyOpSum<coeff_t, B>::evaluate_add_diagonal(const coeff_t* x, coeff_t* y) 
     }
 }
 
+#ifdef USE_CUDA
+__global__ void evaluate_add_off_diag_kernel(
+    const double* x, double* y,
+    const __uint128_t* states, // basis states
+    const double c,
+    size_t dim
+) {
+    size_t i = blockIdx.x * blockDim.x + threadIdx.x;
+    if (i >= dim) return;
 
+    __uint128_t state = states[i];
+
+    // Apply your custom logic here
+    int sign = applyState(state); // device version
+    size_t J = searchIndex(state); // device version
+
+    double dy = c * x[i] * static_cast<double>(sign);
+    if (dy != 0.0) {
+        atomicAdd(&y[J], dy); // atomic to avoid race conditions
+    }
+}
+#endif
 
 
 template <RealOrCplx coeff_t, Basis basis_t>
