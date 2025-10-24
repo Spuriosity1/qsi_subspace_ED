@@ -10,30 +10,6 @@
 #include <nlohmann/json.hpp>
 
 
-std::tuple<std::vector<SymbolicPMROperator>,std::vector<SymbolicPMROperator>,
-    std::vector<int>> 
-get_ring_ops(const nlohmann::json& jdata, bool incl_partial=false);
-
-
-/*
-std::pair<std::vector<SymbolicOpSum<double>>,
-    std::vector<int>> 
-get_vol_ops(
-        const nlohmann::json& jdata,
-        const std::vector<SymbolicPMROperator>& ring_list
-);
-*/
-
-std::vector<SymbolicOpSum<double>>
-get_partial_vol_ops(
-        const nlohmann::json& jdata,
-        const std::vector<SymbolicPMROperator>& ring_list,
-        int sl
-);
-
-
-
-
 // Computes cross terms ⟨ψ_i| O |ψ_j⟩ for given i and j for operator O
 double compute_expectation(
     const ZBasisBST& basis,

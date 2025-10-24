@@ -25,4 +25,10 @@
 #define TIMEIT(msg, ...) __VA_ARGS__
 #endif
 
+#ifdef SUBSPACE_ED_BENCHMARK_OPERATIONS
+#define BENCH_TIMEIT(msg,  ...) \
+     TIMEIT_PRINT_HELPER(msg, __COUNTER__,  __VA_ARGS__)
+#else 
+#define BENCH_TIMEIT(msg, ...) __VA_ARGS__
+#endif
 

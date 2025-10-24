@@ -7,6 +7,7 @@
 
 
 
+
 template<RealOrCplx _S>
 void set_random_unit_mpi(std::vector<_S>& v, std::mt19937& rng) {
     std::normal_distribution<double> dist(0.0, 1.0);
@@ -78,9 +79,8 @@ int main(int argc, char* argv[]){
 	jfile >> jdata;
 
     // Step 2: load and partition the basis
-    std::cout<<"[MPI_BST]  Loading basis..."<<std::endl;
-    MPIContext ctx = load_basis(basis, prog);
-    std::cout<<"[MPI_BST]  Done! Basis dim="<<basis.dim()<<std::endl;
+    TIMEIT("Loading basis", MPIContext ctx = load_basis(basis, prog);)
+    std::cout<<"[rank "<<ctx.world_rank<<"] Done! Basis dim="<<basis.dim()<<std::endl;
 
 
 	using T=double;

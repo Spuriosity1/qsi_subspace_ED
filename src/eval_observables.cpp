@@ -5,6 +5,8 @@
 #include <stdexcept>
 #include <vector>
 
+#include "physics/geometry.hpp"
+
 #include "matrix_diag_bits.hpp"
 #include "operator.hpp"
 
