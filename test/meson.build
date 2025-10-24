@@ -7,30 +7,28 @@ test('gen_spinon_basis_spinorder', spinon_tests, args: ['spinorder'])
 
 test_uint128 = executable('test_uint128',
   'test_uint128.cpp',
-  include_directories: inc,
+  dependencies: common_dep,
   install : false)
 
 
 test_PMR_operator = executable('test_PMR_operator',
   'test_PMR_construct.cpp',
   include_directories: inc,
-  dependencies: [g_deps, eigen_dep, hdf5_dep, omp_dep],
-  link_with: operator_lib,
+  dependencies: operator_dep,
   install : false
   )
 
 test_lanczos = executable('test_lanczos',
   'test_lanczos.cpp',
   include_directories: inc,
-  dependencies: g_deps,
+  dependencies: operator_dep,
   install: false
   )
 
 test_apply = executable('test_apply',
   'test_apply.cpp',
   include_directories: inc,
-  dependencies: [g_deps, eigen_dep, spectra_dep],
-  link_with: expectation_eval,
+  dependencies: [operator_dep, common_dep],
   install: false
   )
 
@@ -38,8 +36,7 @@ test_apply = executable('test_apply',
 test_apply_mpi = executable('test_apply_mpi',
   'test_apply_mpi.cpp',
   include_directories: inc,
-  dependencies: [g_deps, eigen_dep, spectra_dep, mpi_dep],
-  link_with: [expectation_eval, expectation_eval_mpi],
+  dependencies: [operator_mpi_dep, common_dep, operator_dep],
   install: false
   )
 

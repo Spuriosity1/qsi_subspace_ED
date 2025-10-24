@@ -11,7 +11,6 @@
 #include "operator.hpp"
 
 #include "expectation_eval.hpp"
-#include "admin.hpp"
 
 using json=nlohmann::json;
 using namespace std;

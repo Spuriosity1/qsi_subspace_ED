@@ -3,19 +3,17 @@
 #include <stdexcept>
 #include <vector>
 
-#include "matrix_diag_bits.hpp"
 #include "physics/Jring.hpp"
+#include "physics/geometry.hpp"
 
 #include "operator.hpp"
-#include "expectation_eval.hpp"
-#include "tetra_graph_io.hpp"
+#include "basis_format_bits.hpp"
+#include <argparse/argparse.hpp>
 
 
-
-
-
+template<typename T>
 inline void build_hamiltonian(SymbolicOpSum<double>& H_sym, 
-        const nlohmann::json& jdata, double Jpm, const Vector3d B){
+        const nlohmann::json& jdata, double Jpm, const T& B){
 
 	try {
 		auto version=jdata.at("__version__");
@@ -99,9 +97,7 @@ inline void build_hamiltonian(SymbolicOpSum<double>& H_sym,
 
     } catch (nlohmann::json::out_of_range& e){
 std::cout<<"No NNNN terms."<<std::endl;
-
-    };
-        
+    };       
 }
 
 
@@ -125,19 +121,6 @@ inline void build_hamiltonian(SymbolicOpSum<double>& H_sym,
 }
 
 
-template<Basis B>
-inline auto load_basis(B& basis, const argparse::ArgumentParser& prog){
-    auto basisfile = get_basis_file(prog.get<std::string>("lattice_file"), 
-            prog.get<int>("--n_spinons"),
-            prog.is_used("--sector"));
-
-	if (prog.is_used("--sector")) {
-        auto sector = prog.get<std::string>("--sector");
-        return basis.load_from_file(basisfile, sector.c_str());
-    } else {
-        return basis.load_from_file(basisfile);
-    }
-}
 
 
 

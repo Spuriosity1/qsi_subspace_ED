@@ -4,6 +4,8 @@
 #include "operator_matrix.hpp"
 #include <random>
 #include "timeit.hpp"
+#include <fstream>
+#include "lanczos.hpp"
 
 
 

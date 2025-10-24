@@ -9,7 +9,6 @@ __pycache__
 *.db-shm
 lattice_files
 test/tmp
-vendor/*
 *.ipynb
 *.swp
 .old

@@ -7,10 +7,11 @@ project('projected_ed', ['cpp', 'c'],
 cmake = import('cmake')
 
 # add_project_arguments(['
-add_project_link_arguments(['-pthread', '-lstdc++'], language: 'cpp' )
+add_project_link_arguments(['-pthread'], language: 'cpp' )
 
 # Compiler flags for 128-bit integer support
 cpp_compiler = meson.get_compiler('cpp')
+
 host_cpu = host_machine.cpu_family()
 
 target_args = []
@@ -44,7 +45,6 @@ elif get_option('buildtype') == 'debug'
 endif
 
 
-
 hdf5_dep = dependency('hdf5',
   language: 'c',
   required: false,
@@ -57,8 +57,8 @@ eigen_dep = dependency('Eigen3', method: 'cmake',  modules: ['Eigen3::Eigen'], r
 spectra_dep = dependency('spectra', method: 'cmake')
 
 omp_dep = dependency('OpenMP', required: true)
-mpi_dep = dependency('mpi', language: 'cpp')
 
+mpi_dep = dependency('mpi', language: 'cpp')
 
 # MRRR parallel tridiagonal matrix eigensolver
 mr3smp_proj = subproject('mr3smp')
@@ -73,51 +73,40 @@ cmake_opts.add_cmake_defines({
 
 
 # Local include dir for headers like bittools.hpp, admin.hpp, basis_io
-inc = [ include_directories('include') ]
+
+vendor_inc = include_directories('vendor/include')
+
+inc = [ include_directories('include'), vendor_inc ]
 
 g_deps = [
   hdf5_dep,
   json_dep,
-  omp_dep,
-  eigen_dep,
-  mr3smp_dep
+  eigen_dep
 ]
 
-
+subdir('components')
 subdir('src')
 
-if eigen_dep.found()
-if spectra_dep.found()
-
-expectation_eval = static_library('expectation_eval', ['src/expectation_eval.cpp', 'src/operator_matrix.cpp', 'src/operator.cpp'],
-  dependencies: [g_deps, eigen_dep, omp_dep, spectra_dep],
+expectation_eval = static_library('expectation_eval', 'src/expectation_eval.cpp',
   include_directories: inc,
-  link_with: operator_lib,
-  cpp_args: target_args
-  )
+  dependencies: [operator_dep, g_deps])
 
-expectation_eval_mpi = static_library('expectation_eval_mpi', ['src/expectation_eval.cpp', 'src/operator_mpi.cpp', 'src/operator.cpp'],
-  dependencies: [g_deps, eigen_dep, omp_dep, spectra_dep, mpi_dep], #todo purge spectra
-  include_directories: inc,
-  link_with: operator_lib,
-  cpp_args: target_args
-  )
 
-diag_DOQSI_ham = executable('diag_DOQSI_ham',
-  files(['src/diag_DOQSI_ham.cpp']),
-  dependencies: [g_deps, eigen_dep, spectra_dep],
-  include_directories: inc,
-  link_with: expectation_eval,
-  cpp_args: target_args
-  )
-
-build_hamiltonian = executable('build_hamiltonian',
-  files(['src/build_hamiltonian.cpp', 'src/expectation_eval.cpp']),
-  dependencies: [g_deps, eigen_dep, spectra_dep],
-  include_directories: inc,
-  link_with: expectation_eval,
-  cpp_args: target_args
-  )
+#diag_DOQSI_ham = executable('diag_DOQSI_ham',
+#  files(['src/diag_DOQSI_ham.cpp']),
+#  dependencies: [g_deps, eigen_dep, spectra_dep],
+#  include_directories: inc,
+#  link_with: expectation_eval,
+#  cpp_args: target_args
+#  )
+#
+#build_hamiltonian = executable('build_hamiltonian',
+#  files(['src/build_hamiltonian.cpp', 'src/expectation_eval.cpp']),
+#  dependencies: [g_deps, eigen_dep, spectra_dep],
+#  include_directories: inc,
+#  link_with: expectation_eval,
+#  cpp_args: target_args
+#  )
 
 #ftlm_DOQSI_ham = executable('ftlm_DOQSI_ham',
 #  files(['src/ftlm_DOQSI_ham.cpp', 'src/expectation_eval.cpp','src/ftlm.cpp']),
@@ -127,27 +116,28 @@ build_hamiltonian = executable('build_hamiltonian',
 #  )
 
 
-eval_observables = executable('eval_observables',
-  files(['src/eval_observables.cpp', 'src/expectation_eval.cpp']),
-  dependencies: [g_deps, eigen_dep, omp_dep, spectra_dep],
-  include_directories: inc,
-  link_with: expectation_eval,
-  cpp_args: target_args
-  )
+#eval_observables = executable('eval_observables',
+#  files(['src/eval_observables.cpp', 'src/expectation_eval.cpp']),
+#  dependencies: [g_deps, eigen_dep, omp_dep, spectra_dep],
+#  include_directories: inc,
+#  link_with: expectation_eval,
+#  cpp_args: target_args
+#  )
+#
+#
+#eval_dsf = executable('eval_dsf',
+#  files(['src/eval_dsf.cpp', 'src/expectation_eval.cpp']),
+#  dependencies: [g_deps, eigen_dep, spectra_dep],
+#  include_directories: inc,
+#  link_with: expectation_eval,
+#  cpp_args: target_args
+#  )
 
 
-eval_dsf = executable('eval_dsf',
-  files(['src/eval_dsf.cpp', 'src/expectation_eval.cpp']),
-  dependencies: [g_deps, eigen_dep, spectra_dep],
-  include_directories: inc,
-  link_with: expectation_eval,
-  cpp_args: target_args
-  )
-
-
-endif 
+if get_option('build_tests')
+  subdir('test')
 endif
 
-
-subdir('bench')
-subdir('test')
+if get_option('build_benchmarks')
+  subdir('bench')
+endif

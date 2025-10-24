@@ -2,7 +2,6 @@
 
 #include <string>
 #include <argparse/argparse.hpp>
-#include <filesystem>
 #include <iostream>
 
 
@@ -22,33 +21,6 @@
 #include <unsupported/Eigen/SparseExtra>
 
 using namespace Eigen;
-
-
-
-
-inline fs::path get_basis_file(const std::filesystem::path& lattice_file,
-        int n_spinons, bool subspace=false){
-// Determine basis_file default if not set
-	std::string basis_file;
-
-    std::string ext = "." + std::to_string(n_spinons) + ".basis";
-	if (subspace) {
-        ext += ".partitioned";
-    } 
-    ext += ".h5";
-   
-    std::filesystem::path path(lattice_file);
-    // Replace extension: json-> ext
-    if (path.extension() == ".json") {
-        path.replace_extension(ext);
-    } else {
-        // fallback if extension isn't ".json"
-        path += ext;
-    }
-
-    return path;
-}
-
 
 template <typename T>
 struct is_sym_solver : std::false_type {};
@@ -232,5 +204,6 @@ inline diagonalise_real(const LazyOpSum<double, basis_t>& H, const argparse::Arg
         return std::make_pair(eigvals, eigvecs);
     }
 }
+
 
 

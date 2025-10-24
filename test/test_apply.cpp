@@ -4,7 +4,7 @@
 #include "operator_matrix.hpp"
 #include <random>
 #include "timeit.hpp"
-
+#include "matrix_diag_bits.hpp"
 
 
 using json = nlohmann::json;

@@ -32,3 +32,14 @@
 #define BENCH_TIMEIT(msg, ...) __VA_ARGS__
 #endif
 
+
+
+#ifdef SUBSPACE_ED_BENCHMARK_OPERATIONS
+#define BENCH_PRINT_VECTOR(msg,  v) \
+    std::cout<<msg<<": "; \
+    for (const auto& vi : v){std::cout<<vi<<", ";} \
+    std::cout<<"\n";
+#else 
+#define BENCH_PRINT_VECTOR(msg, v)
+#endif
+

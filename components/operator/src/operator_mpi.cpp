@@ -1,0 +1,430 @@
+#include "operator_mpi.hpp"
+#include <mpi.h>
+#include <cassert>
+#include "timeit.hpp"
+
+#ifndef NDEBUG
+#define ASSERT_STATE_FOUND(basis, state, local_idx, error_msg) \
+    do { \
+        if (basis.search(state, local_idx) == 0) { \
+            std::cerr << "State not found on node " << ctx.world_rank << ": "; \
+            printHex(std::cerr, state) << "\n"; \
+            throw std::logic_error("State not found in " error_msg); \
+        } \
+        if (local_idx >= ctx.local_block_size()) { \
+            throw std::logic_error("Bad local_idx in " error_msg); \
+        } \
+    } while(0)
+#else
+#define ASSERT_STATE_FOUND(basis, state, local_idx, error_msg) \
+    basis.search(state, local_idx)
+#endif
+
+
+// reads only the local basis into memory
+inline std::vector<Uint128> read_basis_hdf5(
+        MPIContext& ctx,
+        const std::string& infile,
+        const char* dset_name = "basis"){
+
+	std::vector<Uint128> result;
+
+	// HDF5 identifiers
+	hid_t file_id = -1, dataset_id = -1, dataspace_id = -1;
+	herr_t status;
+
+    try {
+        // open the file
+        file_id = H5Fopen(infile.c_str(), H5F_ACC_RDONLY, H5P_DEFAULT);
+		if (file_id < 0) throw HDF5Error(file_id, -1, -1, "read_basis: Failed to open file");
+		
+		// Open the dataset
+		dataset_id = H5Dopen(file_id, dset_name, H5P_DEFAULT);
+		if (dataset_id < 0) throw HDF5Error(file_id, -1, dataset_id, "read_basis: Failed to open dataset");
+		
+		// Get the dataspace to retrieve the dimensions
+		dataspace_id = H5Dget_space(dataset_id);
+		if (dataspace_id < 0) throw HDF5Error(file_id, dataspace_id, dataset_id, "read_basis: Failed to get dataspace");
+		
+		// Get the dimensions
+		int ndims = H5Sget_simple_extent_ndims(dataspace_id);
+		if (ndims != 2) throw HDF5Error(file_id, dataspace_id, dataset_id, "read_basis: Expected 2D data");
+		
+		hsize_t dims[2];
+		status = H5Sget_simple_extent_dims(dataspace_id, dims, nullptr);
+		if (status < 0) throw HDF5Error(file_id, dataspace_id, dataset_id, "read_basis: Failed to get dimensions");
+
+        hsize_t row_width= dims[1];
+        hsize_t total_rows = dims[0];
+
+        if (total_rows == 0){
+            throw std::runtime_error("Basis is empty!");
+        }
+
+        // build the index partition
+        ctx.build_idx_partition(dims[0]);
+
+        // do some random access to figure out the terminal states
+        {     
+            // Each rank reads its boundary states directly from file
+            auto read_state = [&](hsize_t idx) {
+                Uint128 val{};
+                hsize_t offset[2] = { idx, 0 };
+                hsize_t count[2]  = { 1, row_width };
+                herr_t status;
+                status = H5Sselect_hyperslab(dataspace_id, H5S_SELECT_SET, offset, nullptr, count, nullptr);
+                if (status < 0) throw HDF5Error(file_id, dataspace_id, dataset_id, "read_state: Failed to select hyperslab");
+
+                hid_t memspace = H5Screate_simple(2, count, nullptr);
+                status = H5Dread(dataset_id, H5T_NATIVE_UINT64, memspace, dataspace_id, H5P_DEFAULT, &val);
+
+                if (status < 0) throw HDF5Error(file_id, dataspace_id, dataset_id, "read_state: Failed to read memory");
+
+                H5Sclose(memspace);
+                return val;
+            };
+
+            for (int r = 0; r < ctx.world_size; ++r) {              
+                assert(ctx.idx_partition[r] < total_rows);
+                ctx.state_partition[r] = read_state(ctx.idx_partition[r]);
+            }
+
+            // one past last: last_state + 1
+            Uint128 last = read_state(total_rows - 1);
+            ++last.uint128;
+            ctx.state_partition[ctx.world_size] = last;
+        }
+    
+        
+        // Local chunk indices (by global index)
+        const uint64_t local_start = static_cast<uint64_t>(ctx.idx_partition[ctx.world_rank]);
+        const uint64_t local_end   = static_cast<uint64_t>(ctx.idx_partition[ctx.world_rank+1]);
+        const uint64_t local_count = (local_end > local_start) ? (local_end - local_start) : 0;
+
+        if (local_start + local_count > total_rows){
+            std::cerr << "Error on Rank "<<ctx.world_rank<<":"
+                <<"\ntotal_rows = "<<total_rows
+                <<"\nlocal_start = "<<local_start
+                <<"\nlocal_start + local_count = "<<local_start+local_count
+                <<"\nidx_partition=[";
+            for (const auto& I : ctx.idx_partition){
+                std::cerr << I <<",";
+            }
+            std::cerr <<"]\n";
+            throw std::logic_error("Bad slab spec: trying to read past the end!");
+        }
+		
+        // read the slab in [local_start ... local_end)
+        if (local_count > 0) {
+		    // Allocate memory for the result
+            result.resize(local_count);
+
+            // Select hyperslab in file dataspace
+            hsize_t file_offset[2] = { local_start, 0 };
+            hsize_t file_count[2]  = { local_count, row_width };
+            status = H5Sselect_hyperslab(dataspace_id, H5S_SELECT_SET, file_offset, nullptr, file_count, nullptr);
+            if (status < 0) throw std::runtime_error("read_basis_hdf5: Failed to select hyperslab");
+
+            // Memory dataspace
+            hid_t memspace = H5Screate_simple(2, file_count, nullptr);
+            if (memspace < 0) throw std::runtime_error("read_basis_hdf5: Failed to create memspace");
+
+            // Read as native uint64s into the memory of local_states
+            status = H5Dread(dataset_id, H5T_NATIVE_UINT64, memspace, dataspace_id, H5P_DEFAULT, reinterpret_cast<void*>(result.data()));
+            H5Sclose(memspace);
+            if (status < 0) throw std::runtime_error("read_basis_hdf5: Failed to read local chunk");
+        }
+
+        // Print diagnostics
+        assert(ctx.idx_partition.size() == ctx.state_partition.size());
+        std::cout<<"Loaded basis chunk. Partition scheme:\n index\t state\n";
+        for (size_t i=0; i<ctx.idx_partition.size(); i++){
+            std::cout<<ctx.idx_partition[i]<<"\t";
+            printHex(std::cout, ctx.state_partition[i])<<"\n";
+        }
+		
+		// Clean up
+		H5Sclose(dataspace_id);
+		H5Dclose(dataset_id);
+		H5Fclose(file_id);
+	} catch (const HDF5Error& e){
+		if (dataset_id >= 0) H5Dclose(dataset_id);
+		if (dataspace_id >= 0) H5Sclose(dataspace_id);
+		if (file_id >= 0) H5Fclose(file_id);
+		throw;
+	}
+
+    return result;
+
+}
+
+
+
+MPIContext MPI_ZBasisBST::load_from_file(const fs::path& bfile, const std::string& dataset){
+     // MPI setup
+    MPIContext ctx;
+//    int rank = ctx.world_rank;
+//    int size = ctx.world_size;
+
+    std::cerr << "Loading basis from file " << bfile <<"\n";
+    if (bfile.stem().extension() == ".partitioned"){
+        assert(bfile.extension() == ".h5");
+        states = read_basis_hdf5(ctx, bfile, dataset.c_str());
+    } else if (bfile.extension() == ".h5"){
+        assert(dataset=="basis");
+        states = read_basis_hdf5(ctx, bfile, "basis"); 
+    } else {
+        throw std::runtime_error(
+                "Bad basis format: file must end with .csv or .h5");
+    }
+
+    std::cerr << "Done!" <<"\n";
+    return ctx;
+}
+
+
+size_t MPIContext::node_of_state(ZBasisBase::state_t psi) const {
+    // linear search, all states should fit in cache unless # nodes is very large
+    for (int n=0; n<world_size; n++){
+        if (psi < state_partition[n+1]){
+            return n;
+        }
+    }
+    // this should almost never happen (possible if we serch for psi nonexistent -- in this case we can safely hand it off to any old node)
+    return world_size-1;
+}
+
+// returns the node on which a specified psi can be found
+size_t MPIContext::node_of_idx(ZBasisBase::idx_t J) const {
+    // linear search, all states should fit in cache unless # nodes is very large
+    for (int n=0; n<world_size; n++){
+        if (J < idx_partition[n+1]){
+            return n;
+        }
+    }
+
+    // this should almost never happen (possible if we serch for psi nonexistent -- in this case we can safely hand it off to any old node)
+    return world_size-1;
+}
+
+template<RealOrCplx coeff_t, Basis B >
+void MPILazyOpSum<coeff_t, B>::inplace_bucket_sort(std::vector<ZBasisBase::state_t>& states,
+        std::vector<coeff_t>& c,
+        std::vector<int>& bucket_sizes,
+        std::vector<int>& bucket_starts
+        ) const {
+    size_t n = states.size();
+    assert(c.size() == n);
+
+    bucket_sizes.resize(ctx.world_size);
+    bucket_starts.resize(ctx.world_size);
+    std::fill(bucket_sizes.begin(), bucket_sizes.end(), 0);
+
+
+     // Step 1: Count elements per bucket
+//    std::vector<size_t> bucket_sizes(context.world_size, 0);
+    for (const auto& s : states) {
+        ++bucket_sizes[ctx.node_of_state(s)];
+    }
+
+    // Step 2: Compute bucket start indices
+//    std::vector<size_t> bucket_starts(context.world_size, 0);
+    bucket_starts[0]=0;
+    for (int i = 1; i < ctx.world_size; ++i) {
+        bucket_starts[i] = bucket_starts[i - 1] + bucket_sizes[i - 1];
+    }
+
+     // Step 3: Rearrange
+    std::vector<coeff_t> _scratch_coeff;
+    std::vector<ZBasisBase::state_t> _scratch_states;
+    _scratch_states.resize(n);
+    _scratch_coeff.resize(n);
+    std::vector<int> bucket_next = bucket_starts; // Next free slot in each bucket
+
+     for (size_t i = 0; i < n; ++i) {
+        int target_bucket = ctx.node_of_state(states[i]);
+        size_t target_index = bucket_next[target_bucket]++;
+        _scratch_states[target_index] = states[i];
+        _scratch_coeff[target_index] = c[i];
+    }
+
+     states = std::move(_scratch_states);
+     c = std::move(_scratch_coeff);
+
+//    std::vector<bool> visited(n, false);
+
+//    for (size_t i = 0; i < n; ++i) {
+//        if (visited[i]) continue;
+//
+//        size_t current = i;
+//        Uint128 temp_state = states[current];
+//        coeff_t temp_c = c[current];
+//
+//        while (!visited[current]) {
+//            visited[current] = true;
+//            int target_bucket = ctx.node_of_state(temp_state);
+//            size_t target_index = bucket_next[target_bucket]++;
+//            
+//            std::swap(temp_state, states[target_index]);
+//            std::swap(temp_c, c[target_index]);
+//            current = target_index;
+//        }
+//    }
+}
+
+
+
+
+template <RealOrCplx coeff_t, Basis B>
+void MPILazyOpSum<coeff_t, B>::evaluate_add_diagonal(const coeff_t* x, coeff_t* y) const {
+    for (const auto& term : ops.diagonal_terms) {
+        const auto& c = term.first;   
+        const auto& op = term.second;
+
+        assert(op.is_diagonal());
+
+        #pragma omp parallel for schedule(static)
+        for (ZBasisBase::idx_t i = 0; i<ctx.local_block_size(); ++i){
+            ZBasisBase::state_t psi = basis[i];
+            coeff_t dy = c * x[i] * static_cast<double>(op.applyState(psi));
+            // completely in place, no i collisions
+            y[i] += dy;
+        }       
+    }
+}
+
+
+
+template <RealOrCplx coeff_t, Basis B>
+void MPILazyOpSum<coeff_t, B>::evaluate_add_off_diag(const coeff_t* x, coeff_t* y) const {
+     // For each off-diagonal term do:
+    // 1) produce per-destination vectors of (state,dy)
+    // 2) perform Alltoall of counts -> get recv counts
+    // 3) Alltoallv exchange (we pack state as two uint64_t halves)
+    // 4) on receive side, binary-search local basis block to find local index and add to y.
+    //
+    // Notes & assumptions:
+    // - basis[i] for i in [0, block_size) returns the local state's sorted values.
+    // - local basis block is sorted (so lower_bound works).
+    // - We serialize state_t as two uint64_t halves for transport. If your state_t is 64-bit,
+    //   you can simplify by sending a single uint64_t.
+    // - coeff_t must map to an MPI type via get_mpi_type<coeff_t>().
+    //
+    //
+    const int world_size = static_cast<int>(ctx.world_size);
+
+
+    size_t debug_count =0;
+    for (const auto& term : ops.off_diag_terms) {
+//        std::cout << "[AOD] Operator "<<debug_count++<<"\n";
+
+        const auto& c = term.first;
+        const auto& op = term.second;
+
+        const ZBasisBase::idx_t local_block = ctx.local_block_size();
+
+        std::vector<coeff_t> send_dy; 
+        std::vector<ZBasisBase::state_t> send_states;
+
+        // receivers
+        std::vector<coeff_t> recv_dy;
+        std::vector<ZBasisBase::state_t> recv_states;
+
+
+        BENCH_TIMEIT("[EAOD] local apply",
+        // Apply to all local basis states and store non-vanishing entries
+        for (ZBasisBase::idx_t il=0; il<local_block; ++il){
+            ZBasisBase::state_t state = basis[il];
+            auto sign = op.applyState(state); // "state" is new now
+            if (sign == 0) continue;
+            send_dy.push_back( c * x[il] * sign);
+            send_states.push_back(state);
+        }
+        )
+
+
+
+        // Reorder indices such that nodes are sorted
+        std::vector<int> sendcounts(world_size); 
+        std::vector<int> sendbegin(world_size);
+        // sendcounts[r] is number of values to send to rank r
+        BENCH_TIMEIT("[EAOD] inplace bucket sort",
+        inplace_bucket_sort(send_states, send_dy, sendcounts, sendbegin);
+        )
+
+        BENCH_PRINT_VECTOR("[EAOD] send counts", sendcounts);
+
+
+
+        int n_data_self=0;
+        std::swap(n_data_self, sendcounts[ctx.world_rank]); // do not send to self
+ 
+        // Begin farming data out to others                 
+        std::vector<int> recvcounts(world_size);
+        MPI_Alltoall(sendcounts.data(), 1, MPI_INT,
+                     recvcounts.data(), 1, MPI_INT,
+                     MPI_COMM_WORLD);
+
+        // Compute displacements for receive
+        std::vector<int> recvbegin(world_size);
+        recvbegin[0] = 0;
+        for (int r = 1; r < world_size; ++r) {
+            recvbegin[r] = recvbegin[r-1] + recvcounts[r-1];
+        }
+        int total_recv = recvbegin[world_size-1] + recvcounts[world_size-1];
+
+
+        BENCH_PRINT_VECTOR("[EAOD] recv counts", sendcounts);
+        
+        // Allocate receive buffers
+        recv_states.resize(total_recv);
+        recv_dy.resize(total_recv);
+
+        MPI_Request request[2];
+        
+        // Exchange states
+        MPI_Ialltoallv(send_states.data(), sendcounts.data(), sendbegin.data(),
+                      get_mpi_type_uint128(),
+                      recv_states.data(), recvcounts.data(), recvbegin.data(),
+                      get_mpi_type_uint128(),
+                      MPI_COMM_WORLD, &request[0]);
+
+        // Exchange coefficients
+        MPI_Ialltoallv(send_dy.data(), sendcounts.data(), sendbegin.data(),
+                      get_mpi_type<coeff_t>(),
+                      recv_dy.data(), recvcounts.data(), recvbegin.data(),
+                      get_mpi_type<coeff_t>(),
+                      MPI_COMM_WORLD, &request[1]);
+
+        BENCH_TIMEIT("[EAOD] local updates",
+        // process my own data while MPI is sending the big buffers
+        int self_begin = sendbegin[ctx.world_rank];
+        for (int i = 0; i < n_data_self; ++i) {
+            ZBasisBase::idx_t local_idx;
+            ASSERT_STATE_FOUND(basis, send_states[self_begin + i], local_idx, "self");
+            y[local_idx] += send_dy[self_begin + i];
+        }
+        )
+
+        // Wait for communication to complete
+        MPI_Waitall(2, request, MPI_STATUS_IGNORE);
+
+        BENCH_TIMEIT("[EAOD] received updates",
+//        std::cout<<"[AOD "<<ctx.world_rank<<"] other proc "<<total_recv<<std::endl;
+         // Process received data: find local indices and accumulate
+        for (int i = 0; i < total_recv; ++i) {
+            coeff_t dy_val = recv_dy[i];
+            ZBasisBase::idx_t local_idx;
+            ASSERT_STATE_FOUND(basis, recv_states[i], local_idx, "other");
+            y[local_idx] += dy_val;      
+        }
+        )
+    } // end external for loop
+}
+
+
+
+
+// explicit template instantiations: generate symbols to link with
+template struct MPILazyOpSum<double, MPI_ZBasisBST>;
+//template struct MPILazyOpSum<double, ZBasisInterp>;
