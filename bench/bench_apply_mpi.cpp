@@ -79,7 +79,7 @@ int main(int argc, char* argv[]){
 
     // Step 2: load and partition the basis
     TIMEIT("Loading basis", MPIContext ctx = load_basis(basis, prog);)
-    std::cout<<"[rank "<<ctx.world_rank<<"] Done! Basis dim="<<basis.dim()<<std::endl;
+    std::cout<<"[rank "<<ctx.my_rank<<"] Done! Basis dim="<<basis.dim()<<std::endl;
 
 
 	using T=double;
@@ -101,7 +101,7 @@ int main(int argc, char* argv[]){
 
     std::fill(u_local.begin(), u_local.end(), 0);
 
-    std::cout<<"[BST_MPI "<<ctx.world_rank<<"]  Apply..."<<std::endl;
+    std::cout<<"[BST_MPI "<<ctx.my_rank<<"]  Apply..."<<std::endl;
     // NOTE: add the local block offset to stay correct
     TIMEIT("u += Av", H_mpi.evaluate_add(v_local.data(), u_local.data());)
 

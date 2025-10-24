@@ -15,13 +15,13 @@ template<> inline MPI_Datatype get_mpi_type<std::complex<float>>() { return MPI_
 struct MPIContext {
     MPIContext(){
         MPI_Comm_size(MPI_COMM_WORLD, &world_size);
-        MPI_Comm_rank(MPI_COMM_WORLD, &world_rank);
+        MPI_Comm_rank(MPI_COMM_WORLD, &my_rank);
         idx_partition.resize(world_size+1);
         state_partition.resize(world_size+1);
     }
 
     int world_size;
-    int world_rank;
+    int my_rank;
     
     // sorted parallel arrays, both of length num_nodes + 1
     // node 'n' handles states in interval [ state_partition[n], state_partition[n+1])
@@ -47,11 +47,11 @@ struct MPIContext {
     }
 
     constexpr ZBasisBase::idx_t local_start_index(){
-        return idx_partition[world_rank];
+        return idx_partition[my_rank];
     }
 
     constexpr ZBasisBase::idx_t local_block_size(){
-        return idx_partition[world_rank+1] - idx_partition[world_rank];
+        return idx_partition[my_rank+1] - idx_partition[my_rank];
     }
 
     constexpr ZBasisBase::idx_t global_basis_dim(){

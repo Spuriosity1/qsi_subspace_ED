@@ -89,10 +89,10 @@ int main(int argc, char* argv[]){
     std::fill(u_global.begin(), u_global.end(), 0);
     std::fill(u_local.begin(), u_local.end(), 0);
 
-    std::cout<<"[BST "<<ctx.world_rank<<"]  Apply..."<<std::endl;
+    std::cout<<"[BST "<<ctx.my_rank<<"]  Apply..."<<std::endl;
     TIMEIT("u += Av", H_st.evaluate_add(v_global.data(), u_global.data());)
 
-    std::cout<<"[BST_MPI "<<ctx.world_rank<<"]  Apply..."<<std::endl;
+    std::cout<<"[BST_MPI "<<ctx.my_rank<<"]  Apply..."<<std::endl;
     // NOTE: add the local block offset to stay correct
     TIMEIT("u += Av", H_mpi.evaluate_add(v_global.data() + ctx.local_start_index(), u_local.data());)
 
@@ -107,7 +107,7 @@ int main(int argc, char* argv[]){
 
 
     std::ostringstream filename;
-    filename << "comparison_rank" << ctx.world_rank << ".csv";
+    filename << "comparison_rank" << ctx.my_rank << ".csv";
     std::ofstream out(filename.str());
     out << "local_index,global_index,u_global,u_local\n";
 
@@ -122,7 +122,7 @@ int main(int argc, char* argv[]){
         if( error > tol ){
             if (error_count == 0){
                 std::cout<<"BST != MPI on global index "<< g_idx
-                    <<"= ("<<ctx.world_rank<<") + "<<i<<": +"<<error<<"\n";
+                    <<"= ("<<ctx.my_rank<<") + "<<i<<": +"<<error<<"\n";
             }
             error_count++;
             max_error = std::max(max_error, error);
@@ -130,10 +130,10 @@ int main(int argc, char* argv[]){
     }
 
     if (error_count > 0) {
-        std::cout << "Rank " << ctx.world_rank << ": " << error_count 
+        std::cout << "Rank " << ctx.my_rank << ": " << error_count 
               << " errors found, max error = " << max_error << "\n";
     } else {
-        std::cout << "Rank " << ctx.world_rank <<": All algos agree."<<std::endl;
+        std::cout << "Rank " << ctx.my_rank <<": All algos agree."<<std::endl;
     }
     MPI_Finalize();
     return 0;
