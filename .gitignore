@@ -13,6 +13,7 @@ vendor/*
 *.ipynb
 *.swp
 .old
+.clangd
 hpc_driver/track
 basis_partitions
 .DS_Store
