@@ -1,13 +1,17 @@
 
-common_sources = [
-  'pyro_tree.cpp',
-  'tetra_graph_io.cpp'
-  ]
-
-
-spinon_basis_sources = files(['gen_spinon_basis.cpp'] + common_sources) 
-spinon_basis_big_sources = files(['sbsearch.cpp'] + common_sources) 
-
-
 build_hamiltonian_sources = files(['build_hamiltonian.cpp'])
+
+tetra_io_lib = static_library('tetra_graph_io_lib', ['tetra_graph_io.cpp'],
+  include_directories: inc,
+  cpp_args: target_args,
+  dependencies: g_deps
+  )
+
+operator_lib = static_library('operator_lib', ['operator.cpp'],
+  dependencies: [g_deps, eigen_dep, omp_dep ],
+  include_directories: inc,
+  cpp_args: target_args
+  )
+
+subdir('basis')
 

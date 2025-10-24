@@ -1,6 +1,6 @@
 project('projected_ed', ['cpp', 'c'],
   version: '1.0.0',
-  meson_version : '>= 1.3.0',
+  meson_version : '>= 1.7.0',
   default_options : [ 'warning_level=1', 'buildtype=release', 'cpp_std=c++2a' ]
 )
 
@@ -57,6 +57,7 @@ eigen_dep = dependency('Eigen3', method: 'cmake',  modules: ['Eigen3::Eigen'], r
 spectra_dep = dependency('spectra', method: 'cmake')
 
 omp_dep = dependency('OpenMP', required: true)
+mpi_dep = dependency('mpi', language: 'cpp')
 
 
 # MRRR parallel tridiagonal matrix eigensolver
@@ -82,62 +83,21 @@ g_deps = [
   mr3smp_dep
 ]
 
+
 subdir('src')
 
-if hdf5_dep.found()
-  
-    partition_basis = executable('partition_basis', files('src/partition_basis.cpp'),
-            dependencies: g_deps,
-            include_directories:inc,
-            cpp_args: target_args
-            )
-
-
-else
-  add_project_arguments('-DDONT_USE_HDF5', language: 'cpp')
-endif
-
-gen_spinon_basis = executable('gen_spinon_basis',spinon_basis_sources, 
-  dependencies: g_deps,
-  include_directories:inc,
-  cpp_args: target_args
- )
-
-
-sbsearch = executable('sbsearch', spinon_basis_big_sources, 
-  dependencies: g_deps,
-  include_directories:inc,
-  cpp_args: target_args
-  )
-
-merge_shards = executable('merge_shards', 'src/merge_shards.cpp',
-  dependencies: g_deps,
-  include_directories:inc,
-  cpp_args: target_args
-  )
-
 if eigen_dep.found()
-
-
-operator_lib = static_library('operator_lib', ['src/operator_matrix.cpp', 'src/operator.cpp'],
-  dependencies: [g_deps, eigen_dep, omp_dep ],
-  include_directories: inc,
-  cpp_args: target_args
-  )
-
-
-
-polyring_basis = executable('polyring_basis', files('src/polyring_basis.cpp'), 
-  dependencies: [g_deps, eigen_dep],
-  include_directories:inc,
-  link_with: operator_lib,
-  cpp_args: target_args
-  )
-
 if spectra_dep.found()
 
 expectation_eval = static_library('expectation_eval', ['src/expectation_eval.cpp', 'src/operator_matrix.cpp', 'src/operator.cpp'],
   dependencies: [g_deps, eigen_dep, omp_dep, spectra_dep],
+  include_directories: inc,
+  link_with: operator_lib,
+  cpp_args: target_args
+  )
+
+expectation_eval_mpi = static_library('expectation_eval_mpi', ['src/expectation_eval.cpp', 'src/operator_mpi.cpp', 'src/operator.cpp'],
+  dependencies: [g_deps, eigen_dep, omp_dep, spectra_dep, mpi_dep], #todo purge spectra
   include_directories: inc,
   link_with: operator_lib,
   cpp_args: target_args

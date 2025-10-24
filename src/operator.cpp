@@ -1,7 +1,7 @@
 #include "operator.hpp"
-#include <omp.h>
+#include <cassert>
 
-bool ZBasisBST::search(const state_t& state, idx_t& J) const {
+int ZBasisBST::search(const state_t& state, idx_t& J) const {
 //    auto it = std::lower_bound(states.begin(), states.end(), state);
 //    return it;
     
@@ -18,25 +18,25 @@ bool ZBasisBST::search(const state_t& state, idx_t& J) const {
     }
 
     for (J = left; J <= right; J++) {
-        if (arr[J] == state.uint128) return true;
+        if (arr[J] == state.uint128) return 1;
     }
 
     // manual unroll BS (actually saves noticeable time???)
     for (J = left; J + 3 <= right; J += 4) {
-        if (arr[J] == state) {  return true; }
-        if (arr[J+1] == state) { J = J+1; return true; }
-        if (arr[J+2] == state) { J = J+2; return true; }
-        if (arr[J+3] == state) { J = J+3; return true; }
+        if (arr[J] == state) {  return 1; }
+        if (arr[J+1] == state) { J = J+1; return 1; }
+        if (arr[J+2] == state) { J = J+2; return 1; }
+        if (arr[J+3] == state) { J = J+3; return 1; }
     }
     for (; J <= right; ++J) {
-        if ( J >= 0 && arr[J] == state) { return true; }
+        if ( J >= 0 && arr[J] == state) { return 1; }
     }
-    return false; // not found;
+    return 0; // not found;
 }
 
 
 
-bool ZBasisInterp::search(const state_t& state, idx_t& J) const {
+int ZBasisInterp::search(const state_t& state, idx_t& J) const {
 //    auto it = std::lower_bound(states.begin(), states.end(), state);
 //    return it;
 //
@@ -55,19 +55,19 @@ bool ZBasisInterp::search(const state_t& state, idx_t& J) const {
     }
 
     for (J = left; J <= right; J++) {
-        if (arr[J] == state.uint128) return true;
+        if (arr[J] == state.uint128) return 1;
     }
 
     for (J = left; J + 3 <= right; J += 4) {
-        if (arr[J] == state) { J = J; return true; }
-        if (arr[J+1] == state) { J = J+1; return true; }
-        if (arr[J+2] == state) { J = J+2; return true; }
-        if (arr[J+3] == state) { J = J+3; return true; }
+        if (arr[J] == state) {  return 1; }
+        if (arr[J+1] == state) { J = J+1; return 1; }
+        if (arr[J+2] == state) { J = J+2; return 1; }
+        if (arr[J+3] == state) { J = J+3; return 1; }
     }
     for (; J <= right; ++J) {
-        if (J>=0 && arr[J] == state) { return true; }
+        if (J>=0 && arr[J] == state) { return 1; }
     }
-    return false; // not found;
+    return 0; // not found;
 }
 
 

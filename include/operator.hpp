@@ -15,10 +15,10 @@
 
 //#include <pthash.hpp>
 
-#include <Eigen/Core>
-#include <Eigen/Sparse>
 #include <basis_io.hpp>
 #include <filesystem> // C++17
+#include <unordered_map>
+#include <algorithm>
 					  
 namespace fs = std::filesystem;
 
@@ -125,6 +125,10 @@ struct ZBasisBase {
 		return states.size();
 	}
 
+	size_t size() const {
+		return states.size();
+	}
+
 	inline state_t operator[](idx_t idx) const {
 		return states[idx];
 	}
@@ -138,7 +142,7 @@ struct ZBasisBase {
 template<typename T>
 concept Basis =  std::derived_from<T, ZBasisBase> &&
 requires (T b, const ZBasisBase::state_t& state, ZBasisBase::idx_t& J) {
-    { b.search(state, J) } -> std::same_as<bool>;
+    { b.search(state, J) } -> std::same_as<int>;
 };
 
 
@@ -154,12 +158,12 @@ struct ZBasisBST : public ZBasisBase
     // 'new_states'. Leaves "to_insert" holding a de-duplicated, sorted version of its original state.
 	size_t insert_states(std::vector<state_t>& to_insert);
 
-    bool search(const state_t& state, idx_t& J) const;
+    int search(const state_t& state, idx_t& J) const;
 };
 
 struct ZBasisInterp : public ZBasisBST {
     void load_from_file(const fs::path& bfile, const std::string& dataset="basis");
-    bool search(const state_t& state, idx_t& J) const;
+    int search(const state_t& state, idx_t& J) const;
     protected:
     std::unordered_map<uint64_t, std::pair<idx_t, idx_t>> bounds;
 

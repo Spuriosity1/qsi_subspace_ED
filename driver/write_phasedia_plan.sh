@@ -24,8 +24,8 @@ rm -if "$planfile"
 
 for jpm in $(seq -0.1 0.01 0.1); do
     for B in $(seq 0 0.005 0.1); do
-        echo "$scriptdir/../build/diag_DOQSI_ham $lf --Jpm $jpm --B $B $B 0 -o $odir" -k 30 >> "$planfile"
-        echo "$scriptdir/../build/diag_DOQSI_ham $lf --Jpm $jpm --B $B 0 0 -o $odir" -k 30 >> "$planfile"
+        echo "$scriptdir/../bin/diag_DOQSI_ham $lf --Jpm $jpm --B $B $B 0 -o $odir" -k 30 >> "$planfile"
+        echo "$scriptdir/../bin/diag_DOQSI_ham $lf --Jpm $jpm --B $B 0 0 -o $odir" -k 30 >> "$planfile"
     done
 done
 

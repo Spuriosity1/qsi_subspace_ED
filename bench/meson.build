@@ -19,6 +19,24 @@ benchmark_uint128 = executable('benchmark_uint128',
                               include_directories: inc,
                               install : false)
 
+bench_apply = executable('bench_apply',
+  'bench_apply.cpp',
+  include_directories: inc,
+  dependencies: [g_deps, eigen_dep, spectra_dep],
+  link_with: expectation_eval,
+  install: false
+  )
+
+
+bench_apply_mpi = executable('bench_apply_mpi',
+  'bench_apply_mpi.cpp',
+  include_directories: inc,
+  dependencies: [g_deps, eigen_dep, spectra_dep, mpi_dep],
+  link_with: [expectation_eval, expectation_eval_mpi],
+  install: false
+  )
+  
+
 # Register benchmark (optional)
 benchmark('uint128_performance', benchmark_uint128,
          timeout : 60,

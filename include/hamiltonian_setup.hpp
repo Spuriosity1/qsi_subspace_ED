@@ -126,17 +126,16 @@ inline void build_hamiltonian(SymbolicOpSum<double>& H_sym,
 
 
 template<Basis B>
-inline void load_basis(B& basis, const argparse::ArgumentParser& prog){
+inline auto load_basis(B& basis, const argparse::ArgumentParser& prog){
     auto basisfile = get_basis_file(prog.get<std::string>("lattice_file"), 
             prog.get<int>("--n_spinons"),
             prog.is_used("--sector"));
 
-    std::cout <<"Loading from "<<basisfile << std::endl;
 	if (prog.is_used("--sector")) {
         auto sector = prog.get<std::string>("--sector");
-        basis.load_from_file(basisfile, sector.c_str());
+        return basis.load_from_file(basisfile, sector.c_str());
     } else {
-        basis.load_from_file(basisfile);
+        return basis.load_from_file(basisfile);
     }
 }
 

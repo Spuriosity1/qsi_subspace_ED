@@ -4,8 +4,8 @@ LATSTEM="pyro_2,0,0_0,2,0_0,0,3"
 
 mkdir ../tmp_data
 
-build/gen_spinon_basis "test/lattice_files/$LATSTEM.json"
-build/diag_DOQSI_ham "test/lattice_files/$LATSTEM.json" --Jpm 0.02 --B 0.1 0.1 0.1 -n 1 -N 1 --algorithm mfeig0 -k 20 --rng_seed 11 --atol -9 --rtol -9 -o ../tmp_data
+bin/gen_spinon_basis "test/lattice_files/$LATSTEM.json"
+bin/diag_DOQSI_ham "test/lattice_files/$LATSTEM.json" --Jpm 0.02 --B 0.1 0.1 0.1 -n 1 -N 1 --algorithm mfeig0 -k 20 --rng_seed 11 --atol -9 --rtol -9 -o ../tmp_data
 
 LOGFILE=test/tmp/test_correct.log
 

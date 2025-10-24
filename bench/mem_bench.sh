@@ -1,6 +1,6 @@
 #!/bin/bash
 
-XPATH="../build/bench"
+XPATH="../bin/bench"
 
 function benchit () {
     echo $1

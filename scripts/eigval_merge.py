@@ -125,7 +125,7 @@ if __name__ == "__main__":
         print(f"{sector} | {count}")
         if not args.dry_run:
             res = subprocess.run(
-                ["build/eval_observables", file_lookup[sector], "-N", str(count)],
+                ["bin/eval_observables", file_lookup[sector], "-N", str(count)],
                 capture_output=True, check=True
                 )
             print(res.stdout)

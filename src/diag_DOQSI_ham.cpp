@@ -112,11 +112,8 @@ int main(int argc, char* argv[]) {
 
     std::cout<<"Done! Basis dim="<<basis.dim()<<std::endl;
 
-
-
 	using T=double;
 	SymbolicOpSum<T> H_sym;
-
 
     char outfilename_buf[1024];
 

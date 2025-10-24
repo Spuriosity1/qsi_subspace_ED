@@ -93,7 +93,7 @@ class BasisBenchmarker:
 
         t1 = time.time()
         subprocess.run(
-            ["build/gen_spinon_basis_parallel",
+            ["bin/gen_spinon_basis_parallel",
              latfile_loc,
              str(nthread)])
 
@@ -223,7 +223,7 @@ class RingflipHamiltonian:
 
     def generate_basis_file(self, nthread):
         subprocess.run(
-            ["build/gen_spinon_basis_parallel",
+            ["bin/gen_spinon_basis_parallel",
              self.latfile_loc,
              str(nthread)])
 

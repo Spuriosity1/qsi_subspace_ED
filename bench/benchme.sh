@@ -13,7 +13,7 @@ benchfile="$(date +"%Y-%m-%dT%H-%M-%S")_time.txt"
 
 for j in `seq 2 10`; do
     start=`perl -MTime::HiRes=time -e 'printf "%.9f\n", time'`
-    cmd="build/gen_spinon_basis bench/test_data/pyro_1,0,0_0,2,0_0,0,$j.json --n_threads $1"
+    cmd="bin/gen_spinon_basis bench/test_data/pyro_1,0,0_0,2,0_0,0,$j.json --n_threads $1"
     echo $cmd >> $benchfile
     $cmd > /dev/null
     end=`perl -MTime::HiRes=time -e 'printf "%.9f\n", time'`

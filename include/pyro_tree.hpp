@@ -65,7 +65,6 @@ struct lat_container {
 
 	const unsigned num_spinon_pairs;
 	protected:
-	//global_sz_sector_t global_sz_sector;
 	std::vector<Uint128> masks; // bitmasks filled by make_mask
 
 	template <typename Container>
@@ -153,6 +152,9 @@ protected:
 
     static constexpr unsigned INITIAL_DEPTH_FACTOR = 5;
 };
+
+
+
 
 
 // similar to pyro_vtree_parallel, but only does the search part

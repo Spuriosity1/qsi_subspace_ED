@@ -34,6 +34,16 @@ test_apply = executable('test_apply',
   install: false
   )
 
+
+test_apply_mpi = executable('test_apply_mpi',
+  'test_apply_mpi.cpp',
+  include_directories: inc,
+  dependencies: [g_deps, eigen_dep, spectra_dep, mpi_dep],
+  link_with: [expectation_eval, expectation_eval_mpi],
+  install: false
+  )
+
+
 #test_ftlm_ops = executable('test_ftlm_ops','test_ftlm_ops.cpp',
 #                         include_directories: inc,
 #                         dependencies: [eigen_dep],

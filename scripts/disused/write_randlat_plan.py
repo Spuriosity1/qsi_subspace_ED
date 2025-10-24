@@ -20,6 +20,6 @@ next(reader, None)
 for line in reader:
     print(line)
     if int(line[1][:-1]) < MAX_ST_SIZE:
-        of.write(f"../build/gen_spinon_basis {line[0]}\n")
+        of.write(f"../bin/gen_spinon_basis {line[0]}\n")
 
 inf.close()

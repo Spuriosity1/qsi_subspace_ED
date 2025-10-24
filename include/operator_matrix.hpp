@@ -1,6 +1,9 @@
 #pragma once
 #include "operator.hpp"
 
+#include <Eigen/Core>
+#include <Eigen/Sparse>
+
 // Local sparse methods for converting SymbolicOpSums to concrete matrices
 
 template <RealOrCplx coeff_t, Basis B>

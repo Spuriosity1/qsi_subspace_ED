@@ -11,8 +11,8 @@ From the root directory:
 ```bash
 git clone https://github.com/Spuriosity1/qsi_subspace_ED.git
 cd qsi_subspace_ED
-meson setup build
-ninja -C build
+meson setup build --prefix `pwd` # or your choice of install location
+ninja -C build install
 ninja -C build test # optional
 ```
 
