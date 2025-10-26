@@ -93,8 +93,8 @@ int main(int argc, char* argv[]){
     
     auto [ringL, ringR, sl_list]  = get_ring_ops(jdata);
     std::vector<double> gv {1.0, -0.2, -0.2, -0.2};
-    std::vector<int> indices{1,2,45,46,47};
-    for (auto idx : indices){
+    // std::vector<int> indices{1,2,45,46,47};
+    for (size_t idx=0; idx<sl_list.size(); idx++){
         auto R = ringR[idx];
         auto L = ringL[idx];
 
