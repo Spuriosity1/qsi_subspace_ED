@@ -11,6 +11,16 @@ template<> inline MPI_Datatype get_mpi_type<double>() { return MPI_DOUBLE; }
 template<> inline MPI_Datatype get_mpi_type<float>() { return MPI_FLOAT; }
 template<> inline MPI_Datatype get_mpi_type<std::complex<double>>() { return MPI_C_DOUBLE_COMPLEX; }
 template<> inline MPI_Datatype get_mpi_type<std::complex<float>>() { return MPI_C_FLOAT_COMPLEX; }
+template<> inline MPI_Datatype get_mpi_type<Uint128>() {
+//inline MPI_Datatype get_mpi_type_uint128() {
+    static MPI_Datatype dtype = MPI_DATATYPE_NULL;
+    if (dtype == MPI_DATATYPE_NULL) {
+        MPI_Type_contiguous(2, MPI_UNSIGNED_LONG_LONG, &dtype);
+        MPI_Type_commit(&dtype);
+    }
+    return dtype;
+}
+
 
 struct MPIContext {
     MPIContext(){
@@ -73,16 +83,6 @@ struct MPI_ZBasisBST : public ZBasisBST
 };
 
 
-inline MPI_Datatype get_mpi_type_uint128() {
-    static MPI_Datatype dtype = MPI_DATATYPE_NULL;
-    if (dtype == MPI_DATATYPE_NULL) {
-        MPI_Type_contiguous(2, MPI_UNSIGNED_LONG_LONG, &dtype);
-        MPI_Type_commit(&dtype);
-    }
-    return dtype;
-}
-
-
 template<RealOrCplx coeff_t, Basis B>
 struct MPILazyOpSum {
     using Scalar = coeff_t;
@@ -104,15 +104,19 @@ struct MPILazyOpSum {
 
     // Does y += A*x, where y[i] and x[i] are both indexed from the start of the local block
 	void evaluate_add(const coeff_t* x, coeff_t* y) const; 
+
 protected:
+    // public for debugging only
     void evaluate_add_diagonal(const coeff_t* x, coeff_t* y) const;
-    void evaluate_add_off_diag(const coeff_t* x, coeff_t* y) const;
+    void evaluate_add_off_diag_sync(const coeff_t* x, coeff_t* y) const;
+    void evaluate_add_off_diag_pipeline(const coeff_t* x, coeff_t* y) const;
 
 
     MPIContext& ctx;
 	const B& basis;
 	const SymbolicOpSum<coeff_t> ops;
 private:
+    static constexpr double APPLY_TOL=1e-15;
 
     void inplace_bucket_sort(std::vector<ZBasisBase::state_t>& states,
         std::vector<coeff_t>& c,
@@ -128,7 +132,7 @@ private:
 template <RealOrCplx coeff_t, Basis basis_t>
 void MPILazyOpSum<coeff_t, basis_t>::evaluate_add(const coeff_t* x, coeff_t* y) const {
     evaluate_add_diagonal(x, y);
-    evaluate_add_off_diag(x, y);
+    evaluate_add_off_diag_sync(x, y);
 }
 
 

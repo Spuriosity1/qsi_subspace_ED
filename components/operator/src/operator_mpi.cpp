@@ -4,7 +4,7 @@
 #include "timeit.hpp"
 
 #ifndef NDEBUG
-#define ASSERT_STATE_FOUND(result, state, error_msg) \
+#define ASSERT_STATE_FOUND(error_msg, state, result) \
     do { \
         if (result == 0) { \
             std::cerr << "State not found on node " << ctx.my_rank << ": "; \
@@ -16,7 +16,7 @@
         } \
     } while(0)
 #else
-#define ASSERT_STATE_FOUND(result, error_msg) result
+#define ASSERT_STATE_FOUND(error_msg, state, result) result
 #endif
 
 
@@ -295,19 +295,16 @@ void MPILazyOpSum<coeff_t, B>::evaluate_add_diagonal(const coeff_t* x, coeff_t* 
 
 
 template <RealOrCplx coeff_t, Basis B>
-void MPILazyOpSum<coeff_t, B>::evaluate_add_off_diag(const coeff_t* x, coeff_t* y) const {
+void MPILazyOpSum<coeff_t, B>::evaluate_add_off_diag_sync(const coeff_t* x, coeff_t* y) const {
      // For each off-diagonal term do:
     // 1) produce per-destination vectors of (state,dy)
-    // 2) perform Alltoall of counts -> get recv counts
-    // 3) Alltoallv exchange (we pack state as two uint64_t halves)
+    // These are generally directed only to one or two nodes, so Alltoallv is inefficient.
+    // 2) Exchange metadata. Synchronously communicate i) which nodes I will be receiving and ii) how much data to expect. Allocate send and receive buffers.
+    // 3) Send and receive state-coeff pairs.
     // 4) on receive side, binary-search local basis block to find local index and add to y.
     //
     // Notes & assumptions:
     // - basis[i] for i in [0, block_size) returns the local state's sorted values.
-    // - local basis block is sorted (so lower_bound works).
-    // - We serialize state_t as two uint64_t halves for transport. If your state_t is 64-bit,
-    //   you can simplify by sending a single uint64_t.
-    // - coeff_t must map to an MPI type via get_mpi_type<coeff_t>().
     //
     //
     const int world_size = static_cast<int>(ctx.world_size);
@@ -315,7 +312,9 @@ void MPILazyOpSum<coeff_t, B>::evaluate_add_off_diag(const coeff_t* x, coeff_t* 
 
     size_t debug_count =0;
     for (const auto& term : ops.off_diag_terms) {
-//        std::cout << "[AOD] Operator "<<debug_count++<<"\n";
+#ifdef DEBUG
+        std::cout << "[AOD] Operator "<<debug_count++<<"\n";
+#endif
 
         const auto& c = term.first;
         const auto& op = term.second;
@@ -335,7 +334,7 @@ void MPILazyOpSum<coeff_t, B>::evaluate_add_off_diag(const coeff_t* x, coeff_t* 
         for (ZBasisBase::idx_t il=0; il<local_block; ++il){
             ZBasisBase::state_t state = basis[il];
             auto sign = op.applyState(state); // "state" is new now
-            if (sign == 0) continue;
+            if (sign == 0 || abs(x[il]) < APPLY_TOL) continue;
 
             auto target_rank = ctx.node_of_state(state);
             send_dy[target_rank].push_back( c * x[il] * sign);
@@ -351,6 +350,7 @@ void MPILazyOpSum<coeff_t, B>::evaluate_add_off_diag(const coeff_t* x, coeff_t* 
             }
         }
         // Begin farming data out to others.
+        BENCH_TIMEIT("[EAOD] Metadata exchange",
         // Flirtation phase: let other ranks know I will be bothering them
         int num_targets = send_targets.size();
         std::vector<int> all_num_targets(world_size);
@@ -382,7 +382,9 @@ void MPILazyOpSum<coeff_t, B>::evaluate_add_off_diag(const coeff_t* x, coeff_t* 
                 }
             }
         }
+        )
 
+        BENCH_TIMEIT("[EAOD] p2p data sharing",
         // Post receives from all sources
         std::vector<MPI_Request> requests;
         std::vector<std::vector<ZBasisBase::state_t>> recv_states_bufs(recv_sources.size());
@@ -401,7 +403,7 @@ void MPILazyOpSum<coeff_t, B>::evaluate_add_off_diag(const coeff_t* x, coeff_t* 
             
             // Post non-blocking receives
             requests.push_back(MPI_Request{});
-            MPI_Irecv(recv_states_bufs[i].data(), recv_count, get_mpi_type_uint128(),
+            MPI_Irecv(recv_states_bufs[i].data(), recv_count, get_mpi_type<ZBasisBase::state_t>(),
                      source, 1, MPI_COMM_WORLD, &requests.back());
             
             requests.push_back(MPI_Request{});
@@ -418,13 +420,14 @@ void MPILazyOpSum<coeff_t, B>::evaluate_add_off_diag(const coeff_t* x, coeff_t* 
             
             // Non-blocking sends for data
             requests.push_back(MPI_Request{});
-            MPI_Isend(send_states[target].data(), send_count, get_mpi_type_uint128(),
+            MPI_Isend(send_states[target].data(), send_count, get_mpi_type<ZBasisBase::state_t>(),
                      target, 1, MPI_COMM_WORLD, &requests.back());
             
             requests.push_back(MPI_Request{});
             MPI_Isend(send_dy[target].data(), send_count, get_mpi_type<coeff_t>(),
                      target, 2, MPI_COMM_WORLD, &requests.back());
         }
+        )
 
         // update the local stuff first
         {
@@ -435,25 +438,29 @@ void MPILazyOpSum<coeff_t, B>::evaluate_add_off_diag(const coeff_t* x, coeff_t* 
 
             for (int i = 0; i < local_states.size(); ++i) {
                 ZBasisBase::idx_t local_idx;
-                ASSERT_STATE_FOUND(basis.search(local_states[i], local_idx), 
-                        local_states[i], "self");
+                ASSERT_STATE_FOUND("self", local_states[i],
+                basis.search(local_states[i], local_idx)
+                );
                 y[local_idx] += local_dy[i];
             }
             )
         }
 
+        BENCH_TIMEIT("[EAOD] idling for p2p sharing",
         // Wait for all communication to complete
         if (!requests.empty()) {
             MPI_Waitall(requests.size(), requests.data(), MPI_STATUS_IGNORE);
         }
+        )
 
          // Process received updates
         BENCH_TIMEIT("[EAOD] received updates",
         for (size_t i = 0; i < recv_sources.size(); ++i) {
             for (size_t j = 0; j < recv_states_bufs[i].size(); ++j) {
                 ZBasisBase::idx_t local_idx;
-                ASSERT_STATE_FOUND(basis.search( recv_states_bufs[i][j], local_idx),
-                        recv_states_bufs[i][j], "remote");
+                ASSERT_STATE_FOUND("remote", recv_states_bufs[i][j], 
+                basis.search( recv_states_bufs[i][j], local_idx)
+                );
                 y[local_idx] += recv_dy_bufs[i][j];
             }
         }
@@ -462,6 +469,227 @@ void MPILazyOpSum<coeff_t, B>::evaluate_add_off_diag(const coeff_t* x, coeff_t* 
     } // end external for loop
 }
 
+
+template <RealOrCplx coeff_t, Basis B>
+void MPILazyOpSum<coeff_t, B>::evaluate_add_off_diag_pipeline(const coeff_t* x, coeff_t* y) const {
+    // State for pipelined communication
+    struct OperatorCommState {
+        std::vector<MPI_Request> requests;
+        std::vector<std::vector<ZBasisBase::state_t>> recv_states_bufs;
+        std::vector<std::vector<coeff_t>> recv_dy_bufs;
+        std::vector<int> recv_sources;
+        MPI_Request count_exchange_req;
+        std::vector<int> recvcounts;
+        bool count_exchange_done = false;
+    };
+
+    OperatorCommState prev_op_comm;
+    bool has_prev_op = false;
+
+    int op_index = 0;
+    for ( const auto& [c, op] : ops.off_diag_terms ){
+
+         // Organize sends by destination rank
+        std::vector<std::vector<coeff_t>> send_dy(ctx.world_size); 
+        std::vector<std::vector<ZBasisBase::state_t>> send_states(ctx.world_size);
+
+        BENCH_TIMEIT("[EAOD] local apply",
+        for (ZBasisBase::idx_t il = 0; il < ctx.local_block_size(); ++il) {
+            ZBasisBase::state_t state = basis[il];
+            auto sign = op.applyState(state);
+            if (sign == 0) continue;
+            
+            auto target_rank = ctx.node_of_state(state);
+            send_dy[target_rank].push_back(c * x[il] * sign);
+            send_states[target_rank].push_back(state);
+        }
+        )
+
+
+        // Tell all other nodes how many entries I will send
+        // begin non-blocking metadata exchange for CURRENT operator
+        OperatorCommState curr_op_comm;
+        BENCH_TIMEIT("[EAOD][mpi] Begin count exchange",
+            std::vector<int> sendcounts(ctx.world_size, 0);
+            for (int r = 0; r < ctx.world_size; ++r) {
+                sendcounts[r] = send_states[r].size();
+            }
+
+            curr_op_comm.recvcounts.resize(ctx.world_size);
+            MPI_Ialltoall(sendcounts.data(), 1, MPI_INT,
+                         curr_op_comm.recvcounts.data(), 1, MPI_INT,
+                         MPI_COMM_WORLD, &curr_op_comm.count_exchange_req);
+        )
+
+        // Process local updates immediately
+        BENCH_TIMEIT("[EAOD] local updates",
+            for (size_t i = 0; i < send_states[ctx.my_rank].size(); ++i) {
+                ZBasisBase::idx_t local_idx;
+                ASSERT_STATE_FOUND("self", send_states[ctx.my_rank][i],
+                        basis.search(send_states[ctx.my_rank][i], local_idx)
+                        );
+                y[local_idx] += send_dy[ctx.my_rank][i];
+            }
+        )
+
+
+        // === PROCESS PREVIOUS OPERATOR'S RECEIVES ===
+        if (has_prev_op) {
+            BENCH_TIMEIT("[EAOD][mpi] wait prev count exchange",
+            // Wait for previous operator's count exchange if not done
+            // this if statement is probably always true, it's just for safety
+            if (!prev_op_comm.count_exchange_done) { 
+                MPI_Wait(&prev_op_comm.count_exchange_req, MPI_STATUS_IGNORE);
+                prev_op_comm.count_exchange_done = true;
+            }
+            )
+            
+            BENCH_TIMEIT("[EAOD][mpi] post prev receives",
+            // Now we know who will send to us for previous operator
+            // recvcounts is now populated and readable
+            for (int source = 0; source < ctx.world_size; ++source) {
+                if (source == ctx.my_rank || prev_op_comm.recvcounts[source] == 0) continue;
+                
+                // allocate space to store the received data
+                prev_op_comm.recv_sources.push_back(source);
+                prev_op_comm.recv_states_bufs.emplace_back(prev_op_comm.recvcounts[source]);
+                prev_op_comm.recv_dy_bufs.emplace_back(prev_op_comm.recvcounts[source]);
+                
+                size_t idx = prev_op_comm.recv_states_bufs.size() - 1;
+                // we just added a new row to the buffer, this is its index
+                prev_op_comm.requests.push_back(MPI_Request{});
+                MPI_Irecv(prev_op_comm.recv_states_bufs[idx].data(), 
+                         prev_op_comm.recvcounts[source], get_mpi_type<ZBasisBase::state_t>(),
+                         source, 10*(op_index-1) +1, MPI_COMM_WORLD, &prev_op_comm.requests.back());
+                
+                prev_op_comm.requests.push_back(MPI_Request{});
+                MPI_Irecv(prev_op_comm.recv_dy_bufs[idx].data(),
+                         prev_op_comm.recvcounts[source], get_mpi_type<coeff_t>(),
+                         source, 10*(op_index-1) +2, MPI_COMM_WORLD, &prev_op_comm.requests.back());
+            }
+            )
+            
+            BENCH_TIMEIT("[EAOD][mpi] wait prev comm",
+            // Wait for previous operator's communication to complete
+            if (!prev_op_comm.requests.empty()) {
+                MPI_Waitall(prev_op_comm.requests.size(), prev_op_comm.requests.data(), 
+                           MPI_STATUSES_IGNORE);
+            }
+            )
+            
+            BENCH_TIMEIT("[EAOD] process prev receives",
+            // Process previous operator's received updates
+            for (size_t i = 0; i < prev_op_comm.recv_sources.size(); ++i) {
+                for (size_t j = 0; j < prev_op_comm.recv_states_bufs[i].size(); ++j) {
+                    ZBasisBase::idx_t local_idx;
+                    ASSERT_STATE_FOUND("remote", prev_op_comm.recv_states_bufs[i][j], 
+                            basis.search( prev_op_comm.recv_states_bufs[i][j], local_idx)
+                    );
+
+                    y[local_idx] += prev_op_comm.recv_dy_bufs[i][j];
+                }
+            }
+            )
+        }
+
+
+        // === DATA SENDS FOR CURRENT OPERATOR ===
+        BENCH_TIMEIT("[EAOD] wait curr count exchange",
+        // Wait for current operator's count exchange to complete
+        MPI_Wait(&curr_op_comm.count_exchange_req, MPI_STATUS_IGNORE);
+        curr_op_comm.count_exchange_done = true;
+        )
+
+        BENCH_TIMEIT("[EAOD] initiate curr sends",
+        // Begin sending to all non-empty, non-self targets
+        for (int target_rank=0; target_rank<ctx.world_size; target_rank++){
+            if (target_rank == ctx.my_rank || send_dy[target_rank].size() == 0) continue;
+
+            curr_op_comm.requests.push_back(MPI_Request{});
+            MPI_Isend(
+                    send_states[target_rank].data(), send_states[target_rank].size(), get_mpi_type<ZBasisBase::state_t>(),
+                    target_rank, 10*op_index + 1, MPI_COMM_WORLD,
+                    &curr_op_comm.requests.back());
+
+            curr_op_comm.requests.push_back(MPI_Request{});
+            MPI_Isend(
+                    send_dy[target_rank].data(), send_dy[target_rank].size(), get_mpi_type<coeff_t>(),
+                    target_rank, 10*op_index + 2, MPI_COMM_WORLD,
+                    &curr_op_comm.requests.back());
+
+        }
+        )
+
+        // get ready for next iteration
+        prev_op_comm = std::move(curr_op_comm);
+        has_prev_op = true;
+        op_index++;
+
+   } // end operator loop
+
+
+    // === PROCESS FINAL OPERATOR'S RECEIVES ===
+    if (has_prev_op) {
+        BENCH_TIMEIT("[EAOD][mpi] wait final count exchange",
+        // Wait for previous operator's count exchange if not done
+        // this if statement is probably always true, it's just for safety
+        if (!prev_op_comm.count_exchange_done) { 
+            MPI_Wait(&prev_op_comm.count_exchange_req, MPI_STATUS_IGNORE);
+            prev_op_comm.count_exchange_done = true;
+        }
+        )
+        
+        BENCH_TIMEIT("[EAOD][mpi] post final receives",
+        // Now we know who will send to us for previous operator
+        // recvcounts is now populated and readable
+        for (int source = 0; source < ctx.world_size; ++source) {
+            if (source == ctx.my_rank || prev_op_comm.recvcounts[source] == 0) continue;
+            
+            // allocate space to store the received data
+            prev_op_comm.recv_sources.push_back(source);
+            prev_op_comm.recv_states_bufs.emplace_back(prev_op_comm.recvcounts[source]);
+            prev_op_comm.recv_dy_bufs.emplace_back(prev_op_comm.recvcounts[source]);
+            
+            size_t idx = prev_op_comm.recv_states_bufs.size() - 1;
+            // we just added a new row to the buffer, this is its index
+            prev_op_comm.requests.push_back(MPI_Request{});
+            MPI_Irecv(prev_op_comm.recv_states_bufs[idx].data(), 
+                     prev_op_comm.recvcounts[source], get_mpi_type<ZBasisBase::state_t>(),
+                     source, 10*(op_index-1) + 1, MPI_COMM_WORLD, &prev_op_comm.requests.back());
+            
+            prev_op_comm.requests.push_back(MPI_Request{});
+            MPI_Irecv(prev_op_comm.recv_dy_bufs[idx].data(),
+                     prev_op_comm.recvcounts[source], get_mpi_type<coeff_t>(),
+                     source, 10*(op_index-1) + 2, MPI_COMM_WORLD, &prev_op_comm.requests.back());
+        }
+        )
+        
+        BENCH_TIMEIT("[EAOD][mpi] wait final comm",
+        // Wait for previous operator's communication to complete
+        if (!prev_op_comm.requests.empty()) {
+            MPI_Waitall(prev_op_comm.requests.size(), prev_op_comm.requests.data(), 
+                       MPI_STATUSES_IGNORE);
+        }
+        )
+        
+        BENCH_TIMEIT("[EAOD] process final receives",
+        // Process previous operator's received updates
+        for (size_t i = 0; i < prev_op_comm.recv_sources.size(); ++i) {
+            for (size_t j = 0; j < prev_op_comm.recv_states_bufs[i].size(); ++j) {
+                ZBasisBase::idx_t local_idx;
+                ASSERT_STATE_FOUND("remote", prev_op_comm.recv_states_bufs[i][j], 
+                        basis.search( prev_op_comm.recv_states_bufs[i][j], local_idx)
+                );
+
+                y[local_idx] += prev_op_comm.recv_dy_bufs[i][j];
+            }
+        }
+        )
+    }
+
+
+
+}
 
 
 

@@ -224,11 +224,11 @@ struct SymbolicPMROperator {
     template<Basis BasisType>
     int applyIndex(const BasisType& basis, ZBasisBase::idx_t& J) const {
 		ZBasisBase::state_t state = basis[J];
-
 		int _sign = applyState(state);
-
-        int res = basis.search(state, J);
-        return _sign * res; // *0 in case of miss
+        if (_sign != 0){
+             _sign *= basis.search(state, J);
+        }
+        return _sign; // 0 in case of miss
     }
 	
 	ZBasisBase::idx_t highest_set_bit() const {

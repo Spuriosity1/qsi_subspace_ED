@@ -4,49 +4,58 @@
 // performs y <- Ax + y
 template <RealOrCplx coeff_t, Basis B>
 void LazyOpSum<coeff_t, B>::evaluate_add_off_diag(const coeff_t* x, coeff_t* y) const {
+    
+    ZBasisBase::idx_t J;
+    ZBasisBase::state_t state;
+
+    for (const auto& [c, op] : ops.off_diag_terms) {
+        
+        for (ZBasisBase::idx_t i = 0; i < basis.dim(); ++i) {
+            state = basis[i];
+            int sign = op.applyState(state);
+            if ( sign != 0 && abs(x[i]) > APPLY_TOL ){
+                sign *= basis.search(state, J);
+                y[J] +=  c * x[i] * sign;
+            }
+        }
+        
+    }
+}
+
+
+// performs y <- Ax + y
+// accelerated with openMPI
+template <RealOrCplx coeff_t, Basis B>
+void LazyOpSum<coeff_t, B>::evaluate_add_off_diag_omp(const coeff_t* x, coeff_t* y) const {
     static const size_t CHUNK_SIZE = 10000;
+
 
     for (const auto& term : ops.off_diag_terms) {
         const auto& c = term.first;   // Extract before parallel region
         const auto& op = term.second;
-        
-//        std::vector<std::vector<std::pair<ZBasisBase::idx_t, coeff_t>>> thread_updates(omp_get_max_threads());
-        #pragma omp parallel
-        {
-//            std::vector<std::pair<ZBasisBase::idx_t, coeff_t>> local_updates;
-//            local_updates.reserve(CHUNK_SIZE);
 
-            #pragma omp for schedule(static) nowait
-            for (ZBasisBase::idx_t i = 0; i < basis.dim(); ++i) {
-                ZBasisBase::idx_t J = i;
-                auto sign = op.applyIndex(basis, J);
-//                local_updates.emplace_back(J, dy);
-                double dy = c * x[i] * static_cast<double>(sign);
-                if (sign != 0) {
-                    #pragma omp atomic
-                    y[J] += dy;
-                }
 
-                // Flush when chunk is full
-//                if (local_updates.size() >= CHUNK_SIZE) {
-//                    #pragma omp critical
-//                    {
-//                        for (const auto& [idx, val] : local_updates) {
-//                            y[idx] += val;
-//                        }
-//                    }
-//                    local_updates.clear();
-//                }
+#pragma omp parallel
+    {
+        ZBasisBase::idx_t J;
+        ZBasisBase::state_t state;
+        double dy;
+
+#pragma omp for schedule(static)
+        for (ZBasisBase::idx_t i = 0; i < basis.dim(); ++i) {
+            state = basis[i];
+            int sign = op.applyState(state);
+            if (sign != 0 && abs(x[i]) > APPLY_TOL ){
+                sign *= basis.search(state, J);
+                dy = c * x[i] * sign;
+                 
+                #pragma omp atomic
+                y[J] += dy;
             }
-//            
-//            // flush remaining updates
-//            #pragma omp critical
-//            {
-//                for (const auto& [idx, val] : local_updates) {
-//                    y[idx] += val;
-//                }
-//            }       
         }
+
+    } // end parallel region
+        
     }
 }
 
@@ -98,7 +107,7 @@ __global__ void evaluate_add_off_diag_kernel(
 
 template <RealOrCplx coeff_t, Basis basis_t>
 void LazyOpSum<coeff_t, basis_t>::evaluate_add(const coeff_t* x, coeff_t* y) const {
-    evaluate_add_off_diag(x, y);
+    evaluate_add_off_diag_omp(x, y);
     evaluate_add_diagonal(x, y);
 }
 

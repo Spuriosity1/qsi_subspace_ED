@@ -107,6 +107,9 @@ struct LazyOpSum {
 protected:
     void evaluate_add_diagonal(const coeff_t* x, coeff_t* y) const;
     void evaluate_add_off_diag(const coeff_t* x, coeff_t* y) const;
+    void evaluate_add_off_diag_omp(const coeff_t* x, coeff_t* y) const;
+
+    static constexpr coeff_t APPLY_TOL=1e-15;
 
 	// coeff_t* tmp; // temp storage
 	const B& basis;
