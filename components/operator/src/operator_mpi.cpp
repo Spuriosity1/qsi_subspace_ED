@@ -15,10 +15,21 @@
             throw std::logic_error("Bad local_idx in " error_msg); \
         } \
     } while(0)
+
 #else
 #define ASSERT_STATE_FOUND(error_msg, state, result) result
 #endif
 
+#ifdef DEBUG
+#define DEBUG_PRINT_VEC(msg, op_index, vector, ctx) \
+            std::cout << msg<<" (op "<<op_index<<") [node "<<ctx.my_rank<< "]\n";\
+            for (int r=0; r<ctx.world_size; r++){\
+                if (r == ctx.my_rank) std::cout<<"*";\
+                std::cout << "\tvector["<<r<<"] -> "<<curr_op_comm.send_states[r].size() <<"\n";\
+            }
+#else
+#define DEBUG_PRINT_VEC(msg, op_index, vector, ctx)
+#endif
 
 // reads only the local basis into memory
 inline std::vector<Uint128> read_basis_hdf5(
@@ -516,12 +527,11 @@ void MPILazyOpSum<coeff_t, B>::evaluate_add_off_diag_pipeline(const coeff_t* x, 
         BENCH_TIMEIT("[EAOD][mpi] Begin count exchange",
             std::vector<int> sendcounts(ctx.world_size, 0);
 
-            std::cout << "<< (op "<<op_index<<") [node "<<ctx.my_rank<< "]\n";
             for (int r = 0; r < ctx.world_size; ++r) {
                 sendcounts[r] = curr_op_comm.send_states[r].size();
-                if (r == ctx.my_rank) std::cout<<"*";
-                std::cout << "\tsend_data["<<r<<"] -> "<<curr_op_comm.send_states[r].size() <<"\n";
             }
+
+            DEBUG_PRINT_VEC("<< send ", op_index, sendcounts, ctx)
 
             curr_op_comm.recvcounts.resize(ctx.world_size);
             MPI_Ialltoall(sendcounts.data(), 1, MPI_INT,
@@ -552,12 +562,7 @@ void MPILazyOpSum<coeff_t, B>::evaluate_add_off_diag_pipeline(const coeff_t* x, 
             }
             )
 
-
-            std::cout << ">> (op "<<op_index-1<<") [rank "<<ctx.my_rank<<"]\n";
-            for (int r = 0; r < ctx.world_size; ++r) {
-                if (r == ctx.my_rank) std::cout<<"*";
-                std::cout << "\trecvcount["<<r<<"] -> "<< prev_op_comm.recvcounts[r] <<"\n";
-            }
+            DEBUG_PRINT_VEC(">> recv ", op_index-1, prev_op_comm.recvcounts, ctx)
             
             BENCH_TIMEIT("[EAOD][mpi] post prev receives",
             // Now we know who will send to us for previous operator
@@ -654,6 +659,8 @@ void MPILazyOpSum<coeff_t, B>::evaluate_add_off_diag_pipeline(const coeff_t* x, 
             prev_op_comm.count_exchange_done = true;
         }
         )
+
+        DEBUG_PRINT_VEC(">> recv final ", op_index-1, prev_op_comm.recvcounts, ctx)
         
         BENCH_TIMEIT("[EAOD][mpi] post final receives",
         // Now we know who will send to us for previous operator
