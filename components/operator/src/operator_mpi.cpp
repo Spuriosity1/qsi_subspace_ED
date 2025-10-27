@@ -321,10 +321,10 @@ void MPILazyOpSum<coeff_t, B>::evaluate_add_off_diag_sync(const coeff_t* x, coef
     const int world_size = static_cast<int>(ctx.world_size);
 
 
-    size_t debug_count =0;
+    size_t op_index =0;
     for (const auto& term : ops.off_diag_terms) {
 #ifdef DEBUG
-        std::cout << "[AOD] Operator "<<debug_count++<<"\n";
+        std::cout << "[AOD sync] Operator "<<op_index<<"\n";
 #endif
 
         const auto& c = term.first;
@@ -406,7 +406,7 @@ void MPILazyOpSum<coeff_t, B>::evaluate_add_off_diag_sync(const coeff_t* x, coef
             int recv_count;
             
             // Receive size (blocking for simplicity)
-            MPI_Recv(&recv_count, 1, MPI_INT, source, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+            MPI_Recv(&recv_count, 10*op_index + 0, MPI_INT, source, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
             
             // Allocate buffers
             recv_states_bufs[i].resize(recv_count);
@@ -415,11 +415,11 @@ void MPILazyOpSum<coeff_t, B>::evaluate_add_off_diag_sync(const coeff_t* x, coef
             // Post non-blocking receives
             requests.push_back(MPI_Request{});
             MPI_Irecv(recv_states_bufs[i].data(), recv_count, get_mpi_type<ZBasisBase::state_t>(),
-                     source, 1, MPI_COMM_WORLD, &requests.back());
+                     source, 10*op_index + 1, MPI_COMM_WORLD, &requests.back());
             
             requests.push_back(MPI_Request{});
             MPI_Irecv(recv_dy_bufs[i].data(), recv_count, get_mpi_type<coeff_t>(),
-                     source, 2, MPI_COMM_WORLD, &requests.back());
+                     source, 10*op_index + 2, MPI_COMM_WORLD, &requests.back());
         }
         
         // Send to all targets
@@ -427,16 +427,16 @@ void MPILazyOpSum<coeff_t, B>::evaluate_add_off_diag_sync(const coeff_t* x, coef
             int send_count = send_states[target].size();
             
             // Send size (blocking is fine)
-            MPI_Send(&send_count, 1, MPI_INT, target, 0, MPI_COMM_WORLD);
+            MPI_Send(&send_count, 10*op_index + 0, MPI_INT, target, 0, MPI_COMM_WORLD);
             
             // Non-blocking sends for data
             requests.push_back(MPI_Request{});
             MPI_Isend(send_states[target].data(), send_count, get_mpi_type<ZBasisBase::state_t>(),
-                     target, 1, MPI_COMM_WORLD, &requests.back());
+                     target, 10*op_index + 1, MPI_COMM_WORLD, &requests.back());
             
             requests.push_back(MPI_Request{});
             MPI_Isend(send_dy[target].data(), send_count, get_mpi_type<coeff_t>(),
-                     target, 2, MPI_COMM_WORLD, &requests.back());
+                     target, 10*op_index + 2, MPI_COMM_WORLD, &requests.back());
         }
         )
 
@@ -476,7 +476,7 @@ void MPILazyOpSum<coeff_t, B>::evaluate_add_off_diag_sync(const coeff_t* x, coef
             }
         }
         )
-    
+    op_index++;
     } // end external for loop
 }
 
