@@ -261,25 +261,6 @@ void MPILazyOpSum<coeff_t, B>::inplace_bucket_sort(std::vector<ZBasisBase::state
      states = std::move(_scratch_states);
      c = std::move(_scratch_coeff);
 
-//    std::vector<bool> visited(n, false);
-
-//    for (size_t i = 0; i < n; ++i) {
-//        if (visited[i]) continue;
-//
-//        size_t current = i;
-//        Uint128 temp_state = states[current];
-//        coeff_t temp_c = c[current];
-//
-//        while (!visited[current]) {
-//            visited[current] = true;
-//            int target_bucket = ctx.node_of_state(temp_state);
-//            size_t target_index = bucket_next[target_bucket]++;
-//            
-//            std::swap(temp_state, states[target_index]);
-//            std::swap(temp_c, c[target_index]);
-//            current = target_index;
-//        }
-//    }
 }
 
 
@@ -304,7 +285,7 @@ void MPILazyOpSum<coeff_t, B>::evaluate_add_diagonal(const coeff_t* x, coeff_t* 
 }
 
 
-
+/* BROKEN on tcm-sc1, probably a problem with operator ID collisions
 template <RealOrCplx coeff_t, Basis B>
 void MPILazyOpSum<coeff_t, B>::evaluate_add_off_diag_sync(const coeff_t* x, coeff_t* y) const {
      // For each off-diagonal term do:
@@ -479,184 +460,7 @@ void MPILazyOpSum<coeff_t, B>::evaluate_add_off_diag_sync(const coeff_t* x, coef
     
     } // end external for loop
 }
-
-/*
-template <RealOrCplx coeff_t, Basis B>
-void MPILazyOpSum<coeff_t, B>::evaluate_add_off_diag_sync(const coeff_t* x, coeff_t* y) const {
-     // For each off-diagonal term do:
-    // 1) produce per-destination vectors of (state,dy)
-    // These are generally directed only to one or two nodes, so Alltoallv is inefficient.
-    // 2) Exchange metadata. Synchronously communicate i) which nodes I will be receiving and ii) how much data to expect. Allocate send and receive buffers.
-    // 3) Send and receive state-coeff pairs.
-    // 4) on receive side, binary-search local basis block to find local index and add to y.
-    //
-    // Notes & assumptions:
-    // - basis[i] for i in [0, block_size) returns the local state's sorted values.
-    //
-    //
-    const int world_size = static_cast<int>(ctx.world_size);
-
-
-    size_t op_index =0;
-    for (const auto& term : ops.off_diag_terms) {
-#ifdef DEBUG
-        std::cout << "[AOD sync] Operator "<<op_index<<"\n";
-#endif
-
-        const auto& c = term.first;
-        const auto& op = term.second;
-
-        const ZBasisBase::idx_t local_block = ctx.local_block_size();
-
-        std::vector<std::vector<coeff_t>> send_dy(ctx.world_size); 
-        std::vector<std::vector<ZBasisBase::state_t>> send_states(ctx.world_size);
-
-        // receivers
-        std::vector<coeff_t> recv_dy;
-        std::vector<ZBasisBase::state_t> recv_states;
-
-
-        BENCH_TIMEIT("[EAOD] local apply",
-        // Apply to all local basis states and store non-vanishing entries
-        for (ZBasisBase::idx_t il=0; il<local_block; ++il){
-            ZBasisBase::state_t state = basis[il];
-            auto sign = op.applyState(state); // "state" is new now
-            if (sign == 0 || abs(x[il]) < APPLY_TOL) continue;
-
-            auto target_rank = ctx.rank_of_state(state);
-            send_dy[target_rank].push_back( c * x[il] * sign);
-            send_states[target_rank].push_back(state);
-        }
-        )
-
-        // collect non-self and non-empty ranks
-        std::vector<int> send_targets;
-        for (int i=0; i<ctx.world_size; i++){
-            if ((i != ctx.my_rank) && (!send_states[i].empty())){
-                send_targets.push_back(i);
-            }
-        }
-        // Begin farming data out to others.
-        BENCH_TIMEIT("[EAOD] Metadata exchange",
-        // Flirtation phase: let other ranks know I will be bothering them
-        int num_targets = send_targets.size();
-        std::vector<int> all_num_targets(world_size);
-        MPI_Allgather(&num_targets, 1, MPI_INT,
-                      all_num_targets.data(), 1, MPI_INT,
-                      MPI_COMM_WORLD);
-        // all_num_targets is the globally shared number of targets on each node
-
-        // displacements for the received target data
-        std::vector<int> recv_displs(world_size + 1, 0);
-        for (int r = 0; r < world_size; ++r) {
-            recv_displs[r + 1] = recv_displs[r] + all_num_targets[r];
-        }
-
-        std::vector<int> all_targets(recv_displs[world_size]);
-        MPI_Allgatherv(send_targets.data(), num_targets, MPI_INT,
-                       all_targets.data(), all_num_targets.data(),
-                       recv_displs.data(), MPI_INT,
-                       MPI_COMM_WORLD);
-        
-        // Find who will send to me
-        std::vector<int> recv_sources;
-        for (int r = 0; r < world_size; ++r) {
-            if (r == ctx.my_rank) continue;
-            for (int i = recv_displs[r]; i < recv_displs[r + 1]; ++i) {
-                if (all_targets[i] == ctx.my_rank) {
-                    recv_sources.push_back(r);
-                    break;
-                }
-            }
-        }
-        )
-
-        BENCH_TIMEIT("[EAOD] p2p data sharing",
-        // Post receives from all sources
-        std::vector<MPI_Request> requests;
-        std::vector<std::vector<ZBasisBase::state_t>> recv_states_bufs(recv_sources.size());
-        std::vector<std::vector<coeff_t>> recv_dy_bufs(recv_sources.size());
-        
-        for (size_t i = 0; i < recv_sources.size(); ++i) {
-            int source = recv_sources[i];
-            int recv_count;
-            
-            // Receive size (blocking for simplicity)
-            MPI_Recv(&recv_count, 10*op_index + 0, MPI_INT, source, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-            
-            // Allocate buffers
-            recv_states_bufs[i].resize(recv_count);
-            recv_dy_bufs[i].resize(recv_count);
-            
-            // Post non-blocking receives
-            requests.push_back(MPI_Request{});
-            MPI_Irecv(recv_states_bufs[i].data(), recv_count, get_mpi_type<ZBasisBase::state_t>(),
-                     source, 10*op_index + 1, MPI_COMM_WORLD, &requests.back());
-            
-            requests.push_back(MPI_Request{});
-            MPI_Irecv(recv_dy_bufs[i].data(), recv_count, get_mpi_type<coeff_t>(),
-                     source, 10*op_index + 2, MPI_COMM_WORLD, &requests.back());
-        }
-        
-        // Send to all targets
-        for (int target : send_targets) {
-            int send_count = send_states[target].size();
-            
-            // Send size (blocking is fine)
-            MPI_Send(&send_count, 10*op_index + 0, MPI_INT, target, 0, MPI_COMM_WORLD);
-            
-            // Non-blocking sends for data
-            requests.push_back(MPI_Request{});
-            MPI_Isend(send_states[target].data(), send_count, get_mpi_type<ZBasisBase::state_t>(),
-                     target, 10*op_index + 1, MPI_COMM_WORLD, &requests.back());
-            
-            requests.push_back(MPI_Request{});
-            MPI_Isend(send_dy[target].data(), send_count, get_mpi_type<coeff_t>(),
-                     target, 10*op_index + 2, MPI_COMM_WORLD, &requests.back());
-        }
-        )
-
-        // update the local stuff first
-        {
-            BENCH_TIMEIT("[EAOD] local updates",
-            // process my own data while MPI is sending the big buffers
-            const auto& local_states = send_states[ctx.my_rank];
-            const auto& local_dy = send_dy[ctx.my_rank];
-
-            for (int i = 0; i < local_states.size(); ++i) {
-                ZBasisBase::idx_t local_idx;
-                ASSERT_STATE_FOUND("self", local_states[i],
-                basis.search(local_states[i], local_idx)
-                );
-                y[local_idx] += local_dy[i];
-            }
-            )
-        }
-
-        BENCH_TIMEIT("[EAOD] idling for p2p sharing",
-        // Wait for all communication to complete
-        if (!requests.empty()) {
-            MPI_Waitall(requests.size(), requests.data(), MPI_STATUS_IGNORE);
-        }
-        )
-
-         // Process received updates
-        BENCH_TIMEIT("[EAOD] received updates",
-        for (size_t i = 0; i < recv_sources.size(); ++i) {
-            for (size_t j = 0; j < recv_states_bufs[i].size(); ++j) {
-                ZBasisBase::idx_t local_idx;
-                ASSERT_STATE_FOUND("remote", recv_states_bufs[i][j], 
-                basis.search( recv_states_bufs[i][j], local_idx)
-                );
-                y[local_idx] += recv_dy_bufs[i][j];
-            }
-        }
-        )
-    op_index++;
-    } // end external for loop
-}
 */
-
 
 template <RealOrCplx coeff_t, Basis B>
 void MPILazyOpSum<coeff_t, B>::evaluate_add_off_diag_pipeline(const coeff_t* x, coeff_t* y) const {

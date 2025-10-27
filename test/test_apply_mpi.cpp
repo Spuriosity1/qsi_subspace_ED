@@ -15,25 +15,6 @@
 using json = nlohmann::json;
 
 
-template<RealOrCplx coeff_t, Basis B>
-struct Test_MPILazyOpSum : public MPILazyOpSum<coeff_t, B> {
-    explicit Test_MPILazyOpSum(
-            const B& local_basis_, const SymbolicOpSum<coeff_t>& ops_,
-            MPIContext& context_
-            ) : MPILazyOpSum<coeff_t, B>(local_basis_, ops_, context_){};
-
-    void evaluate_add_sync(const double* x, double*y) const {
-        this->evaluate_add_diagonal(x, y);
-        this->evaluate_add_off_diag_sync(x, y);
-    }
-
-    void evaluate_add_pipe(const double* x, double*y) const {
-        this->evaluate_add_diagonal(x, y);
-        this->evaluate_add_off_diag_pipeline(x, y);
-    }
-};
-
-
 int main(int argc, char* argv[]){
     
 	argparse::ArgumentParser prog(argv[0]);
@@ -93,42 +74,41 @@ int main(int argc, char* argv[]){
     
     auto [ringL, ringR, sl_list]  = get_ring_ops(jdata);
     std::vector<double> gv {1.0, -0.2, -0.2, -0.2};
-    std::vector<int> indices{8,8};
-//    for (size_t idx=0; idx<sl_list.size(); idx++){
-    for (auto idx : indices){
+//    std::vector<int> indices{8,8};
+    for (size_t idx=0; idx<sl_list.size(); idx++){
+//    for (auto idx : indices){
         auto R = ringR[idx];
         auto L = ringL[idx];
 
         H_sym.add_term(gv[sl_list[idx]], R);
-//        H_sym.add_term(gv[sl_list[idx]], L);
+        H_sym.add_term(gv[sl_list[idx]], L);
     }
  
 
-    auto H_mpi = Test_MPILazyOpSum(basis, H_sym, ctx);
+    auto H_mpi = MPILazyOpSum(basis, H_sym, ctx);
     auto H_st = LazyOpSum(basis_st, H_sym);
 
-    std::vector<double> v_global, u_global, u1_local, u2_local;
+    std::vector<double> v_global, u_global, u1_local;
     v_global.resize(basis_st.dim());
     u_global.resize(basis_st.dim());
 
     assert(ctx.local_block_size() == basis.dim());
     u1_local.resize(ctx.local_block_size());
-    u2_local.resize(ctx.local_block_size());
+//    u2_local.resize(ctx.local_block_size());
 
     std::mt19937 rng(seed);
     set_random_unit(v_global, rng);
 
     std::fill(u_global.begin(), u_global.end(), 0);
     std::fill(u1_local.begin(), u1_local.end(), 0);
-    std::fill(u2_local.begin(), u2_local.end(), 0);
+//    std::fill(u2_local.begin(), u2_local.end(), 0);
 
     std::cout<<"[BST "<<ctx.my_rank<<"]  Apply..."<<std::endl;
     TIMEIT("[BST] u += Av", H_st.evaluate_add(v_global.data(), u_global.data());)
 
     std::cout<<"[BST_MPI "<<ctx.my_rank<<"]  Apply..."<<std::endl;
     // NOTE: add the local block offset to stay correct
-    TIMEIT("[MPI synchronous] u += Av", H_mpi.evaluate_add_sync(v_global.data() + ctx.local_start_index(), u1_local.data());)
-    TIMEIT("[MPI pipeline] u += Av", H_mpi.evaluate_add_pipe(v_global.data() + ctx.local_start_index(), u2_local.data());)
+    TIMEIT("[MPI] u += Av", H_mpi.evaluate_add(v_global.data() + ctx.local_start_index(), u1_local.data());)
 
     // we need to carefully check the offsets
     double tol =1e-9;
@@ -136,8 +116,8 @@ int main(int argc, char* argv[]){
     
     size_t error_1_count = 0;
     double max_error_1 = 0;
-    size_t error_2_count = 0;
-    double max_error_2 = 0;
+//    size_t error_2_count = 0;
+//    double max_error_2 = 0;
 
 
 
@@ -149,7 +129,7 @@ int main(int argc, char* argv[]){
     for (int i=0;  i<ctx.local_block_size(); i++){
         auto g_idx = start_offset + i;
         auto error_1 = std::abs(u_global[g_idx] - u1_local[i]);
-        auto error_2 = std::abs(u_global[g_idx] - u2_local[i]);
+//        auto error_2 = std::abs(u_global[g_idx] - u2_local[i]);
 
         if( error_1 > tol ){
             if (error_1_count == 0){
@@ -161,30 +141,30 @@ int main(int argc, char* argv[]){
         }
 
 
-        if( error_2 > tol ){
-            if (error_2_count == 0){
-                std::cout<<"BST != MPI pipe on global index "<< g_idx
-                    <<"= ("<<ctx.my_rank<<") + "<<i<<": +"<<error_2<<"\n";
-            }
-            error_2_count++;
-            max_error_2 = std::max(max_error_2, error_2);
-        }
+//        if( error_2 > tol ){
+//            if (error_2_count == 0){
+//                std::cout<<"BST != MPI pipe on global index "<< g_idx
+//                    <<"= ("<<ctx.my_rank<<") + "<<i<<": +"<<error_2<<"\n";
+//            }
+//            error_2_count++;
+//            max_error_2 = std::max(max_error_2, error_2);
+//        }
     }
 
     if (error_1_count > 0) {
-        std::cout << "[sync] Rank " << ctx.my_rank << ": " << error_1_count 
+        std::cout << "[MPI] Rank " << ctx.my_rank << ": " << error_1_count 
               << " errors found, max error = " << max_error_1 << "\n";
     } else {
-        std::cout << "[sync] Rank " << ctx.my_rank <<": agrees with global BST."<<std::endl;
+        std::cout << "[MPI] Rank " << ctx.my_rank <<": agrees with global BST."<<std::endl;
     }
 
 
-    if (error_2_count > 0) {
-        std::cout << "[pipe] Rank " << ctx.my_rank << ": " << error_2_count 
-              << " errors found, max error = " << max_error_2 << "\n";
-    } else {
-        std::cout << "[pipe] Rank " << ctx.my_rank <<": agrees with global BST."<<std::endl;
-    }
+//    if (error_2_count > 0) {
+//        std::cout << "[pipe] Rank " << ctx.my_rank << ": " << error_2_count 
+//              << " errors found, max error = " << max_error_2 << "\n";
+//    } else {
+//        std::cout << "[pipe] Rank " << ctx.my_rank <<": agrees with global BST."<<std::endl;
+//    }
     MPI_Finalize();
     return 0;
 }
