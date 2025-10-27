@@ -7,7 +7,7 @@
 #define ASSERT_STATE_FOUND(error_msg, state, result) \
     do { \
         if (result == 0) { \
-            std::cerr << "State not found on node " << ctx.my_rank << ": "; \
+            std::cerr << "State not found on rank " << ctx.my_rank << ": "; \
             printHex(std::cerr, state) << "\n"; \
             throw std::logic_error("State not found in " error_msg); \
         } \
@@ -182,7 +182,7 @@ MPIContext MPI_ZBasisBST::load_from_file(const fs::path& bfile, const std::strin
 }
 
 
-size_t MPIContext::node_of_state(ZBasisBase::state_t psi) const {
+size_t MPIContext::rank_of_state(ZBasisBase::state_t psi) const {
     // linear search, all states should fit in cache unless # nodes is very large
     for (int n=0; n<world_size; n++){
         if (psi < state_partition[n+1]){
@@ -193,8 +193,8 @@ size_t MPIContext::node_of_state(ZBasisBase::state_t psi) const {
     return world_size-1;
 }
 
-// returns the node on which a specified psi can be found
-size_t MPIContext::node_of_idx(ZBasisBase::idx_t J) const {
+// returns the rank on which a specified psi can be found
+size_t MPIContext::rank_of_idx(ZBasisBase::idx_t J) const {
     // linear search, all states should fit in cache unless # nodes is very large
     for (int n=0; n<world_size; n++){
         if (J < idx_partition[n+1]){
@@ -223,7 +223,7 @@ void MPILazyOpSum<coeff_t, B>::inplace_bucket_sort(std::vector<ZBasisBase::state
      // Step 1: Count elements per bucket
 //    std::vector<size_t> bucket_sizes(context.world_size, 0);
     for (const auto& s : states) {
-        ++bucket_sizes[ctx.node_of_state(s)];
+        ++bucket_sizes[ctx.rank_of_state(s)];
     }
 
     // Step 2: Compute bucket start indices
@@ -241,7 +241,7 @@ void MPILazyOpSum<coeff_t, B>::inplace_bucket_sort(std::vector<ZBasisBase::state
     std::vector<int> bucket_next = bucket_starts; // Next free slot in each bucket
 
      for (size_t i = 0; i < n; ++i) {
-        int target_bucket = ctx.node_of_state(states[i]);
+        int target_bucket = ctx.rank_of_state(states[i]);
         size_t target_index = bucket_next[target_bucket]++;
         _scratch_states[target_index] = states[i];
         _scratch_coeff[target_index] = c[i];
@@ -336,7 +336,7 @@ void MPILazyOpSum<coeff_t, B>::evaluate_add_off_diag_sync(const coeff_t* x, coef
             auto sign = op.applyState(state); // "state" is new now
             if (sign == 0 || abs(x[il]) < APPLY_TOL) continue;
 
-            auto target_rank = ctx.node_of_state(state);
+            auto target_rank = ctx.rank_of_state(state);
             send_dy[target_rank].push_back( c * x[il] * sign);
             send_states[target_rank].push_back(state);
         }
@@ -475,6 +475,10 @@ void MPILazyOpSum<coeff_t, B>::evaluate_add_off_diag_pipeline(const coeff_t* x, 
     // State for pipelined communication
     struct OperatorCommState {
         std::vector<MPI_Request> requests;
+
+        std::vector<std::vector<coeff_t>> send_dy;
+        std::vector<std::vector<ZBasisBase::state_t>> send_states;
+
         std::vector<std::vector<ZBasisBase::state_t>> recv_states_bufs;
         std::vector<std::vector<coeff_t>> recv_dy_bufs;
         std::vector<int> recv_sources;
@@ -489,30 +493,34 @@ void MPILazyOpSum<coeff_t, B>::evaluate_add_off_diag_pipeline(const coeff_t* x, 
     int op_index = 0;
     for ( const auto& [c, op] : ops.off_diag_terms ){
 
-         // Organize sends by destination rank
-        std::vector<std::vector<coeff_t>> send_dy(ctx.world_size); 
-        std::vector<std::vector<ZBasisBase::state_t>> send_states(ctx.world_size);
+        OperatorCommState curr_op_comm;
+        curr_op_comm.send_states.resize(ctx.world_size);
+        curr_op_comm.send_dy.resize(ctx.world_size);
 
+         // Organize sends by destination rank
         BENCH_TIMEIT("[EAOD] local apply",
         for (ZBasisBase::idx_t il = 0; il < ctx.local_block_size(); ++il) {
             ZBasisBase::state_t state = basis[il];
             auto sign = op.applyState(state);
             if (sign == 0) continue;
             
-            auto target_rank = ctx.node_of_state(state);
-            send_dy[target_rank].push_back(c * x[il] * sign);
-            send_states[target_rank].push_back(state);
+            auto target_rank = ctx.rank_of_state(state);
+            curr_op_comm.send_dy[target_rank].push_back(c * x[il] * sign);
+            curr_op_comm.send_states[target_rank].push_back(state);
         }
         )
 
 
         // Tell all other nodes how many entries I will send
         // begin non-blocking metadata exchange for CURRENT operator
-        OperatorCommState curr_op_comm;
         BENCH_TIMEIT("[EAOD][mpi] Begin count exchange",
             std::vector<int> sendcounts(ctx.world_size, 0);
+
+            std::cout << "<< (op "<<op_index<<") [node "<<ctx.my_rank<< "]\n";
             for (int r = 0; r < ctx.world_size; ++r) {
-                sendcounts[r] = send_states[r].size();
+                sendcounts[r] = curr_op_comm.send_states[r].size();
+                if (r == ctx.my_rank) std::cout<<"*";
+                std::cout << "\tsend_data["<<r<<"] -> "<<curr_op_comm.send_states[r].size() <<"\n";
             }
 
             curr_op_comm.recvcounts.resize(ctx.world_size);
@@ -523,12 +531,12 @@ void MPILazyOpSum<coeff_t, B>::evaluate_add_off_diag_pipeline(const coeff_t* x, 
 
         // Process local updates immediately
         BENCH_TIMEIT("[EAOD] local updates",
-            for (size_t i = 0; i < send_states[ctx.my_rank].size(); ++i) {
+            for (size_t i = 0; i < curr_op_comm.send_states[ctx.my_rank].size(); ++i) {
                 ZBasisBase::idx_t local_idx;
-                ASSERT_STATE_FOUND("self", send_states[ctx.my_rank][i],
-                        basis.search(send_states[ctx.my_rank][i], local_idx)
+                ASSERT_STATE_FOUND("self", curr_op_comm.send_states[ctx.my_rank][i],
+                        basis.search(curr_op_comm.send_states[ctx.my_rank][i], local_idx)
                         );
-                y[local_idx] += send_dy[ctx.my_rank][i];
+                y[local_idx] += curr_op_comm.send_dy[ctx.my_rank][i];
             }
         )
 
@@ -543,6 +551,13 @@ void MPILazyOpSum<coeff_t, B>::evaluate_add_off_diag_pipeline(const coeff_t* x, 
                 prev_op_comm.count_exchange_done = true;
             }
             )
+
+
+            std::cout << ">> (op "<<op_index-1<<") [rank "<<ctx.my_rank<<"]\n";
+            for (int r = 0; r < ctx.world_size; ++r) {
+                if (r == ctx.my_rank) std::cout<<"*";
+                std::cout << "\trecvcount["<<r<<"] -> "<< prev_op_comm.recvcounts[r] <<"\n";
+            }
             
             BENCH_TIMEIT("[EAOD][mpi] post prev receives",
             // Now we know who will send to us for previous operator
@@ -603,17 +618,18 @@ void MPILazyOpSum<coeff_t, B>::evaluate_add_off_diag_pipeline(const coeff_t* x, 
         BENCH_TIMEIT("[EAOD] initiate curr sends",
         // Begin sending to all non-empty, non-self targets
         for (int target_rank=0; target_rank<ctx.world_size; target_rank++){
-            if (target_rank == ctx.my_rank || send_dy[target_rank].size() == 0) continue;
+            if (target_rank == ctx.my_rank || 
+                    curr_op_comm.send_dy[target_rank].size() == 0) continue;
 
             curr_op_comm.requests.push_back(MPI_Request{});
             MPI_Isend(
-                    send_states[target_rank].data(), send_states[target_rank].size(), get_mpi_type<ZBasisBase::state_t>(),
+                    curr_op_comm.send_states[target_rank].data(), curr_op_comm.send_states[target_rank].size(), get_mpi_type<ZBasisBase::state_t>(),
                     target_rank, 10*op_index + 1, MPI_COMM_WORLD,
                     &curr_op_comm.requests.back());
 
             curr_op_comm.requests.push_back(MPI_Request{});
             MPI_Isend(
-                    send_dy[target_rank].data(), send_dy[target_rank].size(), get_mpi_type<coeff_t>(),
+                    curr_op_comm.send_dy[target_rank].data(), curr_op_comm.send_dy[target_rank].size(), get_mpi_type<coeff_t>(),
                     target_rank, 10*op_index + 2, MPI_COMM_WORLD,
                     &curr_op_comm.requests.back());
 
@@ -625,7 +641,7 @@ void MPILazyOpSum<coeff_t, B>::evaluate_add_off_diag_pipeline(const coeff_t* x, 
         has_prev_op = true;
         op_index++;
 
-   } // end operator loop
+    } // end operator loop
 
 
     // === PROCESS FINAL OPERATOR'S RECEIVES ===

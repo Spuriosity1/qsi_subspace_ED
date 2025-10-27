@@ -93,13 +93,14 @@ int main(int argc, char* argv[]){
     
     auto [ringL, ringR, sl_list]  = get_ring_ops(jdata);
     std::vector<double> gv {1.0, -0.2, -0.2, -0.2};
-    // std::vector<int> indices{1,2,45,46,47};
-    for (size_t idx=0; idx<sl_list.size(); idx++){
+    std::vector<int> indices{8,8};
+//    for (size_t idx=0; idx<sl_list.size(); idx++){
+    for (auto idx : indices){
         auto R = ringR[idx];
         auto L = ringL[idx];
 
         H_sym.add_term(gv[sl_list[idx]], R);
-        H_sym.add_term(gv[sl_list[idx]], L);
+//        H_sym.add_term(gv[sl_list[idx]], L);
     }
  
 

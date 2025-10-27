@@ -34,7 +34,7 @@ struct MPIContext {
     int my_rank;
     
     // sorted parallel arrays, both of length num_nodes + 1
-    // node 'n' handles states in interval [ state_partition[n], state_partition[n+1])
+    // rank 'n' handles states in interval [ state_partition[n], state_partition[n+1])
     std::vector<ZBasisBase::state_t> state_partition;
     std::vector<ZBasisBase::idx_t> idx_partition;
 
@@ -69,9 +69,9 @@ struct MPIContext {
     }
 
     // returns the node on which a specified psi can be found
-    size_t node_of_state(ZBasisBase::state_t psi) const;
+    size_t rank_of_state(ZBasisBase::state_t psi) const;
     // returns the node on which a specified global index can be found
-    size_t node_of_idx(ZBasisBase::idx_t J) const;
+    size_t rank_of_idx(ZBasisBase::idx_t J) const;
 
 
 };
