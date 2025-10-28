@@ -7,6 +7,7 @@
 #include <sstream>
 #include <stdexcept>
 #include <vector>
+#include "bits.hpp"
 
 #ifdef __APPLE__ // patch broken NEON optimization
 #define EIGEN_DONT_VECTORIZE
@@ -21,13 +22,6 @@
 #include <algorithm>
 					  
 namespace fs = std::filesystem;
-
-
-template<typename T>
-concept RealOrCplx = std::floating_point<T> ||
-                 (requires { typename T::value_type; } &&
-                  std::is_same_v<T, std::complex<typename T::value_type>> &&
-                  std::floating_point<typename T::value_type>);
 
 
 template<typename comp_basis_state_t>

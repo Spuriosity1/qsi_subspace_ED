@@ -9,8 +9,6 @@
 using namespace projED;
 
 
-
-
 struct MockBasis { 
     std::size_t dim_;
     size_t dim() const { 

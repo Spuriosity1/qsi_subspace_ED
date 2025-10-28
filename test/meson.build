@@ -29,7 +29,7 @@ test_lanczos = executable('test_lanczos',
 test_lanczos_mpi = executable('test_lanczos_mpi',
   'test_lanczos_mpi.cpp',
   include_directories: inc,
-  dependencies: [operator_dep, linalg_routines_dep],
+  dependencies: [operator_mpi_dep, linalg_routines_mpi_dep],
   install: false
   )
 

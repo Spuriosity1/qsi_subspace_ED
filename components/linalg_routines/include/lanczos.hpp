@@ -46,7 +46,7 @@ inline std::ostream& operator<<(std::ostream& os, const Settings& settings)
 
 inline std::ostream& operator<<(std::ostream& os, const Result& res)
 {
-    os << "Lanczos Algorithm Settings:\n";
+        os << "Lanczos Algorithm Result:\n";
     os << "---------------------------\n";
     os << "  Converged:         " << res.converged << "\n";
     os << "  Iterations:        " << res.n_iterations << "\n";
@@ -69,7 +69,6 @@ Result eigval0(projED::ComplexApplyFn f, double& eigval,
         std::vector<std::complex<double>>& v, 
         const Settings& settings_ = Settings()
         );
-
 
 
 }; // end namespace lanczos

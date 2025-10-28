@@ -15,3 +15,19 @@ linalg_routines_dep = declare_dependency(
   dependencies: [ lapack_dep, eigen_dep, blas_dep]
 )
 
+
+
+linalg_routines_mpi_src = ['src/lanczos_mpi.cpp']
+
+linalg_routines_mpi_lib = static_library('linalg_routines_mpi', linalg_routines_mpi_src, 
+  dependencies: [ lapack_dep, eigen_dep, operator_mpi_dep, blas_dep, mpi_dep],
+  include_directories: [linalg_routines_inc, common_inc],
+  cpp_args: target_args
+)
+
+linalg_routines_mpi_dep = declare_dependency(
+  include_directories: linalg_routines_inc,
+  link_with: linalg_routines_mpi_lib,
+  dependencies: [ lapack_dep, eigen_dep, blas_dep, mpi_dep]
+)
+

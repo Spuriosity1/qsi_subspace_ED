@@ -5,34 +5,7 @@
 #include "common_bits.hpp"
 
 namespace projED {
-
-
 namespace lanczos {
-
-
-// a stochastically sampled inner product 
-// Useful to check convergence
-class ApproximateInner {
-    ApproximateInner(std::mt19937& rng, size_t dim, size_t n){
-        auto dist = std::uniform_int_distribution<size_t>( 0, dim);
-        for (size_t i=0; i<n; i++){
-            indices_.push_back(dist(rng));
-        }
-    }
-
-    template<typename T>
-    double distance(const std::vector<T>& u, const std::vector<T>& v){
-        T res=0;
-        for (auto i : indices_){
-            res += std::conj(u[i]) * v[i];
-        }
-        return res;
-    }
-
-private:
-    std::vector<size_t> indices_;
-};
-
 
 
 // Check convergence of the Lanczos iteration

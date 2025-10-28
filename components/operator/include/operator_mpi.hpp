@@ -52,19 +52,19 @@ struct MPIContext {
     }
 
 
-    ZBasisBase::idx_t block_size(size_t r){
+    ZBasisBase::idx_t block_size(size_t r) const {
         return idx_partition[r+1] - idx_partition[r];
     }
 
-    constexpr ZBasisBase::idx_t local_start_index(){
+    constexpr ZBasisBase::idx_t local_start_index() const {
         return idx_partition[my_rank];
     }
 
-    constexpr ZBasisBase::idx_t local_block_size(){
+    constexpr ZBasisBase::idx_t local_block_size() const {
         return idx_partition[my_rank+1] - idx_partition[my_rank];
     }
 
-    constexpr ZBasisBase::idx_t global_basis_dim(){
+    constexpr ZBasisBase::idx_t global_basis_dim() const {
         return idx_partition[world_size];
     }
 
