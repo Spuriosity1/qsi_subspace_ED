@@ -171,7 +171,7 @@ Result lanczos_iterate(ApplyFn evaluate_add,
         betas.push_back(beta);
 
          // Convergence test: compute current eigenvalue estimate
-        if (j >= settings.min_iterations && j % settings.convergence_check_interval == 0) {
+        if (j >= settings.min_iterations) {
             check_lanczos_convergence<_S>(alphas, betas, eigval, j, settings, retval);
             if (settings.verbosity > 0) {
                 std::cout << "Iter "<< j << " eigval error " << retval.eigval_error << "\n";

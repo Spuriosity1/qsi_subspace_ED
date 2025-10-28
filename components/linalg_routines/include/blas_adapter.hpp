@@ -1,5 +1,4 @@
 #pragma once
-#include <vecLib/vecLib.h>
 #include <vector>
 #include <complex>
 

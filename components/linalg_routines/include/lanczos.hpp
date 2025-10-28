@@ -35,7 +35,6 @@ inline std::ostream& operator<<(std::ostream& os, const Settings& settings)
     os << "  Relative Conv. tolerance:  " << settings.rel_tol << "\n";
     os << "  Minimum iterations:        " << settings.min_iterations << "\n";
     os << "  Maximum iterations:        " << settings.max_iterations << "\n";
-    os << "  Conv. check interval:      " << settings.convergence_check_interval << "\n";
     os << "  Initial vector seed:       " << settings.x0_seed << "\n";
     os << "---------------------------\n";
     os << "  Verbosity level:           " << settings.verbosity << " (0=silent, higher=more output)\n";

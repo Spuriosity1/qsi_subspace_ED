@@ -2,13 +2,10 @@
 #include <vector>
 #include <cassert>
 
-#ifdef USE_APPLE_ACCELERATE
-#include <vecLib/vecLib.h>
-#endif
-
-typedef long int LAPACK_int_t;
-typedef long int LAPACK_bool_t;
-
+#include <Eigen/Dense>
+#include <Eigen/Eigenvalues>
+#include <vector>
+#include <stdexcept>
 
 //extern "C" {
 //    // LAPACK routine, see
@@ -36,130 +33,75 @@ typedef long int LAPACK_bool_t;
 
 namespace projED {
 
-    // the FORTRAN binding
 
+inline void tridiagonalise(
+    std::vector<double>& D,       // diagonal
+    std::vector<double>& E,       // off-diagonal
+    std::vector<double>& e,       // eigenvalues (output)
+    std::vector<double>& v,       // eigenvectors (output, column-major)
+    size_t n_eigvals = 1,         // number of eigenvalues (ignored if "A")
+    const char* which = "S"       // "S"=smallest, "L"=largest, "A"=all
+) {
+    const size_t n = D.size();
+    if (n == 0) return;
+    if (E.size() < n - 1 && n > 1)
+        throw std::invalid_argument("E must have size n-1");
 
-
-inline void tridiagonalise_mrrr(
-        std::vector<double>& D,               // diagonal
-        std::vector<double>& E,               // off-diagonal
-        std::vector<double>& e,               // eigenvalues (output)
-        std::vector<double>& v,               // eigenvectors (output)
-        size_t n_eigvals = 1,                 // number of eigenvalues (ignored when 'all' passed)
-        const char* which = "S"               // "S" = smallest, "L" = largest, "A" = all
-    ) {
-        const LAPACK_int_t n = static_cast<LAPACK_int_t>(D.size());
-        if (n-1<0 || E.size() < static_cast<size_t>(n - 1))
-            throw std::invalid_argument("E must have size n-1");
-
-        if (n == 0)
-            return;
-
-        // LAPACK uses Fortran-style ints
-        LAPACK_int_t info, m;
-        char jobz = 'V';
-        char range = 'I';
-
-        if (*which == 'A' || *which == 'a'){
-            n_eigvals = n;
-            range = 'A';
-        }
-
-
-        // Select index range of eigenvalues
-        LAPACK_int_t il = 1;
-        LAPACK_int_t iu = static_cast<LAPACK_int_t>(n_eigvals);
-        if (*which == 'L' || *which == 'l') {
-            il = n - static_cast<LAPACK_int_t>(n_eigvals) + 1;
-            iu = n;
-        } 
-
-        LAPACK_int_t nzv = n_eigvals; 
-
-        
-        LAPACK_int_t tryRAC =1;
-
-        double vl = 0.0, vu = 0.0;  // not used for RANGE='I', 'A'
-     
-        LAPACK_int_t ldz = n; // leading zeros of calculated eigenvector array
-        LAPACK_int_t lwork = -1; // number of places in work arrays
-        LAPACK_int_t liwork = -1; // dimension of iwork
-        std::vector<LAPACK_int_t> isuppz(2 * std::max(static_cast<LAPACK_int_t>(1), n));
-        std::vector<double> work(1);
-        std::vector<LAPACK_int_t> iwork(1);
-
-        // Query to get correct work size (controlled by -1 in ldz)
-        dstemr_(&jobz, &range, &n,
-                D.data(), // IN, OUT the diagonal (length n)
-                E.data(), // IN, OUT the off diagonal (length max(1,n-1))
-                &vl, &vu, // lower, upper eigval bounds (not referecned if range='A' or 'I')
-                &il, &iu, // indices of eigenvalues (ascending order)
-                &m, // OUT total number of eigvals found. Guaranteed to be IU - IL+1 here
-                nullptr, // OUT eigenvalue array
-                nullptr, // OUT eigenvector array (col-major)
-                &ldz, // OUT leading dimension of the array v
-                &nzv, // NZV, number of eigenvectors to be held in Z
-                isuppz.data(), // ISUPPZ is INTEGER array, dimension ( 2*max(1,M) )
-                &tryRAC,
-                work.data(),
-                &lwork,
-                iwork.data(),
-                &liwork,
-                &info
-               );
-
-        if (info != 0)
-            throw std::runtime_error("DSTEMR workspace query failed");
-
-        lwork = work[0];
-        liwork = iwork[0];
-
-        // Allocate workspace
-        work.resize(lwork);
-        iwork.resize(liwork);
-
-        // Allocate output
-        e.resize(m);
-        v.resize(n * m);
-
-        // Compute
-        dstemr_(&jobz, &range, &n,
-                D.data(), // IN, OUT the diagonal (length n)
-                E.data(), // IN, OUT the off diagonal (length max(1,n-1))
-                &vl, &vu, // lower, upper eigval bounds (not referecned if range='A' or 'I')
-                &il, &iu, // indices of eigenvalues (ascending order)
-                &m, // OUT total number of eigvals found. Guaranteed to be IU - IL+1 here
-                e.data(), // OUT eigenvalue array
-                v.data(), // OUT eigenvector array (col-major)
-                &ldz, // OUT leading dimension of the array v
-                &nzv, // NZV, number of eigenvectors to be held in Z
-                isuppz.data(), // ISUPPZ is INTEGER array, dimension ( 2*max(1,M) )
-                &tryRAC,
-                work.data(),
-                &lwork,
-                iwork.data(),
-                &liwork,
-                &info
-               );
-
-        if (info != 0)
-            throw std::runtime_error("DSTEVR computation failed");
+    // Build the symmetric tridiagonal matrix
+    Eigen::MatrixXd mat = Eigen::MatrixXd::Zero(n, n);
+    for (size_t i = 0; i < n; ++i) mat(i, i) = D[i];
+    for (size_t i = 0; i < n - 1; ++i) {
+        mat(i, i + 1) = E[i];
+        mat(i + 1, i) = E[i];
     }
+
+    // Compute all eigenvalues and eigenvectors
+    Eigen::SelfAdjointEigenSolver<Eigen::MatrixXd> solver(mat);
+    if (solver.info() != Eigen::Success)
+        throw std::runtime_error("Eigen decomposition failed");
+
+    Eigen::VectorXd evals = solver.eigenvalues();
+    Eigen::MatrixXd evecs = solver.eigenvectors();
+
+    // Select desired eigenvalues/eigenvectors
+    size_t start = 0;
+    size_t count = n;
+    if (*which == 'S' || *which == 's') {
+        start = 0;
+        count = std::min(n_eigvals, n);
+    } else if (*which == 'L' || *which == 'l') {
+        start = n - std::min(n_eigvals, n);
+        count = std::min(n_eigvals, n);
+    } else if (*which == 'A' || *which == 'a') {
+        start = 0;
+        count = n;
+    } else {
+        throw std::invalid_argument("Invalid value for 'which'");
+    }
+
+    e.resize(count);
+    v.resize(n * count);
+
+    for (size_t j = 0; j < count; ++j) {
+        e[j] = evals(start + j);
+        for (size_t i = 0; i < n; ++i) {
+            v[i + j * n] = evecs(i, start + j); // column-major
+        }
+    }
+}
 
 
 inline void tridiagonalise_one(
-        std::vector<double>& D,               // diagonal
-        std::vector<double>& E,               // off-diagonal
-        double& e,               // eigenvalues (output)
-        std::vector<double>& v,               // eigenvectors (output)
-        const char* which = "S"               // "S" = smallest, "L" = largest
-        ) {
-    std::vector<double> e_v(1);
-    e_v[0] = e;
+    std::vector<double>& D,
+    std::vector<double>& E,
+    double& e_out,
+    std::vector<double>& v,
+    const char* which = "S"
+) {
+    std::vector<double> e_v;
     tridiagonalise(D, E, e_v, v, 1, which);
-    e = e_v[0];
+    e_out = e_v[0];
 }
-
 
 
 } // end namsepace
