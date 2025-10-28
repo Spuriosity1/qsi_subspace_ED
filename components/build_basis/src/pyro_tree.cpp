@@ -512,9 +512,6 @@ void pyro_vtree_parallel::write_basis_hdf5(const std::string& outfilename){
 }
 
 
-////////////
-/// Lower level: sbsearch related functions
-
 
 
 void par_searcher::build_state_tree(){

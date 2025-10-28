@@ -7,6 +7,8 @@
 
 // a more low level gen_spinon_basis.
 // Writes streamed, sharded data to temporary files
+// Sharded Binary SEARCH implementation
+// Collect all data together with a final call to 
 
 using namespace std;
 using json=nlohmann::json;

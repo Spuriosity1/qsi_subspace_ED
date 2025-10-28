@@ -1,11 +1,13 @@
 # QSI subspace ED
 
+This is a collection of C++ programs designed for work in subspaces of locally-constrained spin Hamiltonians.
 
 ## Obtaining and Compiling
 
 ### Dependencies
 - HDF5
 - nlohmann::json.
+- MPI
 
 From the root directory:
 ```bash
@@ -19,7 +21,7 @@ ninja -C build test # optional
 ### Benchmarking
 The bash script bench/benchme.sh (run it from the project root directory) 
 runs a number of calculations on unit cells 1x2xj, for j=1:10. Runtimes
-are spat out as raw ints.
+are spat out as raw numbers.
 
 ```bash
 bench/benchme.sh 4
