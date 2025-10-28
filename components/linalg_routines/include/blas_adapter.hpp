@@ -2,7 +2,6 @@
 #include <vector>
 #include <complex>
 
-namespace projED {
 
 #ifdef USE_APPLE_ACCELERATE
 #include <version>
@@ -10,6 +9,8 @@ namespace projED {
 #else
 #include <cblas.h>
 #endif
+
+namespace projED {
 
 typedef std::complex<double> cplx_t;
 

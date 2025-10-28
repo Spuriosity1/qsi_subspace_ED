@@ -21,7 +21,7 @@ test_PMR_operator = executable('test_PMR_operator',
 test_lanczos = executable('test_lanczos',
   'test_lanczos.cpp',
   include_directories: inc,
-  dependencies: [operator_mpi_dep, linalg_routines_dep],
+  dependencies: [operator_mpi_dep, eigen_dep, linalg_routines_dep],
   install: false
   )
 
