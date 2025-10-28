@@ -17,7 +17,7 @@ host_cpu = host_machine.cpu_family()
 target_args = []
 
 if get_option('buildtype') == 'release'
-  add_project_arguments('-DNDEBUG', language: ['c', 'cpp'])
+  target_args += ['-DNDEBUG'] 
   if host_cpu.startswith('x86')
     if cpp_compiler.has_argument('-mavx2')
       target_args += ['-mavx2']
@@ -28,6 +28,7 @@ if get_option('buildtype') == 'release'
       target_args += ['-msse2']
     endif
   elif host_cpu.startswith('aarch64') or host_cpu.startswith('arm')
+    # Apple silicon, we need to juggle a bit 
     #    if cpp_compiler.has_argument('-mfpu=neon')
     #      target_args += ['-mfpu=neon']
     #    elif cpp_compiler.has_argument('-march=armv8-a+simd')
@@ -45,6 +46,97 @@ elif get_option('buildtype') == 'debug'
 endif
 
 
+blas_backend = get_option('blas_backend')  # 'auto', 'openblas', 'mkl', 'generic'
+
+# Apple bullshit
+# For christ sake just use a goddamn normal header file you turtleneck wearing
+# hipster shits I swear to god
+accelerate_dep = declare_dependency(
+  compile_args: ['-framework', 'Accelerate',
+    '-DUSE_APPLE_ACCELERATE', 
+    '-DACCELERATE_NEW_LAPACK',
+    '-DACCELERATE_LAPACK_ILP64'],
+    link_args: ['-framework', 'Accelerate'],
+  )
+
+
+if blas_backend == 'Accelerate'
+  blas_dep = accelerate_dep
+  lapack_dep = accelerate_dep
+
+message('compiler is ', cpp_compiler.get_id())
+  if cpp_compiler.get_id() == 'gcc'
+    add_project_arguments('-flax-vector-conversions', language: 'cpp')
+  endif
+elif blas_backend == 'mkl'
+  mkl_dep = dependency('mkl-dynamic-lp64-seq', required: false)
+  if not mkl_dep.found()
+    # Fallback: manual MKL detection
+    mkl_root = get_option('mkl_root')
+    if mkl_root == ''
+      mkl_root = run_command('printenv', 'MKLROOT', check: false).stdout().strip()
+    endif
+    
+    if mkl_root != ''
+      mkl_inc = include_directories(mkl_root / 'include')
+      mkl_lib = meson.get_compiler('cpp').find_library('mkl_intel_lp64',
+        dirs: [mkl_root / 'lib' / 'intel64'])
+      mkl_thread = meson.get_compiler('cpp').find_library('mkl_gnu_thread',
+        dirs: [mkl_root / 'lib' / 'intel64'])
+      mkl_core = meson.get_compiler('cpp').find_library('mkl_core',
+        dirs: [mkl_root / 'lib' / 'intel64'])
+      
+      mkl_dep = declare_dependency(
+        include_directories: mkl_inc,
+        dependencies: [mkl_lib, mkl_thread, mkl_core],
+        compile_args: ['-DMKL_ILP64']
+      )
+    else
+      error('MKL requested but MKLROOT not set')
+    endif
+  endif
+  blas_dep = mkl_dep
+  lapack_dep = mkl_dep
+  
+elif blas_backend == 'openblas'
+  # OpenBLAS (usually has cblas built-in)
+  blas_dep = dependency('openblas', required: true)
+  lapack_dep = blas_dep
+  
+elif blas_backend == 'generic' or blas_backend == 'auto'
+  
+  # Try to find any BLAS implementation
+  blas_dep = dependency('cblas', required: false)
+  if not blas_dep.found()
+    blas_dep = dependency('blas', required: false)
+  endif
+  if not blas_dep.found()
+    # Manual search
+    cblas_lib = meson.get_compiler('cpp').find_library('cblas', required: false)
+    blas_lib = meson.get_compiler('cpp').find_library('blas', required: false)
+    if cblas_lib.found() and blas_lib.found()
+      blas_dep = declare_dependency(dependencies: [cblas_lib, blas_lib])
+    else
+      error('BLAS not found. Install BLAS/CBLAS or use -Dblas_backend=mkl')
+    endif
+  endif
+
+  lapack_dep = dependency('lapack', required: false)
+  if not lapack_dep.found()
+    lapack_lib = cc.find_library('lapack', required: false)
+    if lapack_lib.found()
+      lapack_dep = lapack_lib
+    else
+      # Some systems (like Debian/Ubuntu) fold LAPACK into libblas
+      lapack_dep = blas_dep
+    endif
+  endif
+  
+endif
+
+message('Using BLAS backend: @0@'.format(blas_backend))
+
+
 hdf5_dep = dependency('hdf5',
   language: 'c',
   required: false,
@@ -59,11 +151,6 @@ spectra_dep = dependency('spectra', method: 'cmake')
 omp_dep = dependency('OpenMP', required: true)
 
 mpi_dep = dependency('mpi', language: 'cpp')
-
-# MRRR parallel tridiagonal matrix eigensolver
-mr3smp_proj = subproject('mr3smp')
-mr3smp_dep = mr3smp_proj.get_variable('mr3smp_dep')
-
 
 cmake_opts = cmake.subproject_options()
 cmake_opts.add_cmake_defines({
@@ -89,7 +176,7 @@ subdir('src')
 
 expectation_eval = static_library('expectation_eval', 'src/expectation_eval.cpp',
   include_directories: inc,
-  dependencies: [operator_dep, g_deps])
+  dependencies: [operator_dep, linalg_routines_dep, g_deps])
 
 
 #diag_DOQSI_ham = executable('diag_DOQSI_ham',

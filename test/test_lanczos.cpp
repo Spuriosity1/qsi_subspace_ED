@@ -1,9 +1,14 @@
 #include <cmath>
 #include <iostream>
 #include <vector>
+#include "operator.hpp"
 #include "lanczos.hpp"
 #include <argparse/argparse.hpp>
 #include <random>
+
+using namespace projED;
+
+
 
 
 struct MockBasis { 
@@ -116,7 +121,7 @@ int main(int argc, char** argv) {
     // Output vector
     std::vector<double> v0(dim);
 
-    LanczosSettings settings;
+    lanczos::Settings settings;
     settings.krylov_dim = program.get<int>("--krylov_dim");
     settings.abs_tol = pow(10, program.get<int>("--abs_tol"));
     settings.rel_tol = pow(10, program.get<int>("--rel_tol"));
@@ -127,9 +132,12 @@ int main(int argc, char** argv) {
     settings.verbosity = 3;
     settings.calc_eigenvector = true;
 
-
+    using coeff_t = double;
+    RealApplyFn evadd = [H](const coeff_t* x, coeff_t* y){
+        H.evaluate_add(x, y);
+    };
     double eigval_lanczos = 0.0;
-    auto res = eigval0_lanczos(H, eigval_lanczos, v0, settings);
+    auto res = lanczos::eigval0(evadd, eigval_lanczos, v0, settings);
 
     // Exact solution with Eigen
     Eigen::SelfAdjointEigenSolver<Eigen::MatrixXd> solver(M);

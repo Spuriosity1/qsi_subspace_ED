@@ -30,7 +30,7 @@ endif
 operator_dep = declare_dependency(
   link_with: operator_lib,
   include_directories: operator_inc,
-  dependencies: [hdf5_dep, omp_dep, eigen_dep, mr3smp_dep, spectra_dep]
+  dependencies: [hdf5_dep, omp_dep, eigen_dep, lapack_dep, spectra_dep]
   )
 
 operator_mpi_dep = declare_dependency(

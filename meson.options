@@ -1,3 +1,15 @@
 option('build_tests', type: 'boolean', value: true)
 option('build_benchmarks', type: 'boolean', value: true)
+option('blas_backend',
+  type: 'combo',
+  choices: ['auto', 'openblas', 'mkl', 'Accelerate', 'generic'],
+  value: 'auto',
+  description: 'BLAS implementation to use'
+)
+
+option('mkl_root',
+  type: 'string',
+  value: '',
+  description: 'Path to Intel MKL root directory (overrides MKLROOT env var)'
+)
 

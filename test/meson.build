@@ -21,14 +21,14 @@ test_PMR_operator = executable('test_PMR_operator',
 test_lanczos = executable('test_lanczos',
   'test_lanczos.cpp',
   include_directories: inc,
-  dependencies: operator_dep,
+  dependencies: [operator_dep, linalg_routines_dep],
   install: false
   )
 
 test_apply = executable('test_apply',
   'test_apply.cpp',
   include_directories: inc,
-  dependencies: [operator_dep, common_dep],
+  dependencies: [operator_dep, linalg_routines_dep, common_dep],
   install: false
   )
 
@@ -36,7 +36,7 @@ test_apply = executable('test_apply',
 test_apply_mpi = executable('test_apply_mpi',
   'test_apply_mpi.cpp',
   include_directories: inc,
-  dependencies: [operator_mpi_dep, common_dep, operator_dep],
+  dependencies: [operator_mpi_dep, common_dep, linalg_routines_dep, operator_dep],
   install: false
   )
 

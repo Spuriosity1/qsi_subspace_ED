@@ -39,7 +39,7 @@ struct MPIContext {
     std::vector<ZBasisBase::idx_t> idx_partition;
 
     // naively divides into index sectors
-    void build_idx_partition(size_t n_basis_states){
+    void build_idx_partition(int n_basis_states){
         std::cout<<"Building index partion with "<<n_basis_states<<"states\n";
         if (world_size > n_basis_states) {
             throw std::runtime_error("Too many nodes for too small a basis!");
@@ -112,9 +112,9 @@ protected:
     void evaluate_add_off_diag_pipeline(const coeff_t* x, coeff_t* y) const;
 
 
-    MPIContext& ctx;
 	const B& basis;
 	const SymbolicOpSum<coeff_t> ops;
+    MPIContext& ctx;
 private:
     static constexpr double APPLY_TOL=1e-15;
 

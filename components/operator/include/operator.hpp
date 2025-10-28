@@ -121,11 +121,11 @@ struct ZBasisBase {
     using state_t = Uint128; // type which stores the computational basis state
     using idx_t = int64_t;  // the type to use for the indices themselves
 
-	size_t dim() const {
+	idx_t dim() const {
 		return states.size();
 	}
 
-	size_t size() const {
+	idx_t size() const {
 		return states.size();
 	}
 

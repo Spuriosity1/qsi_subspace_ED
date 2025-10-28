@@ -22,7 +22,7 @@ benchmark_uint128 = executable('benchmark_uint128',
 bench_apply = executable('bench_apply',
   'bench_apply.cpp',
   include_directories: [inc],
-  dependencies: [operator_dep, common_dep],
+  dependencies: [operator_dep, linalg_routines_dep, common_dep],
   link_with: expectation_eval,
   install: false
   )
@@ -31,7 +31,7 @@ bench_apply = executable('bench_apply',
 bench_apply_mpi = executable('bench_apply_mpi',
   'bench_apply_mpi.cpp',
   include_directories: [inc, operator_inc],
-  dependencies: [common_dep, eigen_dep, mpi_dep],
+  dependencies: [common_dep, eigen_dep,  linalg_routines_dep, mpi_dep],
   link_with: [bench_operator_mpi_lib],
   install: false
   )

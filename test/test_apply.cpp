@@ -4,7 +4,9 @@
 #include "operator_matrix.hpp"
 #include <random>
 #include "timeit.hpp"
-#include "matrix_diag_bits.hpp"
+#include <fstream>
+#include "common_bits.hpp"
+//#include "matrix_diag_bits.hpp"
 
 
 using json = nlohmann::json;
@@ -81,7 +83,7 @@ int main(int argc, char* argv[]){
     u2.resize(basis.dim());
     u3.resize(basis.dim());
     std::mt19937 rng(seed);
-    set_random_unit(v, rng);
+    projED::set_random_unit(v, rng);
 
     std::fill(u1.begin(), u1.end(), 0);
     std::fill(u2.begin(), u2.end(), 0);

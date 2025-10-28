@@ -5,7 +5,8 @@
 #include <random>
 #include "timeit.hpp"
 #include <fstream>
-#include "lanczos.hpp"
+#include "common_bits.hpp"
+//#include "lanczos.hpp"
 
 
 
@@ -69,7 +70,7 @@ int main(int argc, char* argv[]){
 
     u1.resize(basis.dim());
     std::mt19937 rng(seed);
-    set_random_unit(v, rng);
+    projED::set_random_unit(v, rng);
 
 
     std::cout<<"[BST]  Apply..."<<std::endl;

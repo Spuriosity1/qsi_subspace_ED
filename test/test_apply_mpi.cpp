@@ -5,7 +5,8 @@
 #include "operator_mpi.hpp"
 #include <random>
 #include "timeit.hpp"
-#include "lanczos.hpp"
+//#include "lanczos.hpp"
+#include "common_bits.hpp"
 #include <fstream>
 #include "basis_format_bits.hpp"
 
@@ -97,7 +98,7 @@ int main(int argc, char* argv[]){
 //    u2_local.resize(ctx.local_block_size());
 
     std::mt19937 rng(seed);
-    set_random_unit(v_global, rng);
+    projED::set_random_unit(v_global, rng);
 
     std::fill(u_global.begin(), u_global.end(), 0);
     std::fill(u1_local.begin(), u1_local.end(), 0);

@@ -27,7 +27,7 @@ void LazyOpSum<coeff_t, B>::evaluate_add_off_diag(const coeff_t* x, coeff_t* y) 
 // accelerated with openMPI
 template <RealOrCplx coeff_t, Basis B>
 void LazyOpSum<coeff_t, B>::evaluate_add_off_diag_omp(const coeff_t* x, coeff_t* y) const {
-    static const size_t CHUNK_SIZE = 10000;
+//    static const size_t CHUNK_SIZE = 10000;
 
 
     for (const auto& term : ops.off_diag_terms) {

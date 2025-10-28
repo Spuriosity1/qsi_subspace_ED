@@ -21,6 +21,7 @@
 #include <unsupported/Eigen/SparseExtra>
 
 using namespace Eigen;
+using namespace projED;
 
 template <typename T>
 struct is_sym_solver : std::false_type {};
@@ -160,7 +161,8 @@ inline diagonalise_real(const LazyOpSum<double, basis_t>& H, const argparse::Arg
         sett.rel_tol = pow(10,prog.get<int>("--rtol"));
 
 
-        auto res = eigval0_lanczos<LazyOpSum<double, basis_t>, double>(H, E0, eigvec, sett);
+        RealAppl
+        auto res = lanczos::eigval0(H, E0, eigvec, sett);
 //        res.converged;
 
         return std::make_pair(

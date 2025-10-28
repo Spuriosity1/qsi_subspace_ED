@@ -95,7 +95,7 @@ inline std::vector<Uint128> read_basis_hdf5(
             };
 
             for (int r = 0; r < ctx.world_size; ++r) {              
-                assert(ctx.idx_partition[r] < total_rows);
+                assert(ctx.idx_partition[r] < static_cast<int>(total_rows));
                 ctx.state_partition[r] = read_state(ctx.idx_partition[r]);
             }
 
@@ -273,8 +273,9 @@ void MPILazyOpSum<coeff_t, B>::evaluate_add_diagonal(const coeff_t* x, coeff_t* 
         const auto& op = term.second;
 
         assert(op.is_diagonal());
-
-        #pragma omp parallel for schedule(static)
+       
+        // there is no need to communicate, it's literally just this??
+//        #pragma omp parallel for schedule(static)
         for (ZBasisBase::idx_t i = 0; i<ctx.local_block_size(); ++i){
             ZBasisBase::state_t psi = basis[i];
             coeff_t dy = c * x[i] * static_cast<double>(op.applyState(psi));
