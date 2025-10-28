@@ -116,8 +116,6 @@ int main(int argc, char** argv) {
 
     MockHam H(M, dim);
 
-    // Output vector
-    std::vector<double> v0(dim);
 
     lanczos::Settings settings;
     settings.krylov_dim = program.get<int>("--krylov_dim");
@@ -135,6 +133,8 @@ int main(int argc, char** argv) {
         H.evaluate_add(x, y);
     };
     double eigval_lanczos = 0.0;
+    // Output vector
+    std::vector<double> v0(dim);
     auto res = lanczos::eigval0(evadd, eigval_lanczos, v0, settings);
 
     // Exact solution with Eigen
@@ -157,6 +157,7 @@ int main(int argc, char** argv) {
     std::cout << "Eigenvalue error: " << err_eigval <<"\n";
     std::cout << "Eigenvector error: " << err_eigvec <<"\n";
 
+    std::cout <<res;
     if (!res.converged) {
         std::cout << "Test failed: Lanczos exceeded maximum iterations\n";
         return 1;

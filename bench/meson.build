@@ -37,3 +37,19 @@ bench_apply_mpi = executable('bench_apply_mpi',
   )
   
 
+bench_lanczos = executable('bench_lanczos',
+  'bench_lanczos.cpp',
+  include_directories: [inc],
+  dependencies: [operator_dep, linalg_routines_dep, common_dep],
+  link_with: expectation_eval,
+  install: false
+  )
+
+bench_lanczos_mpi = executable('bench_lanczos_mpi',
+  'bench_lanczos_mpi.cpp',
+  include_directories: [inc, operator_inc],
+  dependencies: [common_dep, eigen_dep, linalg_routines_mpi_dep],
+  link_with: [operator_mpi_lib],
+  install: false
+  )
+  

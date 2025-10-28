@@ -480,6 +480,17 @@ void MPILazyOpSum<coeff_t, B>::evaluate_add_off_diag_pipeline(const coeff_t* x, 
         bool count_exchange_done = false;
     };
 
+    Timer loc_apply_timer("[local apply]", ctx.my_rank);
+    Timer loc_up_timer("[local update]", ctx.my_rank);
+    Timer rem_up_timer("[remote update]", ctx.my_rank);
+    Timer countx_wait_timer("[count exchange wait]", ctx.my_rank);
+    Timer countx_wait_timer_2("[count exchange wait 2]", ctx.my_rank);
+    Timer remx_wait_timer("[remote exchange wait]", ctx.my_rank);
+
+    std::vector<const Timer*> timers{&loc_apply_timer, &loc_up_timer, &rem_up_timer, &countx_wait_timer, &remx_wait_timer};
+
+    std::vector<std::chrono::duration<double, std::milli>> loc_apply_times;
+
     OperatorCommState prev_op_comm;
     bool has_prev_op = false;
 
@@ -491,7 +502,7 @@ void MPILazyOpSum<coeff_t, B>::evaluate_add_off_diag_pipeline(const coeff_t* x, 
         curr_op_comm.send_dy.resize(ctx.world_size);
 
          // Organize sends by destination rank
-        BENCH_TIMEIT("[EAOD] local apply",
+        BENCH_TIMER_TIMEIT(loc_apply_timer,
         for (ZBasisBase::idx_t il = 0; il < ctx.local_block_size(); ++il) {
             ZBasisBase::state_t state = basis[il];
             auto sign = op.applyState(state);
@@ -506,8 +517,8 @@ void MPILazyOpSum<coeff_t, B>::evaluate_add_off_diag_pipeline(const coeff_t* x, 
 
         // Tell all other nodes how many entries I will send
         // begin non-blocking metadata exchange for CURRENT operator
-        BENCH_TIMEIT("[EAOD][mpi] Begin count exchange",
-            std::vector<int> sendcounts(ctx.world_size, 0);
+        std::vector<int> sendcounts(ctx.world_size, 0);
+        {
 
             for (int r = 0; r < ctx.world_size; ++r) {
                 sendcounts[r] = curr_op_comm.send_states[r].size();
@@ -519,10 +530,11 @@ void MPILazyOpSum<coeff_t, B>::evaluate_add_off_diag_pipeline(const coeff_t* x, 
             MPI_Ialltoall(sendcounts.data(), 1, MPI_INT,
                          curr_op_comm.recvcounts.data(), 1, MPI_INT,
                          MPI_COMM_WORLD, &curr_op_comm.count_exchange_req);
-        )
+        }
+        
 
         // Process local updates immediately
-        BENCH_TIMEIT("[EAOD] local updates",
+        BENCH_TIMER_TIMEIT(loc_up_timer,
             for (size_t i = 0; i < curr_op_comm.send_states[ctx.my_rank].size(); ++i) {
                 ZBasisBase::idx_t local_idx;
                 ASSERT_STATE_FOUND("self", curr_op_comm.send_states[ctx.my_rank][i],
@@ -535,7 +547,7 @@ void MPILazyOpSum<coeff_t, B>::evaluate_add_off_diag_pipeline(const coeff_t* x, 
 
         // === PROCESS PREVIOUS OPERATOR'S RECEIVES ===
         if (has_prev_op) {
-            BENCH_TIMEIT("[EAOD][mpi] wait prev count exchange",
+            BENCH_TIMER_TIMEIT(countx_wait_timer,
             // Wait for previous operator's count exchange if not done
             // this if statement is probably always true, it's just for safety
             if (!prev_op_comm.count_exchange_done) { 
@@ -546,7 +558,6 @@ void MPILazyOpSum<coeff_t, B>::evaluate_add_off_diag_pipeline(const coeff_t* x, 
 
             DEBUG_PRINT_VEC(">> recv ", op_index-1, prev_op_comm.recvcounts, ctx)
             
-            BENCH_TIMEIT("[EAOD][mpi] post prev receives",
             // Now we know who will send to us for previous operator
             // recvcounts is now populated and readable
             for (int source = 0; source < ctx.world_size; ++source) {
@@ -569,9 +580,9 @@ void MPILazyOpSum<coeff_t, B>::evaluate_add_off_diag_pipeline(const coeff_t* x, 
                          prev_op_comm.recvcounts[source], get_mpi_type<coeff_t>(),
                          source, 10*(op_index-1) +2, MPI_COMM_WORLD, &prev_op_comm.requests.back());
             }
-            )
             
-            BENCH_TIMEIT("[EAOD][mpi] wait prev comm",
+            
+            BENCH_TIMER_TIMEIT(remx_wait_timer,
             // Wait for previous operator's communication to complete
             if (!prev_op_comm.requests.empty()) {
                 MPI_Waitall(prev_op_comm.requests.size(), prev_op_comm.requests.data(), 
@@ -579,7 +590,7 @@ void MPILazyOpSum<coeff_t, B>::evaluate_add_off_diag_pipeline(const coeff_t* x, 
             }
             )
             
-            BENCH_TIMEIT("[EAOD] process prev receives",
+            BENCH_TIMER_TIMEIT(rem_up_timer,
             // Process previous operator's received updates
             for (size_t i = 0; i < prev_op_comm.recv_sources.size(); ++i) {
                 for (size_t j = 0; j < prev_op_comm.recv_states_bufs[i].size(); ++j) {
@@ -594,15 +605,13 @@ void MPILazyOpSum<coeff_t, B>::evaluate_add_off_diag_pipeline(const coeff_t* x, 
             )
         }
 
-
         // === DATA SENDS FOR CURRENT OPERATOR ===
-        BENCH_TIMEIT("[EAOD] wait curr count exchange",
+        BENCH_TIMER_TIMEIT(countx_wait_timer_2,
         // Wait for current operator's count exchange to complete
         MPI_Wait(&curr_op_comm.count_exchange_req, MPI_STATUS_IGNORE);
         curr_op_comm.count_exchange_done = true;
         )
 
-        BENCH_TIMEIT("[EAOD] initiate curr sends",
         // Begin sending to all non-empty, non-self targets
         for (int target_rank=0; target_rank<ctx.world_size; target_rank++){
             if (target_rank == ctx.my_rank || 
@@ -621,7 +630,7 @@ void MPILazyOpSum<coeff_t, B>::evaluate_add_off_diag_pipeline(const coeff_t* x, 
                     &curr_op_comm.requests.back());
 
         }
-        )
+        
 
         // get ready for next iteration
         prev_op_comm = std::move(curr_op_comm);
@@ -633,7 +642,7 @@ void MPILazyOpSum<coeff_t, B>::evaluate_add_off_diag_pipeline(const coeff_t* x, 
 
     // === PROCESS FINAL OPERATOR'S RECEIVES ===
     if (has_prev_op) {
-        BENCH_TIMEIT("[EAOD][mpi] wait final count exchange",
+        BENCH_TIMER_TIMEIT(countx_wait_timer,
         // Wait for previous operator's count exchange if not done
         // this if statement is probably always true, it's just for safety
         if (!prev_op_comm.count_exchange_done) { 
@@ -644,7 +653,6 @@ void MPILazyOpSum<coeff_t, B>::evaluate_add_off_diag_pipeline(const coeff_t* x, 
 
         DEBUG_PRINT_VEC(">> recv final ", op_index-1, prev_op_comm.recvcounts, ctx)
         
-        BENCH_TIMEIT("[EAOD][mpi] post final receives",
         // Now we know who will send to us for previous operator
         // recvcounts is now populated and readable
         for (int source = 0; source < ctx.world_size; ++source) {
@@ -667,9 +675,9 @@ void MPILazyOpSum<coeff_t, B>::evaluate_add_off_diag_pipeline(const coeff_t* x, 
                      prev_op_comm.recvcounts[source], get_mpi_type<coeff_t>(),
                      source, 10*(op_index-1) + 2, MPI_COMM_WORLD, &prev_op_comm.requests.back());
         }
-        )
         
-        BENCH_TIMEIT("[EAOD][mpi] wait final comm",
+        
+        BENCH_TIMER_TIMEIT(remx_wait_timer,
         // Wait for previous operator's communication to complete
         if (!prev_op_comm.requests.empty()) {
             MPI_Waitall(prev_op_comm.requests.size(), prev_op_comm.requests.data(), 
@@ -677,7 +685,7 @@ void MPILazyOpSum<coeff_t, B>::evaluate_add_off_diag_pipeline(const coeff_t* x, 
         }
         )
         
-        BENCH_TIMEIT("[EAOD] process final receives",
+        BENCH_TIMER_TIMEIT(rem_up_timer,
         // Process previous operator's received updates
         for (size_t i = 0; i < prev_op_comm.recv_sources.size(); ++i) {
             for (size_t j = 0; j < prev_op_comm.recv_states_bufs[i].size(); ++j) {
@@ -691,6 +699,15 @@ void MPILazyOpSum<coeff_t, B>::evaluate_add_off_diag_pipeline(const coeff_t* x, 
         }
         )
     }
+
+
+// print diagnostics
+#ifdef SUBSPACE_ED_BENCHMARK_OPERATIONS
+        for (auto t : timers){
+            t->print_summary();
+        }
+#endif
+
 
 
 
