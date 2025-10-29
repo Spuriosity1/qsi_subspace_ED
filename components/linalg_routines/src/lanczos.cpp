@@ -105,14 +105,14 @@ Result lanczos_iterate(ApplyFn evaluate_add,
 
     std::vector<_S> _tmp; // storage for the Ritz vector
 
-
-    for (size_t j = 0; j < settings.max_iterations; j++) {
+    auto&iter_no = retval.n_iterations;
+    for (iter_no = 0; iter_no < settings.max_iterations; iter_no++) {
        // optional accumulation of Ritz combination
-        if (eigvec && ritz && j < (size_t)ritz->size()) {
-            axpy(*eigvec, v, (*ritz)[j]); // eigvec += ritz[j] * v
+        if (eigvec && ritz && iter_no < (size_t)ritz->size()) {
+            axpy(*eigvec, v, (*ritz)[iter_no]); // eigvec += ritz[j] * v
         } 
         
-        if (j > 0) {
+        if (iter_no > 0) {
             // u = - beta_{j-1} * v_{j-1} (note: after swap, u holds v_{j-1})
             //sub(u, v, beta);
             mul(u, -beta);
@@ -137,17 +137,17 @@ Result lanczos_iterate(ApplyFn evaluate_add,
         mul(v, 1/beta);
 
         if (settings.verbosity > 1) {
-            std::cout << "Iter "<< j << " a[j]="<<alpha<<" b[j]="<<beta << "\n";
+            std::cout << "Iter "<< iter_no << " a[j]="<<alpha<<" b[j]="<<beta << "\n";
         }
 
         alphas.push_back(alpha);
         betas.push_back(beta);
 
          // Convergence test: compute current eigenvalue estimate
-        if (j >= settings.min_iterations) {
-            check_lanczos_convergence<_S>(alphas, betas, eigval, j, settings, retval);
+        if (iter_no >= settings.min_iterations) {
+            check_lanczos_convergence<_S>(alphas, betas, eigval, iter_no, settings, retval);
             if (settings.verbosity > 0) {
-                std::cout << "Iter "<< j << " eigval error " << retval.eigval_error << "\n";
+                std::cout << "Iter "<< iter_no << " eigval error " << retval.eigval_error << "\n";
             }
 
             if (retval.converged) {

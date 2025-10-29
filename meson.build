@@ -59,6 +59,9 @@ accelerate_dep = declare_dependency(
     link_args: ['-framework', 'Accelerate'],
   )
 
+if host_cpu.startswith('aarch64') and blas_backend != 'Accelerate'
+  message('Trying to link with a non-Accelerate BLAS backend on macOS. This will probably not work!')
+endif
 
 if blas_backend == 'Accelerate'
   blas_dep = accelerate_dep
@@ -137,10 +140,49 @@ endif
 message('Using BLAS backend: @0@'.format(blas_backend))
 
 
-hdf5_dep = dependency('hdf5',
+
+mpi_dep = dependency('mpi', language: 'cpp', required:true)
+
+hdf5_raw_dep = dependency('hdf5',
   language: 'c',
   required: false,
   not_found_message: 'dependency HDF5 not found')
+
+
+if hdf5_raw_dep.found()
+
+  hdf5_is_parallel = false
+  # Check if h5pcc exists and supports parallel
+  
+  # Check for parallel support
+  cpp = meson.get_compiler('cpp')
+  parallel_test = '''
+  #include <H5pubconf.h>
+  #ifndef H5_HAVE_PARALLEL
+  #error "No parallel"
+  #endif
+  int main() { return 0; }
+  '''
+
+  hdf5_is_parallel = cpp.compiles(parallel_test, 
+    dependencies: hdf5_raw_dep,
+    name: 'HDF5 parallel support')
+
+  h5_dep_dep = [hdf5_raw_dep]
+  if hdf5_is_parallel
+    message('HDF5 has parallel support')
+    h5_dep_dep += mpi_dep
+  else
+    error('HDF5 does not have parallel support')
+  endif
+
+  hdf5_dep = declare_dependency(
+    dependencies: h5_dep_dep
+    )
+endif
+
+
+
 
 json_dep = dependency('nlohmann_json', required: true)
 
@@ -150,7 +192,6 @@ spectra_dep = dependency('spectra', method: 'cmake')
 
 omp_dep = dependency('OpenMP', required: true)
 
-mpi_dep = dependency('mpi', language: 'cpp')
 
 cmake_opts = cmake.subproject_options()
 cmake_opts.add_cmake_defines({
@@ -179,14 +220,23 @@ expectation_eval = static_library('expectation_eval', 'src/expectation_eval.cpp'
   dependencies: [operator_dep, linalg_routines_dep, g_deps])
 
 
-#diag_DOQSI_ham = executable('diag_DOQSI_ham',
-#  files(['src/diag_DOQSI_ham.cpp']),
-#  dependencies: [g_deps, eigen_dep, spectra_dep],
-#  include_directories: inc,
-#  link_with: expectation_eval,
-#  cpp_args: target_args
-#  )
-#
+diag_DOQSI_ham = executable('diag_DOQSI_ham',
+  files(['src/diag_DOQSI_ham.cpp']),
+  dependencies: [g_deps, eigen_dep, operator_dep, linalg_routines_dep, spectra_dep],
+  include_directories: inc,
+  link_with: expectation_eval,
+  cpp_args: target_args
+  )
+
+diag_DOQSI_ham_mpi = executable('diag_DOQSI_ham_mpi',
+  files(['src/diag_DOQSI_ham_mpi.cpp']),
+  dependencies: [g_deps, eigen_dep, operator_mpi_dep, linalg_routines_mpi_dep],
+  include_directories: inc,
+  link_with: expectation_eval,
+  cpp_args: target_args
+  )
+
+
 #build_hamiltonian = executable('build_hamiltonian',
 #  files(['src/build_hamiltonian.cpp', 'src/expectation_eval.cpp']),
 #  dependencies: [g_deps, eigen_dep, spectra_dep],
@@ -203,13 +253,13 @@ expectation_eval = static_library('expectation_eval', 'src/expectation_eval.cpp'
 #  )
 
 
-#eval_observables = executable('eval_observables',
-#  files(['src/eval_observables.cpp', 'src/expectation_eval.cpp']),
-#  dependencies: [g_deps, eigen_dep, omp_dep, spectra_dep],
-#  include_directories: inc,
-#  link_with: expectation_eval,
-#  cpp_args: target_args
-#  )
+eval_observables = executable('eval_observables',
+  files(['src/eval_observables.cpp', 'src/expectation_eval.cpp']),
+  dependencies: [g_deps, eigen_dep, omp_dep, operator_dep, linalg_routines_dep, spectra_dep],
+  include_directories: inc,
+  link_with: expectation_eval,
+  cpp_args: target_args
+  )
 #
 #
 #eval_dsf = executable('eval_dsf',

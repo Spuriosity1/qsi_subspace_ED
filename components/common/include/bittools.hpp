@@ -10,6 +10,7 @@
 
 
 union Uint128 {
+    static const int i64_width=2;
     __uint128_t uint128;
     uint64_t uint64[2];
     constexpr Uint128(){uint128 = 0;}

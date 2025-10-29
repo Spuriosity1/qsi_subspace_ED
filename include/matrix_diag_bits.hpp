@@ -115,7 +115,17 @@ inline void compute_eigenspectrum_dense(const MatrixXd& ham, Eigen::VectorXd& e,
     }
 }
 
-
+template<typename T>
+requires std::derived_from<lanczos::Settings, T>
+void parse_lanczos_settings(const argparse::ArgumentParser& prog, T& sett){
+    sett.krylov_dim = prog.get<int>("--ncv");
+    sett.verbosity = 2;
+    sett.min_iterations = 10;
+    sett.calc_eigenvector = true;
+    sett.x0_seed = prog.get<int>("--rng_seed");
+    sett.abs_tol = pow(10,prog.get<int>("--atol"));
+    sett.rel_tol = pow(10,prog.get<int>("--rtol"));
+}
 
 
 template<Basis basis_t>
@@ -151,19 +161,16 @@ inline diagonalise_real(const LazyOpSum<double, basis_t>& H, const argparse::Arg
         double E0;
         std::vector<double> eigvec;
 
-        LanczosSettings sett;
-        sett.krylov_dim = prog.get<int>("--ncv");
-        sett.verbosity = 2;
-        sett.min_iterations = 10;
-        sett.calc_eigenvector = true;
-        sett.x0_seed = prog.get<int>("--rng_seed");
-        sett.abs_tol = pow(10,prog.get<int>("--atol"));
-        sett.rel_tol = pow(10,prog.get<int>("--rtol"));
+        lanczos::Settings settings;
+        parse_lanczos_settings(prog, settings);
 
-
-        RealAppl
-        auto res = lanczos::eigval0(H, E0, eigvec, sett);
+        RealApplyFn evadd = [H](const double* x, double* y){
+            H.evaluate_add(x, y);
+        };
+        eigvec.resize(H.cols());
+        auto res = lanczos::eigval0(evadd, E0, eigvec, settings);
 //        res.converged;
+        std::cout<< "Diagonalisation result: "<<res<<"\n";
 
         return std::make_pair(
         Eigen::Map<const Eigen::VectorXd>(&E0, 1),

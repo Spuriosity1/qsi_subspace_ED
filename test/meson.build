@@ -10,6 +10,12 @@ test_uint128 = executable('test_uint128',
   dependencies: common_dep,
   install : false)
 
+#exp_orbit_partition = executable('exp_orbit', 'test_orbit.cpp',
+#  include_directories: inc,
+#  dependencies: [json_dep, operator_dep],
+#  install: false
+#  )
+
 
 test_PMR_operator = executable('test_PMR_operator',
   'test_PMR_construct.cpp',

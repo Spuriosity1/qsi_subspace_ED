@@ -245,6 +245,21 @@ void write_cross_corr_vals_h5(
 
 // helper HDF5 functions
 
+std::string read_string_from_hdf5(hid_t file_id, const std::string& dataset_name) {
+    hid_t dset_id = H5Dopen(file_id, dataset_name.c_str(), H5P_DEFAULT);
+    hid_t dtype = H5Dget_type(dset_id);
+
+    char* rdata;  // HDF5 will allocate memory for this
+    H5Dread(dset_id, dtype, H5S_ALL, H5S_ALL, H5P_DEFAULT, &rdata);
+
+    std::string result(rdata);
+    free(rdata);  // Free the memory allocated by HDF5
+
+    H5Tclose(dtype);
+    H5Dclose(dset_id);
+    return result;
+}
+
 void write_string_to_hdf5(hid_t file_id, const std::string& dataset_name, const std::string& value) {
     // Step 1: Create scalar dataspace (for a single string)
     hid_t dataspace_id = H5Screate(H5S_SCALAR);

@@ -35,7 +35,6 @@ int main(int argc, char* argv[]){
         return 1;
     }
 
-
     unsigned int seed = prog.get<unsigned int>("--seed");
 
 	ZBasisBST basis;

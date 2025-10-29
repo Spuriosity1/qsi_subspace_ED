@@ -4,13 +4,15 @@
 #include <nlohmann/json.hpp>
 #include <stdexcept>
 #include <vector>
-
+#include <fstream>
 #include "physics/geometry.hpp"
 
-#include "matrix_diag_bits.hpp"
-#include "operator.hpp"
-
+//#include "matrix_diag_bits.hpp"
 #include "expectation_eval.hpp"
+#include "basis_format_bits.hpp"
+#include "operator.hpp"
+//#include "admin.hpp"
+
 
 using json=nlohmann::json;
 using namespace std;
@@ -87,7 +89,9 @@ int main(int argc, char* argv[]) {
 
     // truncate to the requested # of eigenvectors
     int n_eigvecs = std::min(static_cast<int>(eigvecs.cols()), prog.get<int>("--n_eigvecs"));
+    if (eigvals.size() > 1){
     assert(eigvals[0] <= eigvals[1]); // make sure we don't so sth stupid
+    }
 
     fs::path latfile = latfile_dir/latfile_name;
 	std::ifstream jfile(latfile);

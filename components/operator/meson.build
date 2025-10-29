@@ -1,9 +1,13 @@
 operator_inc = [include_directories('include'), common_inc]
 
-operator_src = ['src/operator.cpp', 'src/operator_matrix.cpp']
+operator_src = ['src/operator.cpp', 
+  'src/group_theory.cpp', 
+  'src/operator_matrix.cpp']
+
+operator_dep_set = [g_deps, eigen_dep, omp_dep ]
 
 operator_lib = static_library('operator', operator_src,
-  dependencies: [g_deps, eigen_dep, omp_dep ],
+  dependencies: operator_dep_set,
   include_directories: operator_inc,
   cpp_args: target_args
   )
@@ -30,7 +34,7 @@ endif
 operator_dep = declare_dependency(
   link_with: operator_lib,
   include_directories: operator_inc,
-  dependencies: [hdf5_dep, omp_dep, eigen_dep, lapack_dep, spectra_dep]
+  dependencies: operator_dep_set
   )
 
 operator_mpi_dep = declare_dependency(

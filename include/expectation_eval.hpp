@@ -68,6 +68,7 @@ void write_cross_corr_vals_h5(
 );
 
 
+std::string read_string_from_hdf5(hid_t file_id, const std::string& dataset_name); 
 
 void write_string_to_hdf5(hid_t file_id, const std::string& dataset_name, const std::string& value);
 

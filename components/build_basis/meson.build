@@ -5,8 +5,6 @@ basis_common_src= [
   'src/pyro_tree.cpp',
   ]
 
-spinon_basis_sources = files(['gen_spinon_basis.cpp'] + basis_common_src) 
-spinon_basis_big_sources = files(['sbsearch.cpp'] + basis_common_src) 
 
 partition_basis = executable('partition_basis', files('partition_basis.cpp'),
     dependencies: common_dep,
@@ -21,15 +19,26 @@ polyring_basis = executable('polyring_basis', files('polyring_basis.cpp'),
   install: true
   )
 
-gen_spinon_basis = executable('gen_spinon_basis',spinon_basis_sources, 
+gen_spinon_basis = executable('gen_spinon_basis',
+  files(['gen_spinon_basis.cpp'] + basis_common_src), 
   dependencies: common_dep,
   include_directories: basis_inc,
   cpp_args: target_args,
   install: true
  )
 
-sbsearch = executable('sbsearch', spinon_basis_big_sources, 
+sbsearch = executable('sbsearch', files(['sbsearch.cpp'] + basis_common_src) 
+, 
   dependencies: common_dep,
+  include_directories:basis_inc,
+  cpp_args: target_args,
+  install: true
+  )
+
+
+sbsearch_mpi = executable('sbsearch_mpi', 
+  files(['sbsearch_mpi.cpp', 'src/pyro_tree_mpi.cpp'] + basis_common_src), 
+  dependencies: [common_dep, mpi_dep],
   include_directories:basis_inc,
   cpp_args: target_args,
   install: true
