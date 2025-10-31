@@ -2,6 +2,8 @@
 #include <cstddef>
 #include <array>
 #include <vector>
+#include <bit>
+#include "old_gcc_shims.hpp"
 
 namespace Benes {
 
