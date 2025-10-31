@@ -1,5 +1,4 @@
 #pragma once
-#include <concepts>
 
 template<typename T>
 concept RealOrCplx = std::floating_point<T> ||

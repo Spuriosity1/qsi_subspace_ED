@@ -165,6 +165,24 @@ Result lanczos_iterate(ApplyFn evaluate_add,
         }
     } // end lanczos iteration
       
+
+    // end of iteration: check if we got the right vector
+    if (eigvec && settings.verify_eigenvector){
+        std::fill(u.begin(), u.end(), 0);
+        evaluate_add(eigvec->data(), u.data());
+        // u -= e * eigenvector
+        axpy(u, *eigvec, -eigval);
+
+        double err2_local = innerReal(u, u);
+        double err2;
+        MPI_Allreduce(&err2_local, &err2, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
+        retval.eigvec_error = sqrt(err2);
+        std::cout << "[Lanczos] Local evector error rank "<<settings.ctx.my_rank<<
+            ": "<<sqrt(err2_local)<<
+            "\n global evector error: " << retval.eigvec_error <<"\n";
+    }
+
+      
     // Ensure all ranks have consistent final results
     if (settings.ctx.my_rank == 0) {
         retval.n_iterations = alphas.size();
@@ -172,6 +190,7 @@ Result lanczos_iterate(ApplyFn evaluate_add,
     MPI_Bcast(&retval.n_iterations, 1, MPI_INT, 0, MPI_COMM_WORLD);
     MPI_Bcast(&retval.converged, 1, MPI_C_BOOL, 0, MPI_COMM_WORLD);
     MPI_Bcast(&retval.eigval_error, 1, MPI_DOUBLE, 0, MPI_COMM_WORLD);
+    MPI_Bcast(&retval.eigvec_error, 1, MPI_DOUBLE, 0, MPI_COMM_WORLD);
 
     return retval;
 }
@@ -218,7 +237,7 @@ Result eigval0_impl(ApplyFn apply_add, double& eigval,
     // ----------------------------
     std::vector<_S> evector(dim);
     
-    lanczos_iterate(apply_add, v, alphas, betas, settings,
+    res = lanczos_iterate(apply_add, v, alphas, betas, settings,
             &ritz, &evector
             );
     std::swap(evector, v);

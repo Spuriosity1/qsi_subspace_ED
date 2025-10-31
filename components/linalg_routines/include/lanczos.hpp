@@ -1,3 +1,4 @@
+#pragma once
 #include <Eigen/Eigenvalues>
 #include "common_bits.hpp"
 
@@ -15,6 +16,7 @@ struct Settings {
     int verbosity = 0;
     unsigned int x0_seed=10;
     bool calc_eigenvector = false;
+    bool verify_eigenvector= false;
 };
 
 
@@ -36,6 +38,7 @@ inline std::ostream& operator<<(std::ostream& os, const Settings& settings)
     os << "  Minimum iterations:        " << settings.min_iterations << "\n";
     os << "  Maximum iterations:        " << settings.max_iterations << "\n";
     os << "  Initial vector seed:       " << settings.x0_seed << "\n";
+    os << "  Verify eigenvector:        " << (settings.verify_eigenvector ? "yes\n" : "no\n");
     os << "---------------------------\n";
     os << "  Verbosity level:           " << settings.verbosity << " (0=silent, higher=more output)\n";
     os << "  Calculate eigenvectors:    " << (settings.calc_eigenvector ? "yes" : "no") << "\n";

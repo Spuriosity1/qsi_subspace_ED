@@ -5,28 +5,13 @@
 #include "hamiltonian_setup.hpp"
 #include "operator_mpi.hpp"
 #include "lanczos_mpi.hpp"
+#include "lanczos_cli.hpp"
 #include "expectation_eval.hpp"
 #include <fstream>
 #include <filesystem>
 
-
-
-
-
 using json = nlohmann::json;
 using namespace projED;
-
-
-void parse_lanczos_settings(const argparse::ArgumentParser& prog, lanczos_mpi::Settings& sett){
-    sett.krylov_dim = prog.get<int>("--ncv");
-    sett.verbosity = 2;
-    sett.min_iterations = 10;
-    sett.calc_eigenvector = true;
-    sett.x0_seed = prog.get<int>("--rng_seed");
-    sett.abs_tol = pow(10,prog.get<int>("--atol"));
-    sett.rel_tol = pow(10,prog.get<int>("--rtol"));
-}
-
 
 
 int main(int argc, char* argv[]) {
@@ -58,40 +43,16 @@ int main(int argc, char* argv[]) {
         .help("output directory");
 
     // NUMERICAL BS
-	prog.add_argument("--ncv", "-k")
-		.help("Krylov dimension, should be > 2*n_eigvals")
-		.default_value(15)
-		.scan<'i', int>();
-	prog.add_argument("--atol")
-		.help("Absolute convergence tolerance, specify as exponent e.g. -8 = 10^-8")
-		.default_value(-8)
-		.scan<'i', int>();
-	prog.add_argument("--rtol")
-		.help("Relative tolerance, specify as exponent e.g. -8 = 10^-8")
-		.default_value(-8)
-		.scan<'i', int>();
-
-	prog.add_argument("--rng_seed", "-s")
-		.help("Seed used to generate random Lanczos vectors.")
-		.default_value(0)
-		.scan<'i', int>();
-	prog.add_argument("--n_spinons")
+    provide_lanczos_options(prog);
+    prog.add_argument("--n_spinons")
         .default_value(0)
         .scan<'i', int>();
 
-    prog.add_argument("--max_iters")
-        .help("Max steps for iterative solver")
-        .default_value(1000)
-        .scan<'i', int>();
-    prog.add_argument("--tol")
-        .help("Tolerance iterative solver")
-        .default_value(1e-10)
-        .scan<'g', double>();
-
-    prog.add_argument("--algorithm", "-a")
-        .choices("dense","sparse","mfsparse","mfeig0")
-        .help("Variant of ED algorithm to run. dense is best for small problems, mfsparse is a matrix free method that trades off speed for memory.");
-		
+//    prog.add_argument("--max_iters")
+//        .help("Max steps for iterative solver")
+//        .default_value(1000)
+//        .scan<'i', int>();
+	
     try {
         prog.parse_args(argc, argv);
     } catch (const std::exception& err){

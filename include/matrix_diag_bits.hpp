@@ -17,6 +17,7 @@
 #include <Spectra/MatOp/SparseGenMatProd.h>
 
 #include "lanczos.hpp"
+#include "lanczos_cli.hpp"
 
 #include <unsupported/Eigen/SparseExtra>
 
@@ -65,7 +66,7 @@ void compute_spectrum_iterative(const T& ham, VectorXd& evals, MatrixX<S>& evecs
 	n_eigvecs = std::min(n_eigvecs, n_eigvals);
 
     auto max_it = settings.get<int>("--max_iters");
-    auto tol    = settings.get<double>("--tol");
+    auto tol    = pow(10, settings.get<int>("--atol"));
 
 	std::cout << "Using ncv="<<ncv<<" n_eigvals="<<n_eigvals<<std::endl;
 	std::cout << "Eigvecs will be truncated to n_eigvecs="<<n_eigvecs<<std::endl;
@@ -115,18 +116,6 @@ inline void compute_eigenspectrum_dense(const MatrixXd& ham, Eigen::VectorXd& e,
     }
 }
 
-template<typename T>
-requires std::derived_from<lanczos::Settings, T>
-void parse_lanczos_settings(const argparse::ArgumentParser& prog, T& sett){
-    sett.krylov_dim = prog.get<int>("--ncv");
-    sett.verbosity = 2;
-    sett.min_iterations = 10;
-    sett.calc_eigenvector = true;
-    sett.x0_seed = prog.get<int>("--rng_seed");
-    sett.abs_tol = pow(10,prog.get<int>("--atol"));
-    sett.rel_tol = pow(10,prog.get<int>("--rtol"));
-}
-
 
 template<Basis basis_t>
 std::pair<VectorXd, MatrixXd>
@@ -170,7 +159,7 @@ inline diagonalise_real(const LazyOpSum<double, basis_t>& H, const argparse::Arg
         eigvec.resize(H.cols());
         auto res = lanczos::eigval0(evadd, E0, eigvec, settings);
 //        res.converged;
-        std::cout<< "Diagonalisation result: "<<res<<"\n";
+        std::cout<<res<<"\n";
 
         return std::make_pair(
         Eigen::Map<const Eigen::VectorXd>(&E0, 1),

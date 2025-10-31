@@ -3,6 +3,7 @@
 
 #include <nlohmann/json.hpp>
 #include "hamiltonian_setup.hpp"
+#include "lanczos_cli.hpp"
 #include "operator_matrix.hpp"
 #include "hamiltonian_setup.hpp"
 #include "matrix_diag_bits.hpp"
@@ -42,23 +43,6 @@ int main(int argc, char* argv[]) {
         .help("output directory");
 
     // NUMERICAL BS
-	prog.add_argument("--ncv", "-k")
-		.help("Krylov dimension, should be > 2*n_eigvals")
-		.default_value(15)
-		.scan<'i', int>();
-	prog.add_argument("--atol")
-		.help("Absolute convergence tolerance, specify as exponent e.g. -8 = 10^-8")
-		.default_value(-8)
-		.scan<'i', int>();
-	prog.add_argument("--rtol")
-		.help("Relative tolerance, specify as exponent e.g. -8 = 10^-8")
-		.default_value(-8)
-		.scan<'i', int>();
-
-	prog.add_argument("--rng_seed", "-s")
-		.help("Seed used to generate random Lanczos vectors.")
-		.default_value(0)
-		.scan<'i', int>();
 	prog.add_argument("--n_eigvals", "-n")
 		.help("Number of eigenvlaues to compute")
 		.default_value(1)
@@ -71,7 +55,6 @@ int main(int argc, char* argv[]) {
 	prog.add_argument("--n_spinons")
         .default_value(0)
         .scan<'i', int>();
-
 	prog.add_argument("--save_matrix")
 		.help("Flag to get the solver to export a rep of the matrix")
 		.default_value(false)
@@ -80,14 +63,12 @@ int main(int argc, char* argv[]) {
         .help("Max steps for iterative solver")
         .default_value(1000)
         .scan<'i', int>();
-    prog.add_argument("--tol")
-        .help("Tolerance iterative solver")
-        .default_value(1e-10)
-        .scan<'g', double>();
-
     prog.add_argument("--algorithm", "-a")
         .choices("dense","sparse","mfsparse","mfeig0")
         .help("Variant of ED algorithm to run. dense is best for small problems, mfsparse is a matrix free method that trades off speed for memory.");
+
+    // more numerical options:
+    provide_lanczos_options(prog);
 		
     try {
         prog.parse_args(argc, argv);

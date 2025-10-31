@@ -1,5 +1,6 @@
 #include "lanczos.hpp"
 #include <random>
+#include "blas_adapter.hpp"
 #include "timeit.hpp"
 #include <iostream>
 #include "common_bits.hpp"
@@ -62,6 +63,7 @@ void set_random_unit(std::vector<_S>& v, std::mt19937& rng) {
 
 
 // Runs the Lanczos recurrence
+// evaluate_add(src, dest) implements dest += H * src
 template<typename _S, typename ApplyFn>
 Result lanczos_iterate(ApplyFn evaluate_add,
         std::vector<_S>& v, 
@@ -74,7 +76,7 @@ Result lanczos_iterate(ApplyFn evaluate_add,
 {
     auto dim = v.size();
     // Generating the starting vector
-    v.resize(dim);
+//    v.resize(dim);
     std::mt19937 rng(settings.x0_seed);
     set_random_unit(v, rng);
 
@@ -156,6 +158,20 @@ Result lanczos_iterate(ApplyFn evaluate_add,
         }
     }
 
+    // end of iteration: check if we got the right vector
+    if (eigvec && settings.verify_eigenvector){
+        std::cout << "[Lanczos] Verifying...\n";
+        std::fill(u.begin(), u.end(), 0);
+        evaluate_add(eigvec->data(), u.data());
+        // u -= e * eigenvector
+        axpy(u, *eigvec, -eigval);
+        retval.eigvec_error = norm(u); 
+
+        std::cout << "[Lanczos] Retval error is " << retval.eigvec_error <<"\n";
+    }
+
+
+
     return retval;
 }
 
@@ -184,7 +200,8 @@ Result eigval0_impl(ApplyFn apply_add, double& eigval,
     std::vector<double> betas;
 
     std::cout << "[Lanczos] finding lowest eigenvalue\n";
-    Result res = lanczos_iterate(apply_add, v, alphas, betas, settings);
+    Result res;
+    res = lanczos_iterate(apply_add, v, alphas, betas, settings);
 
     std::cout << "[Lanczos] tridiagonalising in Krylov space\n";
     std::vector<double> ritz;
@@ -201,7 +218,7 @@ Result eigval0_impl(ApplyFn apply_add, double& eigval,
     // ----------------------------
     std::vector<_S> evector(dim);
     
-    lanczos_iterate(apply_add, v, alphas, betas, settings,
+    res = lanczos_iterate(apply_add, v, alphas, betas, settings,
             &ritz, &evector
             );
     std::swap(evector, v);

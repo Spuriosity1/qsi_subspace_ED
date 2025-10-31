@@ -1,6 +1,5 @@
 #pragma once
 
-#include <concepts>
 #include <iomanip>
 #include <vector>
 #include <cstdint>
