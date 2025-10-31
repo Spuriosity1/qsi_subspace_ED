@@ -182,7 +182,7 @@ void mpi_par_searcher::build_state_tree(){
         starting_nodes.push(vtree_node_t({0,0,0}));
         _build_state_bfs(starting_nodes, world_size*INITIAL_DEPTH_FACTOR);
 
-        if (starting_nodes.size() < world_size){
+        if (static_cast<int>(starting_nodes.size()) < world_size){
             std::cerr << "Too few starting nodes ("<<starting_nodes.size()<<
                 "). Try running with a msaller world size\n";
             MPI_Abort(MPI_COMM_WORLD, 5);

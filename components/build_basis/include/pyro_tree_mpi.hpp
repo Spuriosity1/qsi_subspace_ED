@@ -92,7 +92,7 @@ mpi_par_searcher(const lattice& lat, unsigned num_spinon_pairs,
         manifest["job_tag"] = job_tag;
         manifest["n_shards"] = world_size;
         manifest["shards"] = nlohmann::json::array();
-        for (unsigned t = 0; t < world_size; ++t) {
+        for (int t = 0; t < world_size; ++t) {
             std::string tmp(namebuf + t*filename_bufsize);
             manifest["shards"].push_back(tmp);
         }
