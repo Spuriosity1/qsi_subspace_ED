@@ -25,7 +25,7 @@ int main (int argc, char *argv[]) {
 		.scan<'i', int>();
 	prog.add_argument("--order_spins")
 		.choices("none", "greedy", "random")
-		.default_value("greedy");
+		.default_value(std::string{"greedy"});
 	prog.add_argument("--tmp_outpath", "-o")
         .required()
         .help("The directory to push sharded output to");

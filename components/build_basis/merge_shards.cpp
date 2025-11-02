@@ -24,75 +24,6 @@ static size_t read_batch(std::ifstream& in,
 
 
 
-// Sort a single shard file in-place using external sort if needed
-void sort_shard_file(const std::string& filename, size_t memory_limit = 1 << 20) {
-    namespace fs = std::filesystem;
-    
-    // Get file size
-    std::ifstream file(filename, std::ios::binary | std::ios::ate);
-    if (!file) {
-        throw std::runtime_error("Failed to open file for sorting: " + filename);
-    }
-    
-    size_t file_size = file.tellg();
-    file.seekg(0, std::ios::beg);
-    file.close();
-    
-    size_t num_elements = file_size / sizeof(Uint128);
-    size_t elements_per_chunk = memory_limit / sizeof(Uint128);
-    
-    if (num_elements <= elements_per_chunk) {
-        // File fits in memory - simple in-memory sort
-        std::vector<Uint128> data(num_elements);
-        
-        std::ifstream in(filename, std::ios::binary);
-        in.read(reinterpret_cast<char*>(data.data()), file_size);
-        in.close();
-        
-        std::sort(data.begin(), data.end());
-        
-        std::ofstream out(filename, std::ios::binary);
-        out.write(reinterpret_cast<const char*>(data.data()), file_size);
-        out.close();
-        
-        std::cout << "Sorted " << filename << " (in-memory, " << num_elements << " elements)\n";
-    } else {
-        throw std::runtime_error("Not Implemented");
-        // File too large - external sort
-        std::cout << "Sorting " << filename << " (external sort, " << num_elements 
-                  << " elements in " << ((num_elements + elements_per_chunk - 1) / elements_per_chunk) 
-                  << " chunks)\n";
-        
-        std::vector<std::string> temp_files;
-        std::ifstream in(filename, std::ios::binary);
-        
-        // Phase 1: Sort chunks and write to temp files
-        size_t chunk_num = 0;
-        std::vector<Uint128> chunk;
-        
-        while (read_batch(in, chunk, elements_per_chunk) > 0) {
-            std::sort(chunk.begin(), chunk.end());
-            
-            std::string temp_name = filename + ".tmp." + std::to_string(chunk_num++);
-            temp_files.push_back(temp_name);
-            
-            std::ofstream temp_out(temp_name, std::ios::binary);
-            temp_out.write(reinterpret_cast<const char*>(chunk.data()), 
-                          chunk.size() * sizeof(Uint128));
-            temp_out.close();
-        }
-        in.close();
-        
-        // Phase 2: K-way merge the temp files back to original file
-        //external_mergesort_to_file(temp_files, filename);
-        
-        // Clean up temp files
-        for (const auto& temp : temp_files) {
-            fs::remove(temp);
-        }
-    }
-}
-
 // K-way merge temp files directly to output file
 void external_mergesort_to_file(const std::vector<std::string>& shard_files,
                                 const std::string& output_filename,
@@ -172,16 +103,91 @@ void external_mergesort_to_file(const std::vector<std::string>& shard_files,
     output.close();
 }
 
+
+// Sort a single shard file in-place using external sort if needed
+void sort_shard_file(const std::string& filename,
+        size_t memory_limit = 1 << 20,
+        bool force_multi_thread=false) {
+    namespace fs = std::filesystem;
+    
+    // Get file size
+    std::ifstream file(filename, std::ios::binary | std::ios::ate);
+    if (!file) {
+        throw std::runtime_error("Failed to open file for sorting: " + filename);
+    }
+    
+    size_t file_size = file.tellg();
+    file.seekg(0, std::ios::beg);
+    file.close();
+    
+    size_t num_elements = file_size / sizeof(Uint128);
+    size_t elements_per_chunk = memory_limit / sizeof(Uint128);
+    
+    if (num_elements <= elements_per_chunk && !force_multi_thread) {
+        // File fits in memory - simple in-memory sort
+        std::vector<Uint128> data(num_elements);
+        
+        std::ifstream in(filename, std::ios::binary);
+        in.read(reinterpret_cast<char*>(data.data()), file_size);
+        in.close();
+        
+        std::sort(data.begin(), data.end());
+        
+        std::ofstream out(filename, std::ios::binary);
+        out.write(reinterpret_cast<const char*>(data.data()), file_size);
+        out.close();
+        
+        std::cout << "Sorted " << filename << " (in-memory, " << num_elements << " elements)\n";
+    } else {
+//        throw std::runtime_error("Not Implemented");
+        // File too large - external sort
+        std::cout << "Sorting " << filename << " (external sort, " << num_elements 
+                  << " elements in " << ((num_elements + elements_per_chunk - 1) / elements_per_chunk) 
+                  << " chunks)\n";
+        
+        std::vector<std::string> temp_files;
+        std::ifstream in(filename, std::ios::binary);
+        
+        // Phase 1: Sort chunks and write to temp files
+        size_t chunk_num = 0;
+        std::vector<Uint128> chunk;
+        
+        while (read_batch(in, chunk, elements_per_chunk) > 0) {
+            std::sort(chunk.begin(), chunk.end());
+            
+            std::string temp_name = filename + ".tmp." + std::to_string(chunk_num++);
+            temp_files.push_back(temp_name);
+            
+            std::ofstream temp_out(temp_name, std::ios::binary);
+            temp_out.write(reinterpret_cast<const char*>(chunk.data()), 
+                          chunk.size() * sizeof(Uint128));
+            temp_out.close();
+        }
+        in.close();
+        
+        // Phase 2: K-way merge the temp files back to original file
+        external_mergesort_to_file(temp_files, filename);
+        
+        // Clean up temp files
+        for (const auto& temp : temp_files) {
+            fs::remove(temp);
+        }
+    }
+}
+
+
 // External merge sort across shard files -> HDF5
 void external_mergesort(const std::vector<std::string> &shard_files,
                         const std::string &outfilename,
-                        size_t batch_size = 1 << 16) {
-    namespace fs = std::filesystem;
+                        size_t batch_size = 1 << 16,
+                        bool force_external_sort=false) {
+//    namespace fs = std::filesystem;
+    static const size_t memory_limit = 1<<20;
     
     // STEP 1: Sort each shard file individually
     std::cout << "Step 1: Sorting individual shard files...\n";
     for (const auto& shard : shard_files) {
-        sort_shard_file(shard);
+        sort_shard_file(shard, memory_limit, force_external_sort);
     }
     std::cout << "Individual shard sorting complete.\n\n";
     

@@ -22,22 +22,23 @@ struct vtree_node_t {
 	// i.e. (1<<curr_spin) & state_thus_far is guaranteed to be 0
 };
 
+inline void print_node(std::ostream& os, const vtree_node_t& node){
+    printHex(os, node.state_thus_far) << " [spin " << node.curr_spin<<"]\n";
+}
+
 
 typedef std::array<int, 4> global_sz_sector_t;
 
 
 template<typename T>
-struct vstack {
-    std::vector<T> m_contents;
-    T top() const { return m_contents.back(); }
+struct vstack : public std::vector<T> {
+    T top() const { return this->back(); }
     T pop() { 
-        T top = m_contents.back();
-        m_contents.pop_back();
+        T top = this->back();
+        this->pop_back();
         return top;
     }
-    bool empty() const { return m_contents.empty(); }
-    size_t size() const { return m_contents.size(); }
-    void push(const T& x) { m_contents.push_back(x); }
+    void push(const T& x) { this->push_back(x); }
 };
 
 
@@ -70,8 +71,8 @@ struct lat_container {
 	template <typename Container>
 	void fork_state_impl(Container& to_examine, vtree_node_t curr); 
 
-    // using cust_stack = vstack<vtree_node_t>;
-    using cust_stack = std::stack<vtree_node_t>;
+    using cust_stack = vstack<vtree_node_t>;
+    //using cust_stack = vstack;
 	void fork_state(cust_stack& to_examine);
 	void fork_state(std::queue<vtree_node_t>& to_examine);
 

@@ -112,7 +112,7 @@ void lat_container::fork_state(cust_stack& to_examine) {
 
 
 void lat_container::fork_state(std::queue<vtree_node_t>& to_examine) {
-    auto& curr = to_examine.front();
+    const auto& curr = to_examine.front();
     fork_state_impl(to_examine, curr);
 	to_examine.pop();
 }

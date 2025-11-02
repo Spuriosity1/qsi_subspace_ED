@@ -1,5 +1,6 @@
 #pragma once
 #include <mpi.h>
+#include <random>
 #include <vector>
 #include "pyro_tree.hpp"
 
@@ -15,7 +16,6 @@ inline int get_mpi_world_size(){
     return x;
 }
 
-
 class mpi_par_searcher : public lat_container {
 
     int world_size;
@@ -25,14 +25,26 @@ class mpi_par_searcher : public lat_container {
     const std::string job_tag;
     
     const std::vector<size_t>& perm;
+
+
     static constexpr unsigned INITIAL_DEPTH_FACTOR = 5;
-    static constexpr int CHECKIN_INTERVAL = 50000000;
-    static constexpr int WORK_REQUEST_TAG = 1;
-    static constexpr int WORK_RESPONSE_TAG = 2;
-    static constexpr int TERMINATION_TAG = 3;
+    static constexpr int CHECK_INTERVAL = 10000;
+
+    // MPI message tags
+    static constexpr int TAG_WORK_REQUEST = 1;
+    static constexpr int TAG_WORK_RESPONSE = 2;
+    static constexpr int TAG_TERMINATION_CHECK = 3;
+    static constexpr int TAG_TERMINATION_RESPONSE = 4;
+
+    // Work request status
+    static constexpr int WORK_AVAILABLE = 1;
+    static constexpr int WORK_UNAVAILABLE = 0;
+
     ShardWriter shard;
 
     cust_stack my_job_stack;
+
+    vtree_node_t pop_hardest_job();
 
 	void _build_state_dfs(cust_stack &node_stack,
 			unsigned long max_stack_size = (1ul << 40));
@@ -40,11 +52,15 @@ class mpi_par_searcher : public lat_container {
 		unsigned long max_queue_len);
 
        // MPI-specific helper methods
+    void state_tree_init();
     void distribute_initial_work(std::queue<vtree_node_t>& starting_nodes);
-    bool check_for_work_requests();
-    bool request_work_from_others();
-    void send_work_to_requester(int requester_rank);
-    bool global_termination_check();
+    void receive_initial_work();
+    bool request_work_from_shuffled();
+    bool request_work_from(int target_rank);
+    bool check_work_requests();
+    bool check_termination_nonblocking(MPI_Request& term_req, bool& checking);
+
+    std::mt19937 rng;
 
 public:
 
