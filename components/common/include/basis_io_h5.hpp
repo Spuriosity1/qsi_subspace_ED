@@ -2,6 +2,7 @@
 #include "bittools.hpp"
 #include <string>
 #include <vector>
+#include <array>
 #include <sstream>
 #include <hdf5.h>
 
@@ -74,6 +75,12 @@ inline void write_basis_hdf5(const std::vector<Uint128>& state_list, const std::
 
 // Helper function to create sector string
 inline std::string make_sector_string(const std::vector<int>& sector) {
+    std::stringstream ss;
+    ss << "basis_s" << sector[0] << "." << sector[1] << "." << sector[2] << "." << sector[3];
+    return ss.str();
+}
+
+inline std::string make_sector_string(const std::array<int, 4>& sector) {
     std::stringstream ss;
     ss << "basis_s" << sector[0] << "." << sector[1] << "." << sector[2] << "." << sector[3];
     return ss.str();

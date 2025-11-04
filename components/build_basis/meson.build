@@ -17,6 +17,7 @@ partition_basis = executable('partition_basis', files('partition_basis.cpp'),
     cpp_args: target_args
     )
 
+
 polyring_basis = executable('polyring_basis', files('polyring_basis.cpp'), 
   dependencies: [common_dep, eigen_dep, operator_dep],
   include_directories:basis_inc,
@@ -56,3 +57,10 @@ merge_shards = executable('merge_shards', 'merge_shards.cpp',
   install: true
   )
 
+
+partition_shard = executable('partition_shard', files('partition_shard.cpp'),
+    dependencies: common_dep,
+    include_directories: basis_inc,
+    cpp_args: target_args,
+    install: true
+    )
