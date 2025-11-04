@@ -25,13 +25,16 @@ function h5diff_cmp() {
 
 function check_diff() {
     if h5diff_cmp $1 "$ref_outfile_h5"; then
-    echo -e "\033[32;1m[hdf5] $2 test passed\033[0m"
+        echo -e "\033[32;1m[hdf5] $2 test passed\033[0m"
     else
-    echo -e "\033[31;1m[hdf5] $2 test failed\033[0m:\
-        h5diff $1 $ref_outfile_h5 != 0"
-    return 1
+        echo -e "\033[31;1m[hdf5] $2 test failed\033[0m:\
+            h5diff $1 $ref_outfile_h5 != 0"
+        return 1
     fi
 }
+
+
+total_ret=0
 
 run_test() {
     local name="$1"
@@ -46,17 +49,19 @@ run_test() {
     "${exec_dir}/merge_shards" "$tmp_dir/manifest-$stem.json" -o "${out_file}"
     
     check_diff "${out_file}.h5" "$name"
+    retval=$?
+    let total_ret+=$retval;
     rm -f "$tmp_dir"/*
     echo
+    return $retval
 }
-
 
 run_test "single-thread" "${exec_dir}/sbsearch" -j 1 "$lfile" -o "$tmp_dir"
 run_test "multi-thread" "${exec_dir}/sbsearch" -j 4 "$lfile" -o "$tmp_dir"
 run_test "MPI-1-job" "${exec_dir}/sbsearch_mpi" "$lfile" -o "$tmp_dir"
 run_test "MPI-4-job" mpirun -n 4 "${exec_dir}/sbsearch_mpi" "$lfile" -o "$tmp_dir"
 
-
+exit $total_ret
 # 8490  build/sbsearch ../lattice_files/pyro_2,0,0_0,3,0_0,0,3.json -b 100 -o ~/tmp -j 4
 # 8491  build/sbsearch ../lattice_files/pyro_1,0,0_0,2,0_0,0,8.json -b 100 -o ~/tmp -j 4
 # 8492  build/sbsearch ../lattice_files/pyro_1,0,0_0,2,0_0,0,9.json -b 100 -o ~/tmp -j 4

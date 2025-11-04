@@ -4,6 +4,9 @@ test('gen_spinon_basis_st', spinon_tests, args: ['single'])
 test('gen_spinon_basis_par', spinon_tests, args: ['parallel'])
 test('gen_spinon_basis_spinorder', spinon_tests, args: ['spinorder'])
 
+sbsearch_test = find_program('check_sbsearch_against_known.sh')
+test('check_sbsearch_against_known', sbsearch_test)
+
 
 test_uint128 = executable('test_uint128',
   'test_uint128.cpp',

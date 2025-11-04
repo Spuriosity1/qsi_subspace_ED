@@ -8,7 +8,7 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 data_dir="$REPO_ROOT/test/data"
 tmp_dir="$REPO_ROOT/test/tmp"
 stem="pyro_2_2_2x0,4,4b4,0,4b4,4,0b1"
-exec_dir="$REPO_ROOT/build"
+exec_dir="$REPO_ROOT/build/components/build_basis"
 infile="${tmp_dir}/${stem}.json"
 
 ref_outfile_csv="${data_dir}/${stem}.reference.basis.csv"
