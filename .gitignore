@@ -7,7 +7,6 @@ __pycache__
 *.db
 *.db-wal
 *.db-shm
-lattice_files
 test/tmp
 *.ipynb
 *.swp
@@ -20,3 +19,5 @@ driver/rundata
 driver/*.plan
 subprojects/mr3smp
 subprojects/pthash
+test/lattice_files/*.basis.csv
+test/lattice_files/*.basis.h5
