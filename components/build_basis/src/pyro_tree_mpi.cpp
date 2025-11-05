@@ -9,7 +9,7 @@ MPI_Datatype create_vtree_node_type(){
 
         vtree_node_t dummy;
 
-        int block_lengths[3] = {1, 1, 1};
+        int block_lengths[3] = {16, 1, 1};
         MPI_Aint displacements[3];
         MPI_Datatype types[3] = {MPI_BYTE, MPI_UNSIGNED, MPI_UNSIGNED};
 
@@ -24,11 +24,13 @@ MPI_Datatype create_vtree_node_type(){
         displacements[2] -= base;
 
         // Fix the size of the first block to cover the entire Uint128 object
-        MPI_Type_create_struct(3, block_lengths, displacements, types, &vtree_node_type);
+        MPI_Datatype tmp;
+        MPI_Type_create_struct(3, block_lengths, displacements, types, &tmp);
 
         // Resize to the real sizeof(vtree_node_t) so MPI doesn’t mis-align consecutive elements
-        MPI_Type_create_resized(vtree_node_type, 0, sizeof(vtree_node_t), &vtree_node_type);
+        MPI_Type_create_resized(tmp, 0, sizeof(vtree_node_t), &vtree_node_type);
         MPI_Type_commit(&vtree_node_type);
+        MPI_Type_free(&tmp);
     }
 
     return vtree_node_type;
@@ -114,24 +116,27 @@ requires std::derived_from<T, lat_container>
 void mpi_par_searcher<T>::state_tree_init(){
     // Look for a checkpoint from an old run
     std::string ckpt = "checkpoint_rank_" + std::to_string(my_rank) + ".bin";
-    load_stack(my_job_stack, ckpt);
+    load_stack(my_job_stack, workdir / ckpt);
 
+    if (my_job_stack.empty()){
+        // no checkpoint found: bootstrap needed
+        std::cout<<"Distributing initial work\n";
+        // part one: node 0 builds some initial states
+        if (my_rank == 0){
+            std::queue<vtree_node_t> starting_nodes;
+            starting_nodes.push(vtree_node_t({0,0,0}));
+            _build_state_bfs(starting_nodes, world_size*INITIAL_DEPTH_FACTOR);
 
-    // part one: node 0 builds some initial states
-    if (my_rank == 0){
-        std::queue<vtree_node_t> starting_nodes;
-        starting_nodes.push(vtree_node_t({0,0,0}));
-        _build_state_bfs(starting_nodes, world_size*INITIAL_DEPTH_FACTOR);
-
-        if (static_cast<int>(starting_nodes.size()) < world_size){
-            std::cerr << "Too few starting nodes ("<<starting_nodes.size()<<
-                "). Try running with a msaller world size\n";
-            MPI_Abort(MPI_COMM_WORLD, 5);
+            if (static_cast<int>(starting_nodes.size()) < world_size){
+                std::cerr << "Too few starting nodes ("<<starting_nodes.size()<<
+                    "). Try running with a msaller world size\n";
+                MPI_Abort(MPI_COMM_WORLD, 5);
+            }
+            distribute_initial_work(starting_nodes);
+        } else {
+            // Other ranks receive their initial work
+            receive_initial_work();
         }
-        distribute_initial_work(starting_nodes);
-    } else {
-        // Other ranks receive their initial work
-        receive_initial_work();
     }
     
     std::cout<<"initial stack:";
@@ -328,7 +333,7 @@ void mpi_par_searcher<T>::build_state_tree(){
         }
         
         // checkpoint the stack
-        save_stack(my_job_stack, "checkpoint_rank_" + std::to_string(my_rank) + ".bin");
+        save_stack(my_job_stack, workdir / ("checkpoint_rank_" + std::to_string(my_rank) + ".bin") );
     }
 
     printf("[rank %d] completed processing %lu nodes\n", my_rank, local_processed);

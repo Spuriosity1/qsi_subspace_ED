@@ -30,7 +30,7 @@ char lat_container::possible_spin_states(const vtree_node_t& curr) const {
 	char res=0b11;
 
 	Uint128 state_new = state; // new spin is already a 0
-#ifdef DEBUG
+#ifndef NDEBUG
 	assert( !readbit(state, idx) );
 	assert( idx < lat.spins.size() );
 #endif
@@ -97,9 +97,9 @@ char lat_container_with_sector::possible_spin_states(const vtree_node_t& curr) c
 	char res=0b11;
 
 	Uint128 state_new = state; // new spin is already a 0
-#ifdef DEBUG
-	assert( !readbit(state, idx) );
-	assert( idx < lat.spins.size() );
+#ifndef NDEBUG
+	assert( !readbit(state, total_known_spins) );
+	assert( total_known_spins < lat.spins.size() );
 #endif
 	const auto& known_mask = this->masks[total_known_spins];
 

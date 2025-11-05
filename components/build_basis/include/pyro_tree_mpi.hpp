@@ -98,6 +98,7 @@ mpi_par_searcher(const lattice& lat, unsigned num_spinon_pairs,
             save_stack(global_self->my_job_stack,
                        "checkpoint_rank_" + std::to_string(global_self->my_rank) + ".bin");
         }
+        MPI_Barrier(MPI_COMM_WORLD);
         MPI_Abort(MPI_COMM_WORLD, 1);
     }
 
