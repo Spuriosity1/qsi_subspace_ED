@@ -128,11 +128,9 @@ void mpi_par_searcher<T>::state_tree_init(){
                 "). Try running with a msaller world size\n";
             MPI_Abort(MPI_COMM_WORLD, 5);
         }
-        assert(my_job_stack.size() == 0);
         distribute_initial_work(starting_nodes);
     } else {
         // Other ranks receive their initial work
-        assert(my_job_stack.size() == 0);
         receive_initial_work();
     }
     

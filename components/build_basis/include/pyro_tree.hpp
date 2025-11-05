@@ -139,6 +139,7 @@ inline void save_stack(const lat_container::cust_stack& stack, const std::string
 inline void load_stack(lat_container::cust_stack& stack, const std::string& path) {
     FILE* f = fopen(path.c_str(), "rb");
     if (!f) return; // No restart available = start normally.
+    std::cout <<"reading checkpoint data: "<<path<<"\n";
 
     size_t n;
     fread(&n, sizeof(n), 1, f);
