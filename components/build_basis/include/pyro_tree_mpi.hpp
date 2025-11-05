@@ -2,6 +2,7 @@
 #include <mpi.h>
 #include <random>
 #include <vector>
+#include <csignal>
 #include "pyro_tree.hpp"
 
 inline int get_mpi_rank(){
