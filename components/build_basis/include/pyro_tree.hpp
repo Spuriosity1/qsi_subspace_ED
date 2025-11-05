@@ -1,4 +1,6 @@
 #pragma once
+#include "basis_io.hpp"
+#include "basis_io_h5.hpp"
 #include "bittools.hpp"
 #include <iostream>
 #include <nlohmann/json.hpp>
@@ -21,6 +23,7 @@ struct vtree_node_t {
 	// curr_spin is the bit ID of the rightmost unknown spin
 	// i.e. (1<<curr_spin) & state_thus_far is guaranteed to be 0
 };
+
 
 inline void print_node(std::ostream& os, const vtree_node_t& node){
     printHex(os, node.state_thus_far) << " [spin " << node.curr_spin<<"]\n";
@@ -65,35 +68,114 @@ struct lat_container {
 	//char possible_spin_states(const Uint128& state, unsigned idx) const ;
 
 	const unsigned num_spinon_pairs;
-	protected:
-	std::vector<Uint128> masks; // bitmasks filled by make_mask
-
-	template <typename Container>
-	void fork_state_impl(Container& to_examine, vtree_node_t curr); 
 
     using cust_stack = vstack<vtree_node_t>;
-    //using cust_stack = vstack;
+
 	void fork_state(cust_stack& to_examine);
 	void fork_state(std::queue<vtree_node_t>& to_examine);
 
 	const lattice& lat;
+protected:
+	std::vector<Uint128> masks; // bitmasks filled by make_mask
+    std::string h5_dset_name="basis";
 };
 
+struct lat_container_with_sector : public lat_container {
+    lat_container_with_sector(const lattice& _lat, unsigned num_spinon_pairs)
+        : lat_container(_lat, num_spinon_pairs){
+        }
+
+    void set_sector(const std::vector<int>& _sector){
+        make_sl_masks(_sector);
+        std::ostringstream oss("basis");
+        char delim='_';
+        for (auto s : _sector){
+            oss << delim << s;
+            delim='.';
+        }
+        h5_dset_name = oss.str();
+    }
+
+	void fork_state(cust_stack& to_examine);
+	void fork_state(std::queue<vtree_node_t>& to_examine);
+
+    char possible_spin_states(const vtree_node_t& curr) const;
 
 
-struct pyro_vtree : public lat_container {
+    protected:
+
+    std::string h5_dset_name="basis";
+
+    void make_sl_masks(const std::vector<int>& sector){ 
+        int max_sl=0;
+        for (const auto& s : this->lat.spins){
+            max_sl = std::max(max_sl, s.sl);
+        }
+        if (max_sl+1 != static_cast<int>(sector.size())){
+            throw std::logic_error("Bad sector secification: expected " + std::to_string(max_sl+1) + " integers");
+        }
+        sl_masks.resize(max_sl+1);
+        for (size_t si=0; si<lat.spins.size(); si++){
+            auto spin = lat.spins[si];
+            or_bit(sl_masks[spin.sl].first, si);
+        }
+        for (int mu=0; mu<=max_sl; mu++){
+            sl_masks[mu].second = sector[mu];
+        }
+    }
+	std::vector<std::pair<Uint128, int>> sl_masks; // pairs such that state &sl_masks == integer
+};
+
+inline void save_stack(const lat_container::cust_stack& stack, const std::string& path) {
+    FILE* f = fopen(path.c_str(), "wb");
+    if (!f) throw std::runtime_error("save_stack: failed to open " + path);
+
+    size_t n = stack.size();
+    fwrite(&n, sizeof(n), 1, f);
+    fwrite(stack.data(), sizeof(vtree_node_t), n, f);
+    fclose(f);
+}
+
+inline void load_stack(lat_container::cust_stack& stack, const std::string& path) {
+    FILE* f = fopen(path.c_str(), "rb");
+    if (!f) return; // No restart available = start normally.
+
+    size_t n;
+    fread(&n, sizeof(n), 1, f);
+    stack.resize(n);
+    fread(stack.data(), sizeof(vtree_node_t), n, f);
+    fclose(f);
+}
+
+
+template<typename LatContainer>
+requires std::derived_from<LatContainer, lat_container>
+struct pyro_vtree : public LatContainer {
 	pyro_vtree(const lattice& lat, unsigned num_spinon_pairs) :
-		lat_container(lat, num_spinon_pairs) {
+		LatContainer(lat, num_spinon_pairs) {
 			is_sorted = false;
 		}
+
+    char possible_spin_states(const vtree_node_t& curr) const {
+        return static_cast<const LatContainer*>(this)->possible_spin_states(curr);
+    }
 
 	void build_state_tree();
 	void sort();
 	// Applies bittools::permute to all elements of the basis
 	void permute_spins(const std::vector<size_t>& perm);
 
-	void write_basis_csv(const std::string &outfilename); 
-    void write_basis_hdf5(const std::string& outfile);
+	void write_basis_csv(const std::string &outfilename) {
+        this->sort();
+        std::cout<<"Outfile: "<<outfilename<<std::endl;
+        basis_io::write_basis_csv(state_list, outfilename);
+    }
+
+    void write_basis_hdf5(const std::string& outfilename) {
+        this->sort();
+        std::cout<<"Outfile: "<<outfilename<<std::endl;
+        basis_io::write_basis_hdf5(this->state_list, outfilename, this->h5_dset_name.c_str());
+    }
 protected:
 	void save_state(const Uint128& state) {
 			state_list.push_back(state);
@@ -108,12 +190,19 @@ protected:
 };
 
 
-struct pyro_vtree_parallel : public lat_container {
+template<typename LatContainer>
+requires std::derived_from<LatContainer, lat_container>
+struct pyro_vtree_parallel : public LatContainer {
 	pyro_vtree_parallel(const lattice &lat, unsigned num_spinon_pairs, 
 			unsigned n_threads = 1)
-		: lat_container(lat, num_spinon_pairs), n_threads(n_threads) {
+		: LatContainer(lat, num_spinon_pairs), n_threads(n_threads) {
 		is_sorted = false;
 		}
+
+
+    char possible_spin_states(const vtree_node_t& curr) const {
+        return static_cast<const LatContainer*>(this)->possible_spin_states(curr);
+    }
 
 	void build_state_tree();
 	void sort();
@@ -121,12 +210,30 @@ struct pyro_vtree_parallel : public lat_container {
 	// Applies bittools::permute to all elements of the basis
 	void permute_spins(const std::vector<size_t>& perm);
 
-	void write_basis_csv(const std::string& outfilename);
-	void write_basis_hdf5(const std::string& outfile);
+	void write_basis_csv(const std::string& outfilename) {
+        this->sort();
+        for (size_t i=1; i<state_set.size(); i++){
+            if(state_set[i].size() != 0){
+                throw std::logic_error("Error in write_basis_csv - basis was not sorted properly");
+            }
+        }
+        std::cout<<"Outfile: "<<outfilename<<std::endl;
+        basis_io::write_basis_csv(state_set[0], outfilename);
+    }
+	void write_basis_hdf5(const std::string& outfilename){
+        this->sort();
+        for (size_t i=1; i<state_set.size(); i++){
+            if(state_set[i].size() != 0){
+                throw std::logic_error("Error in write_basis_hdf5 - basis was not sorted properly");
+            }
+        }
+        std::cout<<"Outfile: "<<outfilename<<std::endl;
+        basis_io::write_basis_hdf5(state_set[0], outfilename);
+    }
 
 
 protected:
-	void _build_state_dfs(cust_stack &node_stack, unsigned thread_id,
+	void _build_state_dfs(lat_container::cust_stack &node_stack, unsigned thread_id,
 			unsigned long max_stack_size = (1ul << 40));
 	void _build_state_bfs(std::queue<vtree_node_t>& node_stack, 
 		unsigned long max_queue_len);
@@ -149,7 +256,7 @@ protected:
 	// first index is the thread ID
 	std::vector<std::vector<Uint128>> state_set;
 	std::vector<std::thread> threads;
-	std::vector<cust_stack> job_stacks;
+	std::vector<lat_container::cust_stack> job_stacks;
 
     static constexpr unsigned INITIAL_DEPTH_FACTOR = 5;
 };

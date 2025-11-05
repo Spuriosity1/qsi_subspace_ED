@@ -64,3 +64,11 @@ inline std::unordered_map<std::string, std::string> parse_parameters(const std::
 }
 
 
+inline std::vector<int> get_sls(const nlohmann::json& j){
+    std::vector<int> sl_of_atom;
+    for (const auto& a : j["atoms"]){
+        sl_of_atom.push_back( static_cast<int>(a["sl"]));
+    }
+    return sl_of_atom;
+}
+

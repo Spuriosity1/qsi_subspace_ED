@@ -34,7 +34,9 @@ MPI_Datatype create_vtree_node_type(){
     return vtree_node_type;
 }
 
-void mpi_par_searcher::distribute_initial_work(std::queue<vtree_node_t>& starting_nodes){
+template<typename T>
+requires std::derived_from<T, lat_container>
+void mpi_par_searcher<T>::distribute_initial_work(std::queue<vtree_node_t>& starting_nodes){
 
     std::vector<std::vector<vtree_node_t>> others_job_stacks(world_size);
 
@@ -83,7 +85,9 @@ void mpi_par_searcher::distribute_initial_work(std::queue<vtree_node_t>& startin
     }
 }
 
-void mpi_par_searcher::receive_initial_work(){
+template<typename T>
+requires std::derived_from<T, lat_container>
+void mpi_par_searcher<T>::receive_initial_work(){
     assert(my_rank != 0);
 
     MPI_Datatype vtree_node_type = create_vtree_node_type();
@@ -105,7 +109,14 @@ void mpi_par_searcher::receive_initial_work(){
 }
 
 
-void mpi_par_searcher::state_tree_init(){
+template<typename T>
+requires std::derived_from<T, lat_container>
+void mpi_par_searcher<T>::state_tree_init(){
+    // Look for a checkpoint from an old run
+    std::string ckpt = "checkpoint_rank_" + std::to_string(my_rank) + ".bin";
+    load_stack(my_job_stack, ckpt);
+
+
     // part one: node 0 builds some initial states
     if (my_rank == 0){
         std::queue<vtree_node_t> starting_nodes;
@@ -132,12 +143,14 @@ void mpi_par_searcher::state_tree_init(){
     std::cout<<"\n";
 }
 
-vtree_node_t mpi_par_searcher::pop_hardest_job(){
+template<typename T>
+requires std::derived_from<T, lat_container>
+vtree_node_t mpi_par_searcher<T>::pop_hardest_job(){
     // the job with the lowest spin ID is the most time consuming
     unsigned lowest_spin_id = std::numeric_limits<unsigned>::max();
     int i=0;
     int min_idx =0;
-    for (i=0; i<my_job_stack.size(); i++){
+    for (i=0; i<static_cast<int>(my_job_stack.size()); i++){
         if (my_job_stack[i].curr_spin < lowest_spin_id){
             lowest_spin_id = my_job_stack[i].curr_spin;
             min_idx = i;
@@ -149,7 +162,9 @@ vtree_node_t mpi_par_searcher::pop_hardest_job(){
 }
 
 //non-blocking check whether there are any nodes requesting work
-bool mpi_par_searcher::check_work_requests(){
+template<typename T>
+requires std::derived_from<T, lat_container>
+bool mpi_par_searcher<T>::check_work_requests(){
     MPI_Status status;
     int flag;
     auto vtree_mpi_type = create_vtree_node_type();
@@ -177,7 +192,9 @@ bool mpi_par_searcher::check_work_requests(){
 }
 
 
-bool mpi_par_searcher::request_work_from(int target_rank){
+template<typename T>
+requires std::derived_from<T, lat_container>
+bool mpi_par_searcher<T>::request_work_from(int target_rank){
     // send work request
     MPI_Send(&my_rank, 1, MPI_INT, target_rank, TAG_WORK_REQUEST, MPI_COMM_WORLD);
     // Wait for response
@@ -198,7 +215,9 @@ bool mpi_par_searcher::request_work_from(int target_rank){
     return false;
 }
 
-bool mpi_par_searcher::request_work_from_shuffled(){
+template<typename T>
+requires std::derived_from<T, lat_container>
+bool mpi_par_searcher<T>::request_work_from_shuffled(){
     if (world_size == 1) return false;
 
     // Build list of all other ranks
@@ -222,7 +241,9 @@ bool mpi_par_searcher::request_work_from_shuffled(){
     return false;
 }
 
-bool mpi_par_searcher::check_termination_nonblocking(
+template<typename T>
+requires std::derived_from<T, lat_container>
+bool mpi_par_searcher<T>::check_termination_nonblocking(
         MPI_Request& term_req, bool& checking){
     if (!checking) {
         // new termination request
@@ -255,7 +276,10 @@ bool mpi_par_searcher::check_termination_nonblocking(
     } 
 }
 
-void mpi_par_searcher::build_state_tree(){
+
+template<typename T>
+requires std::derived_from<T, lat_container>
+void mpi_par_searcher<T>::build_state_tree(){
     // Part 1: initialise
     state_tree_init();
 
@@ -269,12 +293,13 @@ void mpi_par_searcher::build_state_tree(){
     while (true) {
         // Process local work
         while (!my_job_stack.empty() && iter_count < CHECK_INTERVAL) {
-            if (my_job_stack.top().curr_spin == lat.spins.size()) {
+            if (my_job_stack.top().curr_spin == 
+                    static_cast<T*>(this)->lat.spins.size()) {
                 shard.push(
                         permute(my_job_stack.top().state_thus_far, perm));
                 my_job_stack.pop();
             } else {
-                fork_state(my_job_stack);
+               static_cast<T*>(this)->fork_state(my_job_stack);
             }
             iter_count++;
             local_processed++;
@@ -301,43 +326,15 @@ void mpi_par_searcher::build_state_tree(){
 
         // request work
         if (my_job_stack.empty() && !checking_termination){
-            bool success = request_work_from_shuffled();
+            request_work_from_shuffled();
         }
         
-
+        // checkpoint the stack
+        save_stack(my_job_stack, "checkpoint_rank_" + std::to_string(my_rank) + ".bin");
     }
 
-
-
-
-/*
-    while (g_work_available) {
-
-        size_t batch_size = 0;
-        // main loop
-        while (!my_job_stack.empty() && batch_size < CHECKIN_INTERVAL){
-            if (my_job_stack.top().curr_spin == lat.spins.size()){
-                shard.push(permute(my_job_stack.top().state_thus_far, perm));
-                my_job_stack.pop();
-            } else {
-                fork_state(my_job_stack);
-            }
-            batch_size++;
-            local_processed++;
-        }
-
-         // If out of work, try to get more
-        if (my_job_stack.empty()) {
-        }
- 
-
-        // status update
-        if (local_processed % (CHECKIN_INTERVAL * 10) == 0) {
-            printf("[rank %d] procesed %lu nodes \n", my_rank, local_processed);
-        }
-    }
-*/
     printf("[rank %d] completed processing %lu nodes\n", my_rank, local_processed);
+
 
     if (!my_job_stack.empty()){
         throw std::logic_error("[rank "+std::to_string(my_rank) +
@@ -350,35 +347,42 @@ void mpi_par_searcher::build_state_tree(){
 }
 
 
-void mpi_par_searcher::
+template<typename T>
+requires std::derived_from<T, lat_container>
+void mpi_par_searcher<T>::
 _build_state_bfs(std::queue<vtree_node_t>& node_queue, 
 		unsigned long max_stack_size){
 
 	while (!node_queue.empty() && node_queue.size() < max_stack_size){
 
 //        print_node(std::cout<<"[bfs] ", node_queue.front());
-		if (node_queue.front().curr_spin == lat.spins.size()){
+		if (node_queue.front().curr_spin == static_cast<T*>(this)->lat.spins.size()){
 			shard.push(permute(node_queue.front().state_thus_far, perm));
 			node_queue.pop();
 		} else {
-			fork_state(node_queue);
+			static_cast<T*>(this)->fork_state(node_queue);
 //            print_node(std::cout<<"[bfs post-fork] front ",node_queue.front());
 //            print_node(std::cout<<"[bfs post-fork] back ",node_queue.back());
 		}
 	}
 }
 
-void mpi_par_searcher::
-_build_state_dfs(cust_stack& node_stack, 
+template<typename T>
+requires std::derived_from<T, lat_container>
+void mpi_par_searcher<T>::
+_build_state_dfs(lat_container::cust_stack& node_stack, 
 		unsigned long max_queue_len){
 	while (!node_stack.empty() && node_stack.size() < max_queue_len){
-		if (node_stack.top().curr_spin == lat.spins.size()){
+		if (node_stack.top().curr_spin == static_cast<T*>(this)->lat.spins.size()){
 			shard.push(permute(node_stack.top().state_thus_far, perm));
 			node_stack.pop();
 		} else {
-			fork_state(node_stack);
+			static_cast<T*>(this)->fork_state(node_stack);
 		}
 	}
 }
+
+template class mpi_par_searcher<lat_container>;
+template class mpi_par_searcher<lat_container_with_sector>;
 
 

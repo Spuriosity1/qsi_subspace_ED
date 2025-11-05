@@ -177,6 +177,7 @@ template <typename T>
 inline Uint128 make_mask(T idx){
     // returns all ones up to (but excluding) idx
 	// DOES NOT work for idx >= 128 (deliberate omission -- avoid branches)
+    // in other words, returns [idx] 1's from the LSB
     Uint128 res;
     res.uint128 = 1;
     res.uint128 <<= idx;

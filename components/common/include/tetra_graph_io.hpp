@@ -11,6 +11,7 @@ struct spin_set;
 struct tetra;
 
 struct spin {
+    int sl;
 	std::vector<tetra*> tetra_neighbours;
 	std::vector<spin_set*> rings_containing;
 };

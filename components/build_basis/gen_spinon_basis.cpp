@@ -17,9 +17,23 @@ template <typename T>
 void build_and_export(T& L, const argparse::ArgumentParser& prog,
 		const std::vector<size_t>& perm){
 
+    auto sector_spec = prog.get<std::vector<int>>("--sector");
+
 	std::string ext = ".";
 	ext += std::to_string(prog.get<int>("n_spinon_pairs"));
 	ext += prog.get<std::string>("extension");
+
+    if (sector_spec.size() > 0){
+        ext += "_s";
+        bool dot=false;
+        for (auto s : sector_spec){
+            if (dot) ext += ".";
+            ext += std::to_string(s);
+            dot=true;
+        }
+        ext+=".partitioned";
+    }
+
 
 	auto outfilename=as_basis_file(prog.get<std::string>("lattice_file"), ext );
 
@@ -66,7 +80,7 @@ int main (int argc, char *argv[]) {
 	prog.add_argument("n_spinon_pairs")
 		.default_value(0)
 		.scan<'i', int>();
-	prog.add_argument("--n_threads")
+	prog.add_argument("--n_threads", "-t")
 		.help("Number of threads to distribute across (works best as a power of 2)\
 Setting to 0 will use the single-threaded implementations")
 		.default_value(0)
@@ -76,6 +90,11 @@ Setting to 0 will use the single-threaded implementations")
 	prog.add_argument("--order_spins")
 		.choices("none", "greedy", "random")
 		.default_value("greedy");
+    prog.add_argument("--sector", "-s")
+        .help("target global polarisation sector")
+        .nargs(argparse::nargs_pattern::at_least_one)
+        .default_value(std::vector<int>{})
+        .scan<'d', int>();
 	prog.add_argument("--out_format")
 		.choices("csv", "h5", "both", "none")
 		.default_value("h5");
@@ -89,8 +108,10 @@ Setting to 0 will use the single-threaded implementations")
     }
 
 	auto infilename = prog.get<std::string>("lattice_file");
-	size_t n_threads = prog.get<int>("n_threads");
+	size_t n_threads = prog.get<int>("--n_threads");
 	auto num_spinon_pairs = prog.get<int>("n_spinon_pairs");
+
+    auto target_sector = prog.get<std::vector<int>>("--sector");
 
 	ifstream ifs(infilename);
 	json data = json::parse(ifs);
@@ -110,11 +131,26 @@ Setting to 0 will use the single-threaded implementations")
 	lat.apply_permutation(perm);
 	
 	if (n_threads == 0){
-		pyro_vtree L(lat, num_spinon_pairs);
-		build_and_export(L, prog, perm);
+        if (target_sector.size() == 0){
+            pyro_vtree<lat_container> L(lat, num_spinon_pairs);
+            build_and_export(L, prog, perm);
+        } else {
+            cout <<"Looking for specific sector\n";
+            pyro_vtree<lat_container_with_sector> L(lat, num_spinon_pairs);
+            L.set_sector(target_sector);
+            build_and_export(L, prog, perm);
+        }
 	} else {
-		pyro_vtree_parallel L(lat, num_spinon_pairs, n_threads);
-		build_and_export(L, prog, perm);
+        if (target_sector.size() == 0){
+            pyro_vtree_parallel<lat_container> L(lat, num_spinon_pairs, n_threads);
+            build_and_export(L, prog, perm);
+        } else {
+            
+            cout <<"Looking for specific sector\n";
+            pyro_vtree_parallel<lat_container_with_sector> L(lat, num_spinon_pairs, n_threads);
+            L.set_sector(target_sector);
+            build_and_export(L, prog, perm);
+        }
 	}	
 	return 0;
 }

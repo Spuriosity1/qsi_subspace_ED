@@ -1,4 +1,5 @@
 #include "tetra_graph_io.hpp"
+#include <cmath>
 #include <set>
 #include <unordered_set>
 
@@ -14,7 +15,6 @@ lattice::lattice(const json &data) {
 		unique_spinids.insert(static_cast<int>(b["to_idx"]));
 	}
 	*/
-
 	std::set<int> unique_spinids;
 	
 	for (const auto &t : data["tetrahedra"]) {
@@ -28,7 +28,11 @@ lattice::lattice(const json &data) {
 		this->rings.push_back(std::move(hi));
 	}
 
-	spins.resize(unique_spinids.size());	
+	spins.resize(unique_spinids.size());
+    for(const auto& sid : unique_spinids){
+        std::string sl = data["atoms"][sid]["sl"];
+        spins[sid].sl = stoi(sl);
+    }
 	_register_spins();
 }
 

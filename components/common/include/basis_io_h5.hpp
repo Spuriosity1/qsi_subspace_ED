@@ -27,7 +27,7 @@ private:
 
 namespace basis_io {
 
-inline void write_basis_hdf5(const std::vector<Uint128>& state_list, const std::string& outfilename){
+inline void write_basis_hdf5(const std::vector<Uint128>& state_list, const std::string& outfilename, const char* dataset_name="basis"){
 	// do this C style because the C++ API is borked
 	
 
@@ -47,7 +47,7 @@ inline void write_basis_hdf5(const std::vector<Uint128>& state_list, const std::
 		if (dataspace_id < 0) throw HDF5Error(file_id, dataspace_id, -1, "write_basis: Failed to create dataspace");
 
 		// Create the dataset
-		dataset_id = H5Dcreate(file_id, "basis", H5T_NATIVE_UINT64, dataspace_id,
+		dataset_id = H5Dcreate(file_id, dataset_name, H5T_NATIVE_UINT64, dataspace_id,
 				H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT);
 		if (dataset_id < 0) throw HDF5Error(file_id, dataspace_id, dataset_id, "write_basis: Failed to create dataset");
 

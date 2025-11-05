@@ -16,7 +16,14 @@ inline int get_mpi_world_size(){
     return x;
 }
 
-class mpi_par_searcher : public lat_container {
+
+
+
+template<typename T>
+requires std::derived_from<T, lat_container>
+class mpi_par_searcher : public T {
+    static mpi_par_searcher<T>* global_self;
+
 
     int world_size;
     int my_rank;
@@ -42,11 +49,11 @@ class mpi_par_searcher : public lat_container {
 
     ShardWriter shard;
 
-    cust_stack my_job_stack;
+    lat_container::cust_stack my_job_stack;
 
     vtree_node_t pop_hardest_job();
 
-	void _build_state_dfs(cust_stack &node_stack,
+	void _build_state_dfs(lat_container::cust_stack &node_stack,
 			unsigned long max_stack_size = (1ul << 40));
 	void _build_state_bfs(std::queue<vtree_node_t>& node_stack, 
 		unsigned long max_queue_len);
@@ -62,6 +69,8 @@ class mpi_par_searcher : public lat_container {
 
     std::mt19937 rng;
 
+
+
 public:
 
 mpi_par_searcher(const lattice& lat, unsigned num_spinon_pairs,
@@ -69,7 +78,7 @@ mpi_par_searcher(const lattice& lat, unsigned num_spinon_pairs,
         const std::filesystem::path& workdir_,
         const std::string &job_tag_,
         size_t buf_entries = 1<<20) :
-    lat_container(lat, num_spinon_pairs),
+    T(lat, num_spinon_pairs),
     world_size(get_mpi_world_size()),
     my_rank(get_mpi_rank()),
     workdir(workdir_),
@@ -77,7 +86,18 @@ mpi_par_searcher(const lattice& lat, unsigned num_spinon_pairs,
     perm(perm_),
     shard( workdir / ("shard-" + job_tag + "-" + std::to_string(my_rank) + ".bin"), buf_entries )
     {
+        global_self = this;
+        signal(SIGINT, sig_handler);
 
+    }
+
+    static void sig_handler(int){
+        if (global_self){
+            global_self->shard.flush(true);
+            save_stack(global_self->my_job_stack,
+                       "checkpoint_rank_" + std::to_string(global_self->my_rank) + ".bin");
+        }
+        MPI_Abort(MPI_COMM_WORLD, 1);
     }
 
     void build_state_tree();

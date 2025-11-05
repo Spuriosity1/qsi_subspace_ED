@@ -80,11 +80,93 @@ char lat_container::possible_spin_states(const vtree_node_t& curr) const {
 
 
 
+
+// LOGIC
+char lat_container_with_sector::possible_spin_states(const vtree_node_t& curr) const {
+	// state is only initialised up to (but not including) bit 1<<idx
+	// returns possible states of state&(1<<idx)
+	const Uint128& state = curr.state_thus_far;
+	unsigned total_known_spins=curr.curr_spin;
+
+
+	// return values:
+	// 0b00 -> no spin state valid
+	// 0b01 -> spin down (0) state valid
+	// 0b10 -> spin up (1) state valid
+	// 0b11 -> both up and down valid
+	char res=0b11;
+
+	Uint128 state_new = state; // new spin is already a 0
+#ifdef DEBUG
+	assert( !readbit(state, idx) );
+	assert( idx < lat.spins.size() );
+#endif
+	const auto& known_mask = this->masks[total_known_spins];
+
+    const int total_unknown_spins = this->lat.spins.size() - total_known_spins;
+
+	// iterate over the two possible states of state&(1<<idx)
+	for (char updown=0; updown<2; updown++){
+		if (updown == 1){
+			or_bit(state_new, total_known_spins);
+		}
+
+        // phase 1: check if the sector can be satisfied
+        for (const auto& pair : sl_masks){
+            int n_up = popcnt_u128(state_new & pair.first);
+            if (n_up + total_unknown_spins < pair.second) {
+                // not enough spins to make it
+                res &= ~(1<<updown); continue;
+            } else if (n_up > pair.second){
+                // bust!
+                res &= ~(1<<updown); continue;
+            }
+        }
+
+		auto t = lat.spins[total_known_spins].tetra_neighbours[0];
+        // calculate the partial tetra charges
+        // NOTE: state_new is all zeros for bits > idx
+        int Q = popcnt_u128( state_new & t->bitmask );
+        // we know the state of all previous bits, and the one we just set
+        int num_known_spins = popcnt_u128( t->bitmask & known_mask )+1;
+
+        int num_spins = t->member_spin_ids.size();
+        int num_unknown_spins = num_spins - num_known_spins;
+
+        if (Q + num_unknown_spins < t->min_spins_up || Q > t->max_spins_up){
+            // Q is inconsistent with an ice rule
+            res &= ~(1<<updown); continue; // no point checking the other tetra
+        }
+
+
+        t = lat.spins[total_known_spins].tetra_neighbours[1];
+        // calculate the partial tetra charges
+        // NOTE: state_new is all zeros for bits > idx
+        Q = popcnt_u128( state_new & t->bitmask );
+        // we know the state of all previous bits, and the one we just set
+        num_known_spins = popcnt_u128( t->bitmask & known_mask )+1;
+
+        num_spins = t->member_spin_ids.size();
+        num_unknown_spins = num_spins - num_known_spins;
+
+        if (Q + num_unknown_spins < t->min_spins_up || Q > t->max_spins_up){
+            // Q is inconsistent with an ice rule
+            res &= ~(1<<updown); continue;
+        }
+
+
+	}
+	return res;
+}
+
+
+
+
 // Attempts to generate the two next configurations and add them to the queue
-template <typename Container>
-void lat_container::fork_state_impl(Container& to_examine, vtree_node_t curr) {
-    char poss_states = this->possible_spin_states(curr);
-	bool may_create_pair = (curr.num_spinon_pairs < this->num_spinon_pairs);
+template <typename Base, typename Container>
+void fork_state_impl(Base* me, Container& to_examine, vtree_node_t curr) {
+    char poss_states = me->possible_spin_states(curr);
+	bool may_create_pair = (curr.num_spinon_pairs < me->num_spinon_pairs);
     if (poss_states & 0b01) { // 0 is allowed
         auto tmp = vtree_node_t({curr.state_thus_far, curr.curr_spin + 1, curr.num_spinon_pairs});
         to_examine.push(tmp);
@@ -107,19 +189,32 @@ void lat_container::fork_state_impl(Container& to_examine, vtree_node_t curr) {
 void lat_container::fork_state(cust_stack& to_examine) {
     auto curr = to_examine.top();
 	to_examine.pop();
-    fork_state_impl(to_examine, curr);
+    fork_state_impl(this, to_examine, curr);
 }
-
 
 void lat_container::fork_state(std::queue<vtree_node_t>& to_examine) {
     const auto& curr = to_examine.front();
-    fork_state_impl(to_examine, curr);
+    fork_state_impl(this, to_examine, curr);
 	to_examine.pop();
 }
 
 
-void pyro_vtree::build_state_tree(){
-	cust_stack to_examine;
+void lat_container_with_sector::fork_state(cust_stack& to_examine) {
+    auto curr = to_examine.top();
+	to_examine.pop();
+    fork_state_impl(this, to_examine, curr);
+}
+
+void lat_container_with_sector::fork_state(std::queue<vtree_node_t>& to_examine) {
+    const auto& curr = to_examine.front();
+    fork_state_impl(this, to_examine, curr);
+	to_examine.pop();
+}
+
+template<typename T>
+requires std::derived_from<T, lat_container>
+void pyro_vtree<T>::build_state_tree(){
+    lat_container::cust_stack to_examine;
 	// seed the root node
 	to_examine.push(vtree_node_t({0,0,0}));
 
@@ -133,16 +228,18 @@ void pyro_vtree::build_state_tree(){
 #if VERBOSITY > 2
 		printf("State %016llx; spin_idx %d, queue size %lu\n", curr.state_thus_far.uint128, curr.curr_spin, to_examine.size());
 #endif
-		if (to_examine.top().curr_spin == lat.spins.size()){
+		if (to_examine.top().curr_spin == this->lat.spins.size()){
 			state_list.push_back(to_examine.top().state_thus_far);
 			to_examine.pop();
 		} else {
-			fork_state(to_examine);
+		    static_cast<T*>(this)->fork_state(to_examine);
 		}
 	}
 }
 
-void pyro_vtree::sort(){
+template<typename T>
+requires std::derived_from<T, lat_container>
+void pyro_vtree<T>::sort(){
 	if (this->is_sorted) return;
 	std::sort(state_list.begin(), state_list.end());
 	this->is_sorted = true;
@@ -252,7 +349,10 @@ int cmp_uint128( const void* a, const void*b){
     return *static_cast<const Uint128*>(a) < *static_cast<const Uint128*>(b);
 }
 
-void pyro_vtree_parallel::sort() {
+
+template<typename T>
+requires std::derived_from<T, lat_container>
+void pyro_vtree_parallel<T>::sort() {
     if (this->is_sorted) return;
     
     // Remove empty chunks first
@@ -318,30 +418,34 @@ void pyro_vtree_parallel::sort() {
 
 
 
-void pyro_vtree_parallel::
+template<typename T>
+requires std::derived_from<T, lat_container>
+void pyro_vtree_parallel<T>::
 _build_state_bfs(std::queue<vtree_node_t>& node_stack, 
 		unsigned long max_queue_len){
 	if (state_set.size() == 0){ state_set.resize(1); }
 	while (!node_stack.empty() && node_stack.size() < max_queue_len){
-		if (node_stack.front().curr_spin == lat.spins.size()){
+		if (node_stack.front().curr_spin == static_cast<T*>(this)->lat.spins.size()){
 			state_set[0].push_back(node_stack.front().state_thus_far);
 			node_stack.pop();
 		} else {
-			fork_state(node_stack);
+			static_cast<T*>(this)->fork_state(node_stack);
 		}
 	}
 }
 
-void pyro_vtree_parallel::
-_build_state_dfs(cust_stack& node_stack, 
+template<typename T>
+requires std::derived_from<T, lat_container>
+void pyro_vtree_parallel<T>::
+_build_state_dfs(lat_container::cust_stack& node_stack, 
 		unsigned thread_id, 
 		unsigned long max_queue_len){
 	while (!node_stack.empty() && node_stack.size() < max_queue_len){
-		if (node_stack.top().curr_spin == lat.spins.size()){
+		if (node_stack.top().curr_spin == static_cast<T*>(this)->lat.spins.size()){
 			state_set[thread_id].push_back(node_stack.top().state_thus_far);
 			node_stack.pop();
 		} else {
-			fork_state(node_stack);
+			static_cast<T*>(this)->fork_state(node_stack);
 		}
 	}
 }
@@ -378,7 +482,10 @@ bool any_full(const std::vector<T>& job_stacks){
     return false;
 }
 
-void pyro_vtree_parallel::build_state_tree(){
+
+template<typename T>
+requires std::derived_from<T, lat_container>
+void pyro_vtree_parallel<T>::build_state_tree(){
 	// strategy: fork nodes until we exceed the thread pool	
 	// BFS to keep the layer of all threads roughly the same
 	std::queue<vtree_node_t> starting_nodes;
@@ -427,11 +534,11 @@ void pyro_vtree_parallel::build_state_tree(){
                     !local_stack.empty() && counter < CHECKIN_INTERVAL;
                     counter++) 
                 {
-                    if (local_stack.top().curr_spin == lat.spins.size()) {
+                    if (local_stack.top().curr_spin == static_cast<T*>(this)->lat.spins.size()) {
                         state_set[tid].push_back(local_stack.top().state_thus_far);
                         local_stack.pop();
                     } else {
-                        fork_state(local_stack);
+                        static_cast<T*>(this)->fork_state(local_stack);
                     }
                 }
 
@@ -458,20 +565,18 @@ void pyro_vtree_parallel::build_state_tree(){
 
 // IO
 
-void pyro_vtree::write_basis_csv(const std::string &outfilename) {
-	this->sort();
-	basis_io::write_basis_csv(state_list, outfilename);
-}
-
-
-void pyro_vtree::permute_spins(const std::vector<size_t>& perm) {
+template<typename T>
+requires std::derived_from<T, lat_container>
+void pyro_vtree<T>::permute_spins(const std::vector<size_t>& perm) {
 	for (auto& b : this->state_list) {
 		b = permute(b, perm);
 	}
 }
 
 
-void pyro_vtree_parallel::permute_spins(const std::vector<size_t>& perm) {
+template<typename T>
+requires std::derived_from<T, lat_container>
+void pyro_vtree_parallel<T>::permute_spins(const std::vector<size_t>& perm) {
     std::vector<std::thread> threads;
     for (auto& l : state_set){
         threads.emplace_back([&l, perm]() {
@@ -486,33 +591,10 @@ void pyro_vtree_parallel::permute_spins(const std::vector<size_t>& perm) {
 	}
 }
 
-void pyro_vtree_parallel::write_basis_csv(const std::string& outfilename)
-{
-	this->sort();
-	for (size_t i=1; i<state_set.size(); i++){
-		if(state_set[i].size() != 0){
-			throw std::logic_error("Error in write_basis_csv - basis was not sorted properly");
-		}
-	}
-	basis_io::write_basis_csv(state_set[0], outfilename);
-}
-
-void pyro_vtree::write_basis_hdf5(const std::string& outfilename){
-	this->sort();
-	basis_io::write_basis_hdf5(this->state_list, outfilename);
-}
-
-
-void pyro_vtree_parallel::write_basis_hdf5(const std::string& outfilename){
-	this->sort();
-    for (size_t i=0; i<state_set.size(); i++){
-        std::cout << "[w] chunk ["<<i<<"] size "<<state_set[i].size() <<"\n";
-    }
-	basis_io::write_basis_hdf5(this->state_set[0], outfilename);
-}
-
-
-
+template struct pyro_vtree<lat_container>;
+template struct pyro_vtree<lat_container_with_sector>;
+template struct pyro_vtree_parallel<lat_container>;
+template struct pyro_vtree_parallel<lat_container_with_sector>;
 
 void par_searcher::build_state_tree(){
 	// strategy: fork nodes until we exceed the thread pool	
