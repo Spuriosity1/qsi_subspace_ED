@@ -126,27 +126,6 @@ struct lat_container_with_sector : public lat_container {
 	std::vector<std::pair<Uint128, int>> sl_masks; // pairs such that state &sl_masks == integer
 };
 
-inline void save_stack(const lat_container::cust_stack& stack, const std::string& path) {
-    FILE* f = fopen(path.c_str(), "wb");
-    if (!f) throw std::runtime_error("save_stack: failed to open " + path);
-
-    size_t n = stack.size();
-    fwrite(&n, sizeof(n), 1, f);
-    fwrite(stack.data(), sizeof(vtree_node_t), n, f);
-    fclose(f);
-}
-
-inline void load_stack(lat_container::cust_stack& stack, const std::string& path) {
-    FILE* f = fopen(path.c_str(), "rb");
-    if (!f) return; // No restart available = start normally.
-    std::cout <<"reading checkpoint data: "<<path<<"\n";
-
-    size_t n;
-    fread(&n, sizeof(n), 1, f);
-    stack.resize(n);
-    fread(stack.data(), sizeof(vtree_node_t), n, f);
-    fclose(f);
-}
 
 
 template<typename LatContainer>

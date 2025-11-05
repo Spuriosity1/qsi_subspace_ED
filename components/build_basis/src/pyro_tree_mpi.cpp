@@ -115,8 +115,7 @@ template<typename T>
 requires std::derived_from<T, lat_container>
 void mpi_par_searcher<T>::state_tree_init(){
     // Look for a checkpoint from an old run
-    std::string ckpt = "checkpoint_rank_" + std::to_string(my_rank) + ".bin";
-    load_stack(my_job_stack, workdir / ckpt);
+    checkpoint.load_stack(my_job_stack);
 
     if (my_job_stack.empty()){
         // no checkpoint found: bootstrap needed
@@ -226,7 +225,7 @@ bool mpi_par_searcher<T>::request_work_from_shuffled(){
     // Build list of all other ranks
     std::vector<int> targets;
     targets.reserve(world_size - 1);
-    for (int i = 0; i < world_size; i++) {
+    for (int i = 0; i < my_rank; i++) {
         if (i != world_size) targets.push_back(i);
     }
     
@@ -333,7 +332,7 @@ void mpi_par_searcher<T>::build_state_tree(){
         }
         
         // checkpoint the stack
-        save_stack(my_job_stack, workdir / ("checkpoint_rank_" + std::to_string(my_rank) + ".bin") );
+        checkpoint.save_stack(my_job_stack);
     }
 
     printf("[rank %d] completed processing %lu nodes\n", my_rank, local_processed);

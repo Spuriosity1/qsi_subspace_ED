@@ -17,7 +17,39 @@ inline int get_mpi_world_size(){
     return x;
 }
 
+class CheckpointWriter {
+    std::filesystem::path ckpt_file;
 
+    public:
+    CheckpointWriter(const std::filesystem::path& file) : ckpt_file(file) {}
+
+    inline void save_stack(const lat_container::cust_stack& stack) {
+        FILE* f = fopen(ckpt_file.c_str(), "wb");
+        if (!f) throw std::runtime_error("save_stack: failed to open " + ckpt_file.string());
+
+        size_t n = stack.size();
+        fwrite(&n, sizeof(n), 1, f);
+        fwrite(stack.data(), sizeof(vtree_node_t), n, f);
+        fclose(f);
+    }
+
+    inline void load_stack(lat_container::cust_stack& stack) {
+        FILE* f = fopen(ckpt_file.c_str(), "rb");
+        if (!f) return; // No restart available = start normally.
+        std::cout <<"reading checkpoint data: "<<ckpt_file<<"\n";
+
+        size_t n;
+        fread(&n, sizeof(n), 1, f);
+        stack.resize(n);
+        fread(stack.data(), sizeof(vtree_node_t), n, f);
+        fclose(f);
+    }
+
+    void finalize() {
+        // deletes the checkpoints
+        remove(ckpt_file.c_str());
+    }
+};
 
 
 template<typename T>
@@ -49,6 +81,7 @@ class mpi_par_searcher : public T {
     static constexpr int WORK_UNAVAILABLE = 0;
 
     ShardWriter shard;
+    CheckpointWriter checkpoint;
 
     lat_container::cust_stack my_job_stack;
 
@@ -85,7 +118,8 @@ mpi_par_searcher(const lattice& lat, unsigned num_spinon_pairs,
     workdir(workdir_),
     job_tag(job_tag_),
     perm(perm_),
-    shard( workdir / ("shard-" + job_tag + "-" + std::to_string(my_rank) + ".bin"), buf_entries )
+    shard( workdir / ("shard-" + job_tag + "-" + std::to_string(my_rank) + ".bin"), buf_entries ),
+    checkpoint( workdir / ("checkpoint-" + job_tag + "-" + std::to_string(my_rank) + ".bin") )
     {
         global_self = this;
         signal(SIGINT, sig_handler);
@@ -95,8 +129,7 @@ mpi_par_searcher(const lattice& lat, unsigned num_spinon_pairs,
     static void sig_handler(int){
         if (global_self){
             global_self->shard.flush(true);
-            save_stack(global_self->my_job_stack,
-                       "checkpoint_rank_" + std::to_string(global_self->my_rank) + ".bin");
+            global_self->checkpoint.save_stack(global_self->my_job_stack);
         }
         MPI_Barrier(MPI_COMM_WORLD);
         MPI_Abort(MPI_COMM_WORLD, 1);
@@ -106,6 +139,7 @@ mpi_par_searcher(const lattice& lat, unsigned num_spinon_pairs,
 
     void finalise_shards(){
         shard.finalize(true);
+        checkpoint.finalize();
         static const int filename_bufsize = 4096;
         char* sendbuf = new char[filename_bufsize];
         const std::string& my_name = shard.done_path();
