@@ -225,8 +225,8 @@ bool mpi_par_searcher<T>::request_work_from_shuffled(){
     // Build list of all other ranks
     std::vector<int> targets;
     targets.reserve(world_size - 1);
-    for (int i = 0; i < my_rank; i++) {
-        if (i != world_size) targets.push_back(i);
+    for (int i = 0; i < world_size; i++) {
+        if (i != my_rank) targets.push_back(i);
     }
     
     // Shuffle them
@@ -246,13 +246,12 @@ bool mpi_par_searcher<T>::request_work_from_shuffled(){
 template<typename T>
 requires std::derived_from<T, lat_container>
 bool mpi_par_searcher<T>::check_termination_nonblocking(
-        MPI_Request& term_req, bool& checking){
+        MPI_Request& term_req, bool& checking, int& global_empty){
     if (!checking) {
         // new termination request
         if (my_job_stack.empty()) {
             int local_empty = 1;
-            int* global_empty_ptr = new int;  // Will be cleaned up after wait
-            MPI_Iallreduce(&local_empty, global_empty_ptr, 1, MPI_INT, MPI_LAND, 
+            MPI_Iallreduce(&local_empty, &global_empty, 1, MPI_INT, MPI_LAND, 
                           MPI_COMM_WORLD, &term_req);
             checking = true;
             return false;
@@ -265,13 +264,14 @@ bool mpi_par_searcher<T>::check_termination_nonblocking(
 
         if (flag) {
             // Allreduce completed
+            term_req = MPI_REQUEST_NULL;
             checking = false;
             // If we got work while checking, cancel termination
             if (!my_job_stack.empty()) {
                 return false;
             }
             // All ranks were idle and we're still idle
-            return true;
+            return (global_empty==1);
         }
         return false;
 
@@ -292,6 +292,8 @@ void mpi_par_searcher<T>::build_state_tree(){
     MPI_Request term_req = MPI_REQUEST_NULL;
     bool checking_termination = false;
 
+    int global_empty = 0;
+
     while (true) {
         // Process local work
         while (!my_job_stack.empty() && iter_count < CHECK_INTERVAL) {
@@ -305,16 +307,11 @@ void mpi_par_searcher<T>::build_state_tree(){
             }
             iter_count++;
             local_processed++;
+        }
 
-            // If we got work while checking termination, we know we're not done
-            if (checking_termination) {
-                checking_termination = false;
-                if (term_req != MPI_REQUEST_NULL) {
-                    MPI_Cancel(&term_req);
-                    MPI_Request_free(&term_req);
-                    term_req = MPI_REQUEST_NULL;
-                }
-            }
+        // If we got work while checking termination, we know we're not done
+        if (checking_termination && !my_job_stack.empty()) {
+            checking_termination = false;
         }
 
         // check for requesters
@@ -322,17 +319,14 @@ void mpi_par_searcher<T>::build_state_tree(){
         iter_count=0;
 
 
-        if (check_termination_nonblocking(term_req, checking_termination)){
+        if (check_termination_nonblocking(term_req, checking_termination, global_empty)){
             break;
         }
 
         // request work
         if (my_job_stack.empty() && !checking_termination){
             request_work_from_shuffled();
-        }
-        
-        // checkpoint the stack
-        checkpoint.save_stack(my_job_stack);
+        }   
     }
 
     printf("[rank %d] completed processing %lu nodes\n", my_rank, local_processed);

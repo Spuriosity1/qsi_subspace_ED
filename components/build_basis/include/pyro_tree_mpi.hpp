@@ -99,7 +99,7 @@ class mpi_par_searcher : public T {
     bool request_work_from_shuffled();
     bool request_work_from(int target_rank);
     bool check_work_requests();
-    bool check_termination_nonblocking(MPI_Request& term_req, bool& checking);
+    bool check_termination_nonblocking(MPI_Request& term_req, bool& checking, int& global_empty_ptr);
 
     std::mt19937 rng;
 
