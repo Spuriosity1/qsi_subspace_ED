@@ -83,8 +83,6 @@ class mpi_par_searcher : public T {
     // MPI message tags
     static constexpr int TAG_WORK_REQUEST = 1;
     static constexpr int TAG_WORK_RESPONSE = 2;
-//    static constexpr int TAG_TERMINATION_CHECK = 3;
-//    static constexpr int TAG_TERMINATION_RESPONSE = 4;
 
     static constexpr int TAG_TERMINATION_TOKEN = 9;
 
@@ -116,10 +114,10 @@ class mpi_par_searcher : public T {
 //    bool check_termination_robust();
 //    bool check_shutdown_nonblocking(MPI_Request& term_req, bool& checking, int& global_shutdown);
 
-    void initiate_termination_check();
-    bool poll_termination_check();
-    bool check_termination_token_ring();
-    bool check_for_global_termination();
+//    void initiate_termination_check();
+//    bool poll_termination_check();
+//    bool check_termination_token_ring();
+//    bool check_for_global_termination();
 
     std::mt19937 rng;
 

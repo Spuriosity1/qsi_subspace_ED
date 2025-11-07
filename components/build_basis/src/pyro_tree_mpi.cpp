@@ -235,8 +235,8 @@ bool mpi_par_searcher<T>::request_work_from(int target_rank)
     int flag = 0;
     MPI_Status status;
 
-    int dt=10;
-    const static int MAX_DELAY=1000000; // nanoseconds
+    int dt=100;
+    const static int MAX_DELAY=100000; // nanoseconds
     while (!flag && dt < MAX_DELAY) {
         sleep_for(nanoseconds(dt));
         MPI_Iprobe(target_rank, TAG_WORK_RESPONSE, MPI_COMM_WORLD, &flag, &status);
@@ -244,7 +244,8 @@ bool mpi_par_searcher<T>::request_work_from(int target_rank)
     }
 
     if(!flag){
-        // target didn't respond → target is also idle → no deadlock
+//        std::cout <<"No response from rank " <<target_rank<<std::endl;
+        // target didn't respond → target is also idle, give up
         return false;
     }
 
@@ -332,7 +333,7 @@ void mpi_par_searcher<T>::build_state_tree(){
             std::cout<<my_rank<<"] bottom job @ spin "<<my_job_stack[0].curr_spin<<std::endl;
         }
 
-        // if idle: ask for work, initiate ring check
+        // if idle: ask for work
         if (my_job_stack.empty()) {
             bool got_work = request_work_from_shuffled();
             
@@ -349,6 +350,22 @@ void mpi_par_searcher<T>::build_state_tree(){
             }
         } else {
             idle_iterations = 0;
+        }
+    }
+
+    // outside loop, drain any remaining requests
+    int flag=1;
+    MPI_Status status;
+
+    while(flag) {
+        MPI_Iprobe(MPI_ANY_SOURCE, TAG_WORK_REQUEST, MPI_COMM_WORLD, &flag, &status);
+        if(flag){
+            int requester;
+            MPI_Recv(&requester, 1, MPI_INT, status.MPI_SOURCE,
+                    TAG_WORK_REQUEST, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+            int available = WORK_UNAVAILABLE;
+            MPI_Send(&available, 1, MPI_INT, requester,
+                    TAG_WORK_RESPONSE, MPI_COMM_WORLD);
         }
     }
 
