@@ -78,7 +78,7 @@ class mpi_par_searcher : public T {
 
     static constexpr unsigned INITIAL_DEPTH_FACTOR = 5;
     static constexpr int CHECK_INTERVAL = 10000;
-    static constexpr int PRINT_INTERVAL = 1; // print this many checks
+    static constexpr int PRINT_INTERVAL = 50; // print this many checks
 
     // MPI message tags
     static constexpr int TAG_WORK_REQUEST = 1;
