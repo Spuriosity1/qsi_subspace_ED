@@ -78,13 +78,16 @@ class mpi_par_searcher : public T {
 
     static constexpr unsigned INITIAL_DEPTH_FACTOR = 5;
     static constexpr int CHECK_INTERVAL = 10000;
-    static constexpr int PRINT_INTERVAL = 1000; // print this many checks
+    static constexpr int PRINT_INTERVAL = 1; // print this many checks
 
     // MPI message tags
     static constexpr int TAG_WORK_REQUEST = 1;
     static constexpr int TAG_WORK_RESPONSE = 2;
-    static constexpr int TAG_TERMINATION_CHECK = 3;
-    static constexpr int TAG_TERMINATION_RESPONSE = 4;
+//    static constexpr int TAG_TERMINATION_CHECK = 3;
+//    static constexpr int TAG_TERMINATION_RESPONSE = 4;
+
+    static constexpr int TAG_TERMINATION_TOKEN = 9;
+
 
     // Work request status
     static constexpr int WORK_AVAILABLE = 1;
@@ -109,9 +112,14 @@ class mpi_par_searcher : public T {
     bool request_work_from_shuffled();
     bool request_work_from(int target_rank);
     bool check_work_requests();
-    bool check_termination_nonblocking(MPI_Request& term_req, bool& checking, int& global_empty_ptr);
-    bool check_termination_robust();
+//    bool check_termination_nonblocking(MPI_Request& term_req, bool& checking, int& global_empty_ptr);
+//    bool check_termination_robust();
 //    bool check_shutdown_nonblocking(MPI_Request& term_req, bool& checking, int& global_shutdown);
+
+    void initiate_termination_check();
+    bool poll_termination_check();
+    bool check_termination_token_ring();
+    bool check_for_global_termination();
 
     std::mt19937 rng;
 

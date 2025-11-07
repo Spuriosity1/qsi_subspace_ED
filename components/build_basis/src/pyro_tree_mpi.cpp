@@ -184,7 +184,7 @@ bool mpi_par_searcher<T>::check_work_requests(){
                      MPI_COMM_WORLD, MPI_STATUS_IGNORE);
 
         // send work if available
-        if (!my_job_stack.empty()){
+        if (my_job_stack.size() > 10){
             int available = WORK_AVAILABLE;
             MPI_Send(&available, 1, MPI_INT, requester_rank, TAG_WORK_RESPONSE, MPI_COMM_WORLD);
             vtree_node_t state_to_send = pop_hardest_job();
@@ -200,26 +200,55 @@ bool mpi_par_searcher<T>::check_work_requests(){
 }
 
 
+//template<typename T>
+//requires std::derived_from<T, lat_container>
+//bool mpi_par_searcher<T>::request_work_from(int target_rank){
+//    // send work request
+//    MPI_Send(&my_rank, 1, MPI_INT, target_rank, TAG_WORK_REQUEST, MPI_COMM_WORLD);
+//    // Wait for response
+//    int available;
+//    MPI_Recv(&available, 1, MPI_INT, target_rank, TAG_WORK_RESPONSE, 
+//            MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+//
+//    auto vtree_mpi_type = create_vtree_node_type();
+//
+//    if (available == WORK_AVAILABLE){
+//        // receive work item
+//        vtree_node_t node_obtained;
+//        MPI_Recv(&node_obtained, 1, vtree_mpi_type, target_rank, TAG_WORK_RESPONSE,
+//                MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+//        my_job_stack.emplace_back(node_obtained);
+//        return true;
+//    }
+//    return false;
+//}
+
 template<typename T>
 requires std::derived_from<T, lat_container>
-bool mpi_par_searcher<T>::request_work_from(int target_rank){
-    // send work request
+bool mpi_par_searcher<T>::request_work_from(int target_rank)
+{
     MPI_Send(&my_rank, 1, MPI_INT, target_rank, TAG_WORK_REQUEST, MPI_COMM_WORLD);
-    // Wait for response
+
+    int flag = 0;
+    MPI_Status status;
+    MPI_Iprobe(target_rank, TAG_WORK_RESPONSE, MPI_COMM_WORLD, &flag, &status);
+
+    if (!flag) {
+        // target didn't respond → target is also idle → no deadlock
+        return false;
+    }
+
     int available;
-    MPI_Recv(&available, 1, MPI_INT, target_rank, TAG_WORK_RESPONSE, 
-            MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+    MPI_Recv(&available, 1, MPI_INT, target_rank, TAG_WORK_RESPONSE, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
 
-    auto vtree_mpi_type = create_vtree_node_type();
-
-    if (available == WORK_AVAILABLE){
-        // receive work item
+    if (available == WORK_AVAILABLE) {
+        auto vtree_mpi_type = create_vtree_node_type();
         vtree_node_t node_obtained;
-        MPI_Recv(&node_obtained, 1, vtree_mpi_type, target_rank, TAG_WORK_RESPONSE,
-                MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+        MPI_Recv(&node_obtained, 1, vtree_mpi_type, target_rank, TAG_WORK_RESPONSE, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
         my_job_stack.emplace_back(node_obtained);
         return true;
     }
+
     return false;
 }
 
@@ -241,6 +270,7 @@ bool mpi_par_searcher<T>::request_work_from_shuffled(){
     // Try each in sequence until we get work
     for (int target : targets) {
         if (request_work_from(target)) {
+            std::cout<<my_rank<<"] pulled work from " << target <<std::endl;
             return true;
         }
     }
@@ -249,115 +279,77 @@ bool mpi_par_searcher<T>::request_work_from_shuffled(){
     return false;
 }
 
-//
-//template<typename T>
-//requires std::derived_from<T, lat_container>
-//bool mpi_par_searcher<T>::check_shutdown_nonblocking(
-//        MPI_Request& shut_req, bool& checking, int& global_shutdown){
-//    if (!checking) {
-//        // Start a new async reduce only if we haven't started one
-//        int local_flag = GLOBAL_SHUTDOWN_REQUEST ? 1 : 0;
-//        global_shutdown = 0;
-//        MPI_Iallreduce(&local_flag, &global_shutdown, 1, MPI_INT,
-//                       MPI_LOR, MPI_COMM_WORLD, &shut_req);
-//        checking = true;
-//        return false;
-//    }
-//
-//    // We *are* checking → test for completion
-//    int done = 0;
-//    MPI_Test(&shut_req, &done, MPI_STATUS_IGNORE);
-//
-//    if (!done) {
-//        return false; // still in progress
-//    }
-//
-//    // Reduce has completed → consume result and reset state
-//    MPI_Wait(&shut_req, MPI_STATUS_IGNORE);  // ← ADD THIS
-//    shut_req = MPI_REQUEST_NULL;
-//    checking = false;
-//
-//    // Update global state
-//    if (global_shutdown) {
-////        GLOBAL_SHUTDOWN_REQUEST = 1;
-//        return true;   // shutdown confirmed → exit main loop
-//    }
-//
-//    return false; // shutdown not requested → continue
-//}
-//
+template<typename T>
+requires std::derived_from<T, lat_container>
+void mpi_par_searcher<T>::initiate_termination_check() {
+    // Only rank 0 initiates termination checks
+    if (my_rank != 0 || !my_job_stack.empty())
+        throw std::logic_error("bad call to initiate_termination_check");
+
+    std::cout << "[rank 0] Sending termination token" << std::endl;
+    
+    // Send white token to rank 1
+    int token = 0;  // white = idle
+    if (world_size > 1) {
+        MPI_Send(&token, 1, MPI_INT, 1, TAG_TERMINATION_TOKEN, MPI_COMM_WORLD);
+    }   
+}
+
+
 
 template<typename T>
 requires std::derived_from<T, lat_container>
-bool mpi_par_searcher<T>::check_termination_nonblocking(
-        MPI_Request& term_req, bool& checking, int& global_empty){
-    if (!checking) {
-        // new termination request
-        if (my_job_stack.empty()) {
-            int local_empty = 1;
-            MPI_Iallreduce(&local_empty, &global_empty, 1, MPI_INT, MPI_LAND, 
-                          MPI_COMM_WORLD, &term_req);
-            checking = true;
-            return false;
+bool mpi_par_searcher<T>::poll_termination_check() {
+    // searhc for the returned token comes back white
+    MPI_Status status;
+    int flag;
+    MPI_Iprobe(world_size - 1, TAG_TERMINATION_TOKEN, MPI_COMM_WORLD, &flag, &status);
+    
+    if (flag) {
+        int returned_token;
+        MPI_Recv(&returned_token, 1, MPI_INT, world_size - 1, TAG_TERMINATION_TOKEN,
+                 MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+        
+        // If token returned white and we're still idle, we're done!
+        if (returned_token == 0 && my_job_stack.empty()) {
+            return true;
         }
-        return false;
-    } else {
-         // Check if termination check is complete
+    }
+    
+    return false;
+}
+
+
+template<typename T>
+requires std::derived_from<T, lat_container>
+bool mpi_par_searcher<T>::check_termination_token_ring() {
+    // Non-blocking check if rank 0 has sent us a termination token
+    if (my_rank > 0) {
+
+        std::cout<<my_rank<<"] ringck ";
+        MPI_Status status;
         int flag;
-        MPI_Test(&term_req, &flag, MPI_STATUS_IGNORE);
-
+        MPI_Iprobe(my_rank - 1, TAG_TERMINATION_TOKEN, MPI_COMM_WORLD, &flag, &status);
+        
         if (flag) {
-            // Allreduce completed
-            term_req = MPI_REQUEST_NULL;
-            checking = false;
-            // If we got work while checking, cancel termination
-            if (!my_job_stack.empty()) {
-                return false;
+            std::cout << "recv "<<my_rank-1<<" -> "<<my_rank<<"\n";
+            int token;
+            MPI_Recv(&token, 1, MPI_INT, my_rank - 1, TAG_TERMINATION_TOKEN, 
+                     MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+            
+            // If we're idle and token is white, pass it on
+            if (my_job_stack.empty() && token == 0) {
+                int next_rank = (my_rank + 1) % world_size;
+                MPI_Send(&token, 1, MPI_INT, next_rank, TAG_TERMINATION_TOKEN, MPI_COMM_WORLD);
             }
-            // All ranks were idle and we're still idle
-            return (global_empty==1);
+            // Otherwise, discard (termination failed, rank 0 will retry)
+        } else {
+            std::cout<<my_rank<<"] no flag " <<std::endl;
         }
-        return false;
-
-    } 
-}
-
-
-
-template<typename T>
-requires std::derived_from<T, lat_container>
-bool mpi_par_searcher<T>::check_termination_robust() {
-    // Only initiate termination check if we're truly idle
-    if (!my_job_stack.empty()) {
-        return false;
     }
     
-    // Two-phase commit: everyone must agree they're idle TWICE consecutively
-    int local_idle = 1;
-    int global_idle_phase1, global_idle_phase2;
-    
-    // Phase 1: Check if everyone is currently idle
-    MPI_Allreduce(&local_idle, &global_idle_phase1, 1, MPI_INT, 
-                  MPI_LAND, MPI_COMM_WORLD);
-    
-    if (global_idle_phase1 != 1) {
-        return false;  // Someone has work
-    }
-    
-    // Brief moment to handle any in-flight messages
-    check_work_requests();
-    
-    // Check again if we're still idle (might have received work)
-    local_idle = my_job_stack.empty() ? 1 : 0;
-    
-    // Phase 2: Verify everyone is STILL idle
-    MPI_Allreduce(&local_idle, &global_idle_phase2, 1, MPI_INT, 
-                  MPI_LAND, MPI_COMM_WORLD);
-    
-    // Only terminate if idle in both phases
-    return (global_idle_phase2 == 1);
+    return false;  // This is for worker ranks
 }
-
 
 
 
@@ -372,6 +364,8 @@ void mpi_par_searcher<T>::build_state_tree(){
     size_t iter_count = 0;
     size_t local_processed =0;
     size_t num_checks =0;
+    size_t idle_iterations=10;
+    bool terminating=false;
 //    MPI_Request term_req = MPI_REQUEST_NULL;
 //    MPI_Request shut_req = MPI_REQUEST_NULL;
 //    bool checking_termination = false;
@@ -395,39 +389,38 @@ void mpi_par_searcher<T>::build_state_tree(){
             local_processed++;
         }
 
-//        // If we got work while checking termination, we know we're not done
-//        if (checking_termination && !my_job_stack.empty()) {
-//            checking_termination = false;
-//        }
-
         // check for requesters
         check_work_requests();
         iter_count=0;
 
-        if (
-//                check_termination_nonblocking(term_req, checking_termination, global_empty)
-                GLOBAL_SHUTDOWN_REQUEST
-                ){
-            break;
-        }
-        
+        if (GLOBAL_SHUTDOWN_REQUEST) {
+          break;
+        }       
+
         // give an update
         if ( num_checks++ > PRINT_INTERVAL && !my_job_stack.empty()){
             num_checks=0;
-            std::cout<<my_rank<<"] bottom job @ spin "<<my_job_stack[0].curr_spin
-                <<" | shut="
-                <<GLOBAL_SHUTDOWN_REQUEST <<std::endl;
+            std::cout<<my_rank<<"] bottom job @ spin "<<my_job_stack[0].curr_spin<<std::endl;
         }
 
-        // request work
-        if (my_job_stack.empty()){
+        // if idle: ask for work, initiate ring check
+        if (my_job_stack.empty()) {
             bool got_work = request_work_from_shuffled();
             
-            // If still idle after trying to get work, check termination
-            if (!got_work && check_termination_robust()) {
-                break;  // All processes are truly done
+            if (!got_work) {
+                idle_iterations++;
+                // spin-wait
+
+                // Rank 0: After being idle for a bit, quit
+                if (idle_iterations > 1000) {
+                    break;
+                }
+            } else {
+                idle_iterations = 0;
             }
-        }   
+        } else {
+            idle_iterations = 0;
+        }
     }
 
 

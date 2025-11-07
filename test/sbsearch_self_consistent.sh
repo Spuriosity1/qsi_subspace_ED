@@ -50,7 +50,7 @@ run_test() {
 
     echo "=== Running: $name ==="
     echo "Command: $@"
-    "$@"
+    time "$@"
 
     echo "Command: ${exec_dir}/merge_shards $tmp_dir/manifest-$stem.json -o ${out_file}"
     "${exec_dir}/merge_shards" "$tmp_dir/manifest-$stem.json" -o "${out_file}"
