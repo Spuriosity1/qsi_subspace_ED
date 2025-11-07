@@ -298,8 +298,11 @@ private:
             }
 
             char op = token[i];
-            if (op != 'Z' && op !='z' && op != 'X' && op != 'x' && op != '+' && op != '-')
+            const std::string valid_ops = "xyz+-pqXYZPQ";
+            for (auto s : valid_ops){
+                if (op != s)
                 throw std::invalid_argument("Invalid op '" + std::string(1, op) + "' in token: " + token);
+            }
 
             ops.push_back(op);
             ids.push_back(idx);
@@ -356,6 +359,37 @@ private:
                         else
                             or_bit(up_mask, J);
 						break;
+                    case 'p':
+                    case 'P':
+                        // project-up, equivalent to S+ S-
+                        // -- situation
+                        if (readbit(up_mask&X_mask, J)){
+                            sign=0; break; 
+                        }
+                        // if -+, don't reset the mask
+                        if (!readbit(X_mask, J))
+                            or_bit(down_mask, J);
+                        else
+                            or_bit(up_mask, J);
+						break;
+                    case 'Q':
+                    case 'q':
+                        // project-down, equivalent to S- S+
+                        // ++ situation
+                        if (readbit(down_mask&X_mask, J)){
+                            sign=0; break;
+                        }
+                        if (readbit(Z_mask, J))
+                            sign *= -1;
+
+						xor_bit(X_mask, J);
+                        // if +-, don't reset the mask
+                        if (!readbit(X_mask, J))
+                            or_bit(up_mask, J);
+                        else
+                            or_bit(down_mask, J);
+						break;
+                        break;
 					default:
 						throw bad_operator_spec(opstring, spin_ids);
 				}
