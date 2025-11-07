@@ -227,13 +227,23 @@ template<typename T>
 requires std::derived_from<T, lat_container>
 bool mpi_par_searcher<T>::request_work_from(int target_rank)
 {
+    using namespace std::this_thread; // sleep_for, sleep_until
+    using namespace std::chrono; // nanoseconds, system_clock, seconds
+
     MPI_Send(&my_rank, 1, MPI_INT, target_rank, TAG_WORK_REQUEST, MPI_COMM_WORLD);
 
     int flag = 0;
     MPI_Status status;
-    MPI_Iprobe(target_rank, TAG_WORK_RESPONSE, MPI_COMM_WORLD, &flag, &status);
 
-    if (!flag) {
+    int dt=10;
+    const static int MAX_DELAY=1000000; // nanoseconds
+    while (!flag && dt < MAX_DELAY) {
+        sleep_for(nanoseconds(dt));
+        MPI_Iprobe(target_rank, TAG_WORK_RESPONSE, MPI_COMM_WORLD, &flag, &status);
+        dt *=2;
+    }
+
+    if(!flag){
         // target didn't respond → target is also idle → no deadlock
         return false;
     }
@@ -279,6 +289,7 @@ bool mpi_par_searcher<T>::request_work_from_shuffled(){
     return false;
 }
 
+/*
 template<typename T>
 requires std::derived_from<T, lat_container>
 void mpi_par_searcher<T>::initiate_termination_check() {
@@ -350,7 +361,7 @@ bool mpi_par_searcher<T>::check_termination_token_ring() {
     
     return false;  // This is for worker ranks
 }
-
+*/
 
 
 template<typename T>
