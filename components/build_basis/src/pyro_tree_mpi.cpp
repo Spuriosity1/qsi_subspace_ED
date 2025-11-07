@@ -289,80 +289,6 @@ bool mpi_par_searcher<T>::request_work_from_shuffled(){
     return false;
 }
 
-/*
-template<typename T>
-requires std::derived_from<T, lat_container>
-void mpi_par_searcher<T>::initiate_termination_check() {
-    // Only rank 0 initiates termination checks
-    if (my_rank != 0 || !my_job_stack.empty())
-        throw std::logic_error("bad call to initiate_termination_check");
-
-    std::cout << "[rank 0] Sending termination token" << std::endl;
-    
-    // Send white token to rank 1
-    int token = 0;  // white = idle
-    if (world_size > 1) {
-        MPI_Send(&token, 1, MPI_INT, 1, TAG_TERMINATION_TOKEN, MPI_COMM_WORLD);
-    }   
-}
-
-
-
-template<typename T>
-requires std::derived_from<T, lat_container>
-bool mpi_par_searcher<T>::poll_termination_check() {
-    // searhc for the returned token comes back white
-    MPI_Status status;
-    int flag;
-    MPI_Iprobe(world_size - 1, TAG_TERMINATION_TOKEN, MPI_COMM_WORLD, &flag, &status);
-    
-    if (flag) {
-        int returned_token;
-        MPI_Recv(&returned_token, 1, MPI_INT, world_size - 1, TAG_TERMINATION_TOKEN,
-                 MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-        
-        // If token returned white and we're still idle, we're done!
-        if (returned_token == 0 && my_job_stack.empty()) {
-            return true;
-        }
-    }
-    
-    return false;
-}
-
-
-template<typename T>
-requires std::derived_from<T, lat_container>
-bool mpi_par_searcher<T>::check_termination_token_ring() {
-    // Non-blocking check if rank 0 has sent us a termination token
-    if (my_rank > 0) {
-
-        std::cout<<my_rank<<"] ringck ";
-        MPI_Status status;
-        int flag;
-        MPI_Iprobe(my_rank - 1, TAG_TERMINATION_TOKEN, MPI_COMM_WORLD, &flag, &status);
-        
-        if (flag) {
-            std::cout << "recv "<<my_rank-1<<" -> "<<my_rank<<"\n";
-            int token;
-            MPI_Recv(&token, 1, MPI_INT, my_rank - 1, TAG_TERMINATION_TOKEN, 
-                     MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-            
-            // If we're idle and token is white, pass it on
-            if (my_job_stack.empty() && token == 0) {
-                int next_rank = (my_rank + 1) % world_size;
-                MPI_Send(&token, 1, MPI_INT, next_rank, TAG_TERMINATION_TOKEN, MPI_COMM_WORLD);
-            }
-            // Otherwise, discard (termination failed, rank 0 will retry)
-        } else {
-            std::cout<<my_rank<<"] no flag " <<std::endl;
-        }
-    }
-    
-    return false;  // This is for worker ranks
-}
-*/
-
 
 template<typename T>
 requires std::derived_from<T, lat_container>
@@ -376,14 +302,6 @@ void mpi_par_searcher<T>::build_state_tree(){
     size_t local_processed =0;
     size_t num_checks =0;
     size_t idle_iterations=10;
-    bool terminating=false;
-//    MPI_Request term_req = MPI_REQUEST_NULL;
-//    MPI_Request shut_req = MPI_REQUEST_NULL;
-//    bool checking_termination = false;
-//    bool checking_shutdown = false;
-
-//    int global_empty = 0;
-//    static int global_shutting =0;
 
     while (true) {
         // Process local work
