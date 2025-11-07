@@ -323,6 +323,44 @@ bool mpi_par_searcher<T>::check_termination_nonblocking(
 }
 
 
+
+template<typename T>
+requires std::derived_from<T, lat_container>
+bool mpi_par_searcher<T>::check_termination_robust() {
+    // Only initiate termination check if we're truly idle
+    if (!my_job_stack.empty()) {
+        return false;
+    }
+    
+    // Two-phase commit: everyone must agree they're idle TWICE consecutively
+    int local_idle = 1;
+    int global_idle_phase1, global_idle_phase2;
+    
+    // Phase 1: Check if everyone is currently idle
+    MPI_Allreduce(&local_idle, &global_idle_phase1, 1, MPI_INT, 
+                  MPI_LAND, MPI_COMM_WORLD);
+    
+    if (global_idle_phase1 != 1) {
+        return false;  // Someone has work
+    }
+    
+    // Brief moment to handle any in-flight messages
+    check_work_requests();
+    
+    // Check again if we're still idle (might have received work)
+    local_idle = my_job_stack.empty() ? 1 : 0;
+    
+    // Phase 2: Verify everyone is STILL idle
+    MPI_Allreduce(&local_idle, &global_idle_phase2, 1, MPI_INT, 
+                  MPI_LAND, MPI_COMM_WORLD);
+    
+    // Only terminate if idle in both phases
+    return (global_idle_phase2 == 1);
+}
+
+
+
+
 template<typename T>
 requires std::derived_from<T, lat_container>
 void mpi_par_searcher<T>::build_state_tree(){
@@ -334,13 +372,13 @@ void mpi_par_searcher<T>::build_state_tree(){
     size_t iter_count = 0;
     size_t local_processed =0;
     size_t num_checks =0;
-    MPI_Request term_req = MPI_REQUEST_NULL;
-    MPI_Request shut_req = MPI_REQUEST_NULL;
-    bool checking_termination = false;
-    bool checking_shutdown = false;
+//    MPI_Request term_req = MPI_REQUEST_NULL;
+//    MPI_Request shut_req = MPI_REQUEST_NULL;
+//    bool checking_termination = false;
+//    bool checking_shutdown = false;
 
-    int global_empty = 0;
-    static int global_shutting =0;
+//    int global_empty = 0;
+//    static int global_shutting =0;
 
     while (true) {
         // Process local work
@@ -357,18 +395,18 @@ void mpi_par_searcher<T>::build_state_tree(){
             local_processed++;
         }
 
-        // If we got work while checking termination, we know we're not done
-        if (checking_termination && !my_job_stack.empty()) {
-            checking_termination = false;
-        }
+//        // If we got work while checking termination, we know we're not done
+//        if (checking_termination && !my_job_stack.empty()) {
+//            checking_termination = false;
+//        }
 
         // check for requesters
         check_work_requests();
         iter_count=0;
 
         if (
-                check_termination_nonblocking(term_req, checking_termination, global_empty)
-                || GLOBAL_SHUTDOWN_REQUEST
+//                check_termination_nonblocking(term_req, checking_termination, global_empty)
+                GLOBAL_SHUTDOWN_REQUEST
                 ){
             break;
         }
@@ -382,8 +420,13 @@ void mpi_par_searcher<T>::build_state_tree(){
         }
 
         // request work
-        if (my_job_stack.empty() && !checking_termination){
-            request_work_from_shuffled();
+        if (my_job_stack.empty()){
+            bool got_work = request_work_from_shuffled();
+            
+            // If still idle after trying to get work, check termination
+            if (!got_work && check_termination_robust()) {
+                break;  // All processes are truly done
+            }
         }   
     }
 

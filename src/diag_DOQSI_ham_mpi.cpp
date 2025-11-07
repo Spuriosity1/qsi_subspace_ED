@@ -42,7 +42,6 @@ int main(int argc, char* argv[]) {
         .required()
         .help("output directory");
 
-    // NUMERICAL BS
     provide_lanczos_options(prog);
     prog.add_argument("--n_spinons")
         .default_value(0)
