@@ -2,6 +2,9 @@
 #include "pyro_tree_mpi.hpp"
 #include "bittools.hpp"
 
+
+volatile sig_atomic_t GLOBAL_SHUTDOWN_REQUEST=0;
+
 MPI_Datatype create_vtree_node_type(){
     static MPI_Datatype vtree_node_type = MPI_DATATYPE_NULL;
 
@@ -35,6 +38,9 @@ MPI_Datatype create_vtree_node_type(){
 
     return vtree_node_type;
 }
+
+
+
 
 template<typename T>
 requires std::derived_from<T, lat_container>
@@ -119,9 +125,9 @@ void mpi_par_searcher<T>::state_tree_init(){
 
     if (my_job_stack.empty()){
         // no checkpoint found: bootstrap needed
-        std::cout<<"Distributing initial work\n";
         // part one: node 0 builds some initial states
         if (my_rank == 0){
+            std::cout<<"Distributing initial work\n";
             std::queue<vtree_node_t> starting_nodes;
             starting_nodes.push(vtree_node_t({0,0,0}));
             _build_state_bfs(starting_nodes, world_size*INITIAL_DEPTH_FACTOR);
@@ -243,6 +249,44 @@ bool mpi_par_searcher<T>::request_work_from_shuffled(){
     return false;
 }
 
+//
+//template<typename T>
+//requires std::derived_from<T, lat_container>
+//bool mpi_par_searcher<T>::check_shutdown_nonblocking(
+//        MPI_Request& shut_req, bool& checking, int& global_shutdown){
+//    if (!checking) {
+//        // Start a new async reduce only if we haven't started one
+//        int local_flag = GLOBAL_SHUTDOWN_REQUEST ? 1 : 0;
+//        global_shutdown = 0;
+//        MPI_Iallreduce(&local_flag, &global_shutdown, 1, MPI_INT,
+//                       MPI_LOR, MPI_COMM_WORLD, &shut_req);
+//        checking = true;
+//        return false;
+//    }
+//
+//    // We *are* checking → test for completion
+//    int done = 0;
+//    MPI_Test(&shut_req, &done, MPI_STATUS_IGNORE);
+//
+//    if (!done) {
+//        return false; // still in progress
+//    }
+//
+//    // Reduce has completed → consume result and reset state
+//    MPI_Wait(&shut_req, MPI_STATUS_IGNORE);  // ← ADD THIS
+//    shut_req = MPI_REQUEST_NULL;
+//    checking = false;
+//
+//    // Update global state
+//    if (global_shutdown) {
+////        GLOBAL_SHUTDOWN_REQUEST = 1;
+//        return true;   // shutdown confirmed → exit main loop
+//    }
+//
+//    return false; // shutdown not requested → continue
+//}
+//
+
 template<typename T>
 requires std::derived_from<T, lat_container>
 bool mpi_par_searcher<T>::check_termination_nonblocking(
@@ -289,10 +333,14 @@ void mpi_par_searcher<T>::build_state_tree(){
     // main work loop
     size_t iter_count = 0;
     size_t local_processed =0;
+    size_t num_checks =0;
     MPI_Request term_req = MPI_REQUEST_NULL;
+    MPI_Request shut_req = MPI_REQUEST_NULL;
     bool checking_termination = false;
+    bool checking_shutdown = false;
 
     int global_empty = 0;
+    static int global_shutting =0;
 
     while (true) {
         // Process local work
@@ -318,9 +366,19 @@ void mpi_par_searcher<T>::build_state_tree(){
         check_work_requests();
         iter_count=0;
 
-
-        if (check_termination_nonblocking(term_req, checking_termination, global_empty)){
+        if (
+                check_termination_nonblocking(term_req, checking_termination, global_empty)
+                || GLOBAL_SHUTDOWN_REQUEST
+                ){
             break;
+        }
+        
+        // give an update
+        if ( num_checks++ > PRINT_INTERVAL && !my_job_stack.empty()){
+            num_checks=0;
+            std::cout<<my_rank<<"] bottom job @ spin "<<my_job_stack[0].curr_spin
+                <<" | shut="
+                <<GLOBAL_SHUTDOWN_REQUEST <<std::endl;
         }
 
         // request work
@@ -329,17 +387,28 @@ void mpi_par_searcher<T>::build_state_tree(){
         }   
     }
 
-    printf("[rank %d] completed processing %lu nodes\n", my_rank, local_processed);
 
+    if (GLOBAL_SHUTDOWN_REQUEST) {
+        // graceful exit mid-processing
 
-    if (!my_job_stack.empty()){
+        printf("[rank %d] interrupted: processed %lu nodes\n", my_rank, local_processed);
+        shard.flush(true);
+        checkpoint.save_stack(my_job_stack);
+
+        if (my_rank == 0) {
+            int shutdown = 1;
+            MPI_Bcast(&shutdown, 1, MPI_INT, 0, MPI_COMM_WORLD);
+        } else {
+            int dummy;
+            MPI_Bcast(&dummy, 1, MPI_INT, 0, MPI_COMM_WORLD);
+        }
+    } else if (!my_job_stack.empty()){
         throw std::logic_error("[rank "+std::to_string(my_rank) +
                 "] About to terminate without clearing the stack"+
                 "-- something is terribly wrong!");
+    } else {
+        printf("[rank %d] completed processing %lu nodes\n", my_rank, local_processed);
     }
-
-
-
 }
 
 

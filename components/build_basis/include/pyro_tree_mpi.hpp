@@ -5,6 +5,12 @@
 #include <csignal>
 #include "pyro_tree.hpp"
 
+#include <unistd.h>
+#include <fcntl.h>
+#include <string>
+#include <sys/types.h>
+#include <sys/stat.h>
+
 inline int get_mpi_rank(){
     int myrank;
     MPI_Comm_rank(MPI_COMM_WORLD, &myrank);
@@ -51,11 +57,14 @@ class CheckpointWriter {
     }
 };
 
+volatile extern sig_atomic_t GLOBAL_SHUTDOWN_REQUEST;
+
+
 
 template<typename T>
 requires std::derived_from<T, lat_container>
 class mpi_par_searcher : public T {
-    static mpi_par_searcher<T>* global_self;
+//    static mpi_par_searcher<T>* global_self;
 
 
     int world_size;
@@ -69,6 +78,7 @@ class mpi_par_searcher : public T {
 
     static constexpr unsigned INITIAL_DEPTH_FACTOR = 5;
     static constexpr int CHECK_INTERVAL = 10000;
+    static constexpr int PRINT_INTERVAL = 1000; // print this many checks
 
     // MPI message tags
     static constexpr int TAG_WORK_REQUEST = 1;
@@ -100,9 +110,9 @@ class mpi_par_searcher : public T {
     bool request_work_from(int target_rank);
     bool check_work_requests();
     bool check_termination_nonblocking(MPI_Request& term_req, bool& checking, int& global_empty_ptr);
+//    bool check_shutdown_nonblocking(MPI_Request& term_req, bool& checking, int& global_shutdown);
 
     std::mt19937 rng;
-
 
 
 public:
@@ -121,19 +131,18 @@ mpi_par_searcher(const lattice& lat, unsigned num_spinon_pairs,
     shard( workdir / ("shard-" + job_tag + "-" + std::to_string(my_rank) + ".bin"), buf_entries ),
     checkpoint( workdir / ("checkpoint-" + job_tag + "-" + std::to_string(my_rank) + ".bin") )
     {
-        global_self = this;
+        GLOBAL_SHUTDOWN_REQUEST=0;
         signal(SIGINT, sig_handler);
-
+        signal(SIGTERM, sig_handler);
     }
 
     static void sig_handler(int){
-        if (global_self){
-            global_self->shard.flush(true);
-            global_self->checkpoint.save_stack(global_self->my_job_stack);
-        }
-        MPI_Barrier(MPI_COMM_WORLD);
-        MPI_Abort(MPI_COMM_WORLD, 1);
+        const char msg[] = "Exit requested...\n";
+        write(STDERR_FILENO, msg, sizeof(msg) - 1);  // Async-signal-safe
+        GLOBAL_SHUTDOWN_REQUEST=1;
     }
+
+/////
 
     void build_state_tree();
 

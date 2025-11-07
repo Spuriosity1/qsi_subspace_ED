@@ -7,13 +7,7 @@
 #include "admin.hpp"
 #include <mpi.h>
 
-template <>
-mpi_par_searcher<lat_container> 
-    *mpi_par_searcher<lat_container>::global_self = nullptr;
 
-template <>
-mpi_par_searcher<lat_container_with_sector>
-    *mpi_par_searcher<lat_container_with_sector>::global_self = nullptr;
 
 // a more low level gen_spinon_basis.
 // Writes streamed, sharded data to temporary files
@@ -89,11 +83,9 @@ int main (int argc, char *argv[]) {
                 tmp_outpath,
                 inpath.stem(),
                 buffer_size);
-
         L.build_state_tree();
         L.finalise_shards();
     } else {
-
         mpi_par_searcher<lat_container_with_sector> L(lat, num_spinon_pairs, perm,
                 tmp_outpath,
                 inpath.stem(),
