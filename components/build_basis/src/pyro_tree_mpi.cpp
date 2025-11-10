@@ -209,9 +209,9 @@ bool mpi_par_searcher<T>::request_work_from(int target_rank)
     using namespace std::this_thread; // sleep_for, sleep_until
     using namespace std::chrono; // nanoseconds, system_clock, seconds
 
-    MPI_Request req;
+    MPI_Request req_send, req_recv;
 
-    MPI_Isend(&my_rank, 1, MPI_INT, target_rank, TAG_WORK_REQUEST, MPI_COMM_WORLD, &req);
+    MPI_Isend(&my_rank, 1, MPI_INT, target_rank, TAG_WORK_REQUEST, MPI_COMM_WORLD, &req_send);
 
     double dt;
     double t;
@@ -221,7 +221,7 @@ bool mpi_par_searcher<T>::request_work_from(int target_rank)
 
     // await send success
     for (dt=0.001; !flag && dt < MAX_DELAY; dt*=2) {
-        MPI_Test(&req, &flag, MPI_STATUS_IGNORE);
+        MPI_Test(&req_send, &flag, MPI_STATUS_IGNORE);
         t=MPI_Wtime();
         while(MPI_Wtime() < t+dt) check_work_requests(true);
     }
@@ -232,11 +232,11 @@ bool mpi_par_searcher<T>::request_work_from(int target_rank)
     }
 
     int available;
-    MPI_Irecv(&available, 1, MPI_INT, target_rank, TAG_WORK_RESPONSE, MPI_COMM_WORLD, &req);
+    MPI_Irecv(&available, 1, MPI_INT, target_rank, TAG_WORK_RESPONSE, MPI_COMM_WORLD, &req_recv);
 
     // await recv success
     for (dt=10; !flag && dt < MAX_DELAY; dt*=2) {
-        MPI_Test(&req, &flag, MPI_STATUS_IGNORE);
+        MPI_Test(&req_recv, &flag, MPI_STATUS_IGNORE);
         t=MPI_Wtime();
         while(MPI_Wtime() < t+dt) check_work_requests(true);
     }
