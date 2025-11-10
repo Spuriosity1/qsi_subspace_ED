@@ -27,7 +27,9 @@ class CheckpointWriter {
     std::filesystem::path ckpt_file;
 
     public:
-    CheckpointWriter(const std::filesystem::path& file) : ckpt_file(file) {}
+    CheckpointWriter(const std::filesystem::path& file) : ckpt_file(file) {
+        std::cout<<"Initialised checkpoint: "<<ckpt_file<<std::endl;
+    }
 
     inline void save_stack(const lat_container::cust_stack& stack) {
         FILE* f = fopen(ckpt_file.c_str(), "wb");
@@ -84,7 +86,9 @@ class mpi_par_searcher : public T {
     static constexpr int TAG_WORK_REQUEST = 1;
     static constexpr int TAG_WORK_RESPONSE = 2;
 
-    static constexpr int TAG_SHUTDOWN = 9;
+    static constexpr int TAG_SHUTDOWN_RING = 300;
+//    static constexpr int TAG_SHUTDOWN_COMPLETE = 301;
+    static constexpr int NUM_TERMINATE_LOOPS = 3;
 
 
     // Work request status
@@ -109,20 +113,16 @@ class mpi_par_searcher : public T {
     void receive_initial_work();
     bool request_work_from_shuffled();
     bool request_work_from(int target_rank);
-    bool check_work_requests();
-//    bool check_termination_nonblocking(MPI_Request& term_req, bool& checking, int& global_empty_ptr);
-//    bool check_termination_robust();
-//    bool check_shutdown_nonblocking(MPI_Request& term_req, bool& checking, int& global_shutdown);
+    bool check_work_requests(bool force_reject=false);
 
-//    void initiate_termination_check();
-//    bool poll_termination_check();
-//    bool check_termination_token_ring();
-//    bool check_for_global_termination();
+    bool check_termination_requests(MPI_Request* send);
+    void initiate_termination_check(MPI_Request* send);
 
     std::mt19937 rng;
 
 
 public:
+
 
 mpi_par_searcher(const lattice& lat, unsigned num_spinon_pairs,
         const std::vector<size_t>& perm_,
