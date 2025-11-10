@@ -78,10 +78,8 @@ int main(int argc, char* argv[]) {
     MPI_ZBasisBST basis;
     std::cout<<"[MPI_BST]  Loading basis..."<<std::endl;
     MPIContext ctx = load_basis(basis, prog);
-    std::cout<<"[MPI_BST]  Done! Basis dim="<<basis.dim()<<std::endl;
+    std::cout<<"[MPI_BST]  Done! local basis dim="<<basis.dim()<<std::endl;
 
-
-    std::cout<<"Done! Basis dim="<<basis.dim()<<std::endl;
 
 	using coeff_t=double;
 	SymbolicOpSum<coeff_t> H_sym;

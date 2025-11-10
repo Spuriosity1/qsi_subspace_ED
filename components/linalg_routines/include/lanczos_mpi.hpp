@@ -10,9 +10,9 @@ namespace lanczos_mpi {
     // specialise these in case we need extra knobs
 struct Settings  : public lanczos::Settings 
     {
-        Settings(const MPIContext& ctx_) : 
+        Settings(const MPIctx& ctx_) : 
             ctx(ctx_){}
-        const MPIContext& ctx;
+        const MPIctx& ctx;
     };
 
 struct Result : public lanczos::Result 
