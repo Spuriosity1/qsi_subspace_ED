@@ -6,6 +6,7 @@
 #include <cstdio>
 #include <string>
 #include <iostream>
+#include <sstream>
 
 
 union Uint128 {
@@ -39,6 +40,19 @@ union Uint128 {
         uint128 |= other.uint128;
         return *this;
     }
+    
+    template <std::integral T>
+    constexpr Uint128 operator<<=(T x){
+        uint128 <<= x;
+        return *this;
+    }
+
+    template <std::integral T>
+    constexpr Uint128 operator>>=(T other){
+        uint128 >>= other;
+        return *this;
+    }
+
 
     constexpr Uint128 operator~() const {
         Uint128 x = *this;
@@ -68,6 +82,12 @@ union Uint128 {
     friend H AbslHashValue(H h, const Uint128& c) {
         return H::combine(std::move(h), c.uint128);
         //return H::combine(std::move(h), c.uint64[0], c.uint64[1]);
+    }
+
+    constexpr uint64_t bit_width() const {
+        auto bw = std::bit_width(uint64[0]);
+        if (bw < 64) return bw;
+        return std::bit_width(uint64[1]) + bw;
     }
 
 };
@@ -215,4 +235,10 @@ inline std::ostream& printHex(std::ostream& os, const Uint128& val) {
     
     os.flags(flags);
     return os;
+}
+
+inline std::string to_string(const Uint128& x){
+    std::stringstream oss;
+    printHex(oss, x);
+    return oss.str();
 }

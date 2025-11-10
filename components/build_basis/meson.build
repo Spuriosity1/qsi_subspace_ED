@@ -18,12 +18,6 @@ partition_basis = executable('partition_basis', files('partition_basis.cpp'),
     )
 
 
-polyring_basis = executable('polyring_basis', files('polyring_basis.cpp'), 
-  dependencies: [common_dep, eigen_dep, operator_dep],
-  include_directories:basis_inc,
-  cpp_args: target_args,
-  install: true
-  )
 
 gen_spinon_basis = executable('gen_spinon_basis',
   [files(['gen_spinon_basis.cpp']), basis_common_src], 

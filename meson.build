@@ -215,6 +215,21 @@ g_deps = [
 subdir('components')
 subdir('src')
 
+
+polyring_basis = executable('polyring_basis', files('src/polyring_basis.cpp'), 
+  dependencies: [common_dep, eigen_dep, operator_dep],
+  include_directories:basis_inc,
+  cpp_args: target_args,
+  install: true
+  )
+
+polyring_basis_mpi = executable('polyring_basis_mpi', files('src/polyring_basis_mpi.cpp'), 
+  dependencies: [common_dep, eigen_dep, operator_dep, mpi_dep],
+  include_directories:basis_inc,
+  cpp_args: target_args,
+  install: true
+  )
+
 expectation_eval = static_library('expectation_eval', 'src/expectation_eval.cpp',
   include_directories: inc,
   dependencies: [operator_dep, linalg_routines_dep, g_deps])

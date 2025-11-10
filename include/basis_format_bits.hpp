@@ -42,3 +42,4 @@ inline auto load_basis(B& basis, const argparse::ArgumentParser& prog){
         return basis.load_from_file(basisfile);
     }
 }
+

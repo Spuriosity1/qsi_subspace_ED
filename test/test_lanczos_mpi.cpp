@@ -83,7 +83,7 @@ int main(int argc, char** argv) {
 
 
     // construct the basis partition
-    MPIContext ctx;
+    MPIctx ctx;
     ctx.build_idx_partition(dim);
 
     // The random vector

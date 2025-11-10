@@ -33,7 +33,7 @@
 
 // reads only the local basis into memory
 inline std::vector<Uint128> read_basis_hdf5(
-        MPIContext& ctx,
+        MPIctx& ctx,
         const std::string& infile,
         const char* dset_name = "basis"){
 
@@ -170,9 +170,9 @@ inline std::vector<Uint128> read_basis_hdf5(
 
 
 
-MPIContext MPI_ZBasisBST::load_from_file(const fs::path& bfile, const std::string& dataset){
+MPIctx MPI_ZBasisBST::load_from_file(const fs::path& bfile, const std::string& dataset){
      // MPI setup
-    MPIContext ctx;
+    MPIctx ctx;
 //    int rank = ctx.world_rank;
 //    int size = ctx.world_size;
 
@@ -192,30 +192,10 @@ MPIContext MPI_ZBasisBST::load_from_file(const fs::path& bfile, const std::strin
     return ctx;
 }
 
+//void MPI_ZBasisBST::load_state(std::vector<double>& psi, const fs::path& eig_file){
+//    
+//}
 
-size_t MPIContext::rank_of_state(ZBasisBase::state_t psi) const {
-    // linear search, all states should fit in cache unless # nodes is very large
-    for (int n=0; n<world_size; n++){
-        if (psi < state_partition[n+1]){
-            return n;
-        }
-    }
-    // this should almost never happen (possible if we serch for psi nonexistent -- in this case we can safely hand it off to any old node)
-    return world_size-1;
-}
-
-// returns the rank on which a specified psi can be found
-size_t MPIContext::rank_of_idx(ZBasisBase::idx_t J) const {
-    // linear search, all states should fit in cache unless # nodes is very large
-    for (int n=0; n<world_size; n++){
-        if (J < idx_partition[n+1]){
-            return n;
-        }
-    }
-
-    // this should almost never happen (possible if we serch for psi nonexistent -- in this case we can safely hand it off to any old node)
-    return world_size-1;
-}
 
 template<RealOrCplx coeff_t, Basis B >
 void MPILazyOpSum<coeff_t, B>::inplace_bucket_sort(std::vector<ZBasisBase::state_t>& states,

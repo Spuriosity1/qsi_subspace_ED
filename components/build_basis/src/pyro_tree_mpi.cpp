@@ -199,30 +199,7 @@ bool mpi_par_searcher<T>::check_work_requests(){
     return flag;
 }
 
-
-//template<typename T>
-//requires std::derived_from<T, lat_container>
-//bool mpi_par_searcher<T>::request_work_from(int target_rank){
-//    // send work request
-//    MPI_Send(&my_rank, 1, MPI_INT, target_rank, TAG_WORK_REQUEST, MPI_COMM_WORLD);
-//    // Wait for response
-//    int available;
-//    MPI_Recv(&available, 1, MPI_INT, target_rank, TAG_WORK_RESPONSE, 
-//            MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-//
-//    auto vtree_mpi_type = create_vtree_node_type();
-//
-//    if (available == WORK_AVAILABLE){
-//        // receive work item
-//        vtree_node_t node_obtained;
-//        MPI_Recv(&node_obtained, 1, vtree_mpi_type, target_rank, TAG_WORK_RESPONSE,
-//                MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-//        my_job_stack.emplace_back(node_obtained);
-//        return true;
-//    }
-//    return false;
-//}
-
+// BLOCKING request 
 template<typename T>
 requires std::derived_from<T, lat_container>
 bool mpi_par_searcher<T>::request_work_from(int target_rank)
@@ -279,9 +256,20 @@ bool mpi_par_searcher<T>::request_work_from_shuffled(){
     std::shuffle(targets.begin(), targets.end(), rng);
     
     // Try each in sequence until we get work
-    for (int target : targets) {
-        if (request_work_from(target)) {
-            std::cout<<my_rank<<"] pulled work from " << target <<std::endl;
+    for(int target : targets) {
+        // Non-blocking probe to see if peer has sent termination notification
+        int flag = 0;
+        MPI_Iprobe(target, TAG_SHUTDOWN, MPI_COMM_WORLD, &flag, MPI_STATUS_IGNORE);
+        if(flag){
+            // peer is shutting down
+            int dummy;
+            MPI_Recv(&dummy, 1, MPI_INT, target, TAG_SHUTDOWN, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+            continue;
+        }
+
+        // Try to request work
+        if(request_work_from(target)){
+            std::cout << my_rank << "] pulled work from " << target << std::endl;
             return true;
         }
     }
@@ -289,6 +277,8 @@ bool mpi_par_searcher<T>::request_work_from_shuffled(){
     // All ranks were empty
     return false;
 }
+
+
 
 
 template<typename T>
@@ -343,7 +333,7 @@ void mpi_par_searcher<T>::build_state_tree(){
 
                 // Rank 0: After being idle for a bit, quit
                 if (idle_iterations > 1000) {
-                    break;
+                    
                 }
             } else {
                 idle_iterations = 0;
@@ -352,23 +342,6 @@ void mpi_par_searcher<T>::build_state_tree(){
             idle_iterations = 0;
         }
     }
-
-    // outside loop, drain any remaining requests
-    int flag=1;
-    MPI_Status status;
-
-    while(flag) {
-        MPI_Iprobe(MPI_ANY_SOURCE, TAG_WORK_REQUEST, MPI_COMM_WORLD, &flag, &status);
-        if(flag){
-            int requester;
-            MPI_Recv(&requester, 1, MPI_INT, status.MPI_SOURCE,
-                    TAG_WORK_REQUEST, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-            int available = WORK_UNAVAILABLE;
-            MPI_Send(&available, 1, MPI_INT, requester,
-                    TAG_WORK_RESPONSE, MPI_COMM_WORLD);
-        }
-    }
-
 
     if (GLOBAL_SHUTDOWN_REQUEST) {
         // graceful exit mid-processing

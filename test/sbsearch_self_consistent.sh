@@ -1,7 +1,5 @@
 #!/bin/bash
 
-#!/bin/bash
-
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR/.."
 
@@ -62,6 +60,8 @@ run_test() {
     find "$tmp_dir" -type f ! -name "merged-*" -delete
     echo
 }
+
+
 
 run_test "single-thread" "${exec_dir}/sbsearch" -j 1 "$lfile" -o "$tmp_dir"
 run_test "multi-thread" "${exec_dir}/sbsearch" -j 4 "$lfile" -o "$tmp_dir"

@@ -84,7 +84,7 @@ class mpi_par_searcher : public T {
     static constexpr int TAG_WORK_REQUEST = 1;
     static constexpr int TAG_WORK_RESPONSE = 2;
 
-    static constexpr int TAG_TERMINATION_TOKEN = 9;
+    static constexpr int TAG_SHUTDOWN = 9;
 
 
     // Work request status
