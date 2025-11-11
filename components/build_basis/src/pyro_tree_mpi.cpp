@@ -536,8 +536,7 @@ MPI_Datatype create_vtree_node_type() {
   MPI_Type_create_resized(tmp, 0, sizeof(vtree_node_t), &type);
   MPI_Type_commit(&type);
 
-  //    MPI_Type_free(&uint128_type);
-  MPI_Type_free(&tmp);
+//  MPI_Type_free(&tmp);
 
   return type;
 }
@@ -562,7 +561,7 @@ MPI_Datatype create_packet_type() {
   MPI_Type_create_struct(2, blocklen, disp, types, &tmp);
   MPI_Type_create_resized(tmp, 0, sizeof(packet), &type);
   MPI_Type_commit(&type);
-  MPI_Type_free(&tmp);
+//  MPI_Type_free(&tmp);
 
   return type;
 }
