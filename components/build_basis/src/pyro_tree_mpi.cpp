@@ -50,7 +50,6 @@ struct packet {
     int available;
     vtree_node_t state;
 };
-
 #pragma pack(pop)
 
 MPI_Datatype create_packet_type() {
@@ -311,7 +310,7 @@ requires std::derived_from<T, lat_container>
 bool mpi_par_searcher<T>::request_work_from_shuffled(){
     if (world_size == 1) return false;
     
-    
+
     std::cout<<my_rank<<"] requesting work... "<<std::endl;
 
     // Build list of all other ranks
