@@ -35,9 +35,14 @@ compute_all_expectations(
 
     std::vector<double> result(num_ops * num_vecs * num_vecs);
 
+#pragma omp parallel for collapse(2)
     for (int l = 0; l < num_ops; ++l) {
         for (int i = 0; i < num_vecs; ++i) {
             for (int j = 0; j < num_vecs; ++j) {
+                if (i==j && i == 0){
+
+        std::cout<<"Op "<<l+1<<"/"<<num_ops<<"           \r"<<std::flush;
+                }
                 double val = compute_expectation(eigenvectors, ops[l], i, j);
                 result[l * num_vecs * num_vecs + i * num_vecs + j] = val;
             }

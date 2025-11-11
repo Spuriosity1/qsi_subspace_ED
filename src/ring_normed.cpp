@@ -134,16 +134,16 @@ int main(int argc, char* argv[]) {
         write_dataset(out_fid, "eigenvalues", eigvals.data(), dims, 1);
     }
 
-    cout<<"Compute <O_i>... "<<flush;
+    cout<<"Compute <O_i>... "<<endl;
     // computing all one-ring expectation values
     auto ring_expect = compute_all_expectations(eigvecs.leftCols(n_eigvecs), lazy_ringL_Op);
     write_expectation_vals_h5(out_fid, "ringL_i", ring_expect, ringL.size(), n_eigvecs); 
 
-    cout<<"Compute <O_i O'_i + O'_i O_i>... "<<flush;
+    cout<<"Compute <O_i O'_i + O'_i O_i>... "<<endl;
     auto total_expect = compute_all_expectations(eigvecs.leftCols(n_eigvecs), lazy_projector);
     write_expectation_vals_h5(out_fid, "norm_i", total_expect, total_expect.size(), n_eigvecs); 
 
-    cout<<"Compute <O'_0 O_j>... "<<flush;
+    cout<<"Compute <O'_0 O_j>... "<<endl;
     auto ring_ring = compute_all_expectations(eigvecs.leftCols(n_eigvecs), lazy_OO);
     write_expectation_vals_h5(out_fid, "ringR_0 ringL_i", ring_ring, ring_ring.size(), n_eigvecs); 
     cout<<"Done!"<<endl;

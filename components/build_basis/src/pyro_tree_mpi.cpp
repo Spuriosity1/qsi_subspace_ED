@@ -14,7 +14,6 @@ MPI_Datatype create_vtree_node_type() {
     vtree_node_t dummy;
     MPI_Aint base, disp[3];
     int blocklen[3] = {1, 1, 1};
-//    MPI_Datatype types[3] = {MPI_BYTE, MPI_UNSIGNED, MPI_UNSIGNED};
 
     MPI_Get_address(&dummy, &base);
     MPI_Get_address(&dummy.state_thus_far, &disp[0]);
@@ -30,10 +29,11 @@ MPI_Datatype create_vtree_node_type() {
     MPI_Type_contiguous(16, MPI_BYTE, &uint128_type);
     MPI_Type_commit(&uint128_type);
 
+
+    MPI_Datatype types[3] = {uint128_type, MPI_UNSIGNED, MPI_UNSIGNED};
+
     MPI_Datatype tmp;
-    MPI_Type_create_struct(3, blocklen, disp,
-                           (MPI_Datatype[]){uint128_type, MPI_UNSIGNED, MPI_UNSIGNED},
-                           &tmp);
+    MPI_Type_create_struct(3, blocklen, disp, types, &tmp);
 
     MPI_Type_create_resized(tmp, 0, sizeof(vtree_node_t), &type);
     MPI_Type_commit(&type);
