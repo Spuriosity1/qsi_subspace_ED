@@ -5,87 +5,6 @@
 
 volatile sig_atomic_t GLOBAL_SHUTDOWN_REQUEST=0;
 
-MPI_Datatype create_Uint128_type() {
-    static MPI_Datatype uint128_type = MPI_DATATYPE_NULL;
-    if (uint128_type != MPI_DATATYPE_NULL)
-        return uint128_type;
-
-
-    MPI_Type_contiguous(16, MPI_BYTE, &uint128_type);
-    MPI_Type_commit(&uint128_type);
-
-    return uint128_type;
-}
-
-MPI_Datatype create_vtree_node_type() {
-    static MPI_Datatype type = MPI_DATATYPE_NULL;
-    if (type != MPI_DATATYPE_NULL)
-        return type;
-
-    vtree_node_t dummy;
-    MPI_Aint base, disp[3];
-    int blocklen[3] = {1, 1, 1};
-
-    MPI_Get_address(&dummy, &base);
-    MPI_Get_address(&dummy.state_thus_far, &disp[0]);
-    MPI_Get_address(&dummy.curr_spin, &disp[1]);
-    MPI_Get_address(&dummy.num_spinon_pairs, &disp[2]);
-
-    for (int i = 0; i < 3; i++)
-        disp[i] -= base;
-
-    // For the 128-bit field, send 16 bytes as a contiguous block
-    // but better to use MPI_Type_contiguous(16, MPI_BYTE)
-
-    MPI_Datatype types[3] = {create_Uint128_type(), MPI_UNSIGNED, MPI_UNSIGNED};
-
-    MPI_Datatype tmp;
-    MPI_Type_create_struct(3, blocklen, disp, types, &tmp);
-
-    MPI_Type_create_resized(tmp, 0, sizeof(vtree_node_t), &type);
-    MPI_Type_commit(&type);
-
-//    MPI_Type_free(&uint128_type);
-    MPI_Type_free(&tmp);
-
-    return type;
-}
-
-
-#pragma pack(push,1)
-struct packet {
-    int32_t available;
-    vtree_node_t state;
-};
-#pragma pack(pop)
-
-MPI_Datatype create_packet_type() {
-    static MPI_Datatype type = MPI_DATATYPE_NULL;
-    if (type != MPI_DATATYPE_NULL)
-        return type;
-
-    packet dummy;
-    MPI_Aint base, disp[2];
-    int blocklen[2] = {1, 1};
-    MPI_Datatype types[2] = {MPI_INT32_T, create_vtree_node_type()};
-
-    MPI_Get_address(&dummy, &base);
-    MPI_Get_address(&dummy.available, &disp[0]);
-    MPI_Get_address(&dummy.state, &disp[1]);
-    for (int i = 0; i < 2; i++)
-        disp[i] -= base;
-
-    MPI_Datatype tmp;
-    MPI_Type_create_struct(2, blocklen, disp, types, &tmp);
-    MPI_Type_create_resized(tmp, 0, sizeof(packet), &type);
-    MPI_Type_commit(&type);
-    MPI_Type_free(&tmp);
-
-    return type;
-}
-
-
-
 
 template<typename T>
 requires std::derived_from<T, lat_container>
@@ -579,4 +498,72 @@ _build_state_dfs(lat_container::cust_stack& node_stack,
 template class mpi_par_searcher<lat_container>;
 template class mpi_par_searcher<lat_container_with_sector>;
 
+MPI_Datatype create_Uint128_type() {
+  static MPI_Datatype uint128_type = MPI_DATATYPE_NULL;
+  if (uint128_type != MPI_DATATYPE_NULL)
+    return uint128_type;
+
+  MPI_Type_contiguous(16, MPI_BYTE, &uint128_type);
+  MPI_Type_commit(&uint128_type);
+
+  return uint128_type;
+}
+MPI_Datatype create_vtree_node_type() {
+  static MPI_Datatype type = MPI_DATATYPE_NULL;
+  if (type != MPI_DATATYPE_NULL)
+    return type;
+
+  vtree_node_t dummy;
+  MPI_Aint base, disp[3];
+  int blocklen[3] = {1, 1, 1};
+
+  MPI_Get_address(&dummy, &base);
+  MPI_Get_address(&dummy.state_thus_far, &disp[0]);
+  MPI_Get_address(&dummy.curr_spin, &disp[1]);
+  MPI_Get_address(&dummy.num_spinon_pairs, &disp[2]);
+
+  for (int i = 0; i < 3; i++)
+    disp[i] -= base;
+
+  // For the 128-bit field, send 16 bytes as a contiguous block
+  // but better to use MPI_Type_contiguous(16, MPI_BYTE)
+
+  MPI_Datatype types[3] = {create_Uint128_type(), MPI_UNSIGNED, MPI_UNSIGNED};
+
+  MPI_Datatype tmp;
+  MPI_Type_create_struct(3, blocklen, disp, types, &tmp);
+
+  MPI_Type_create_resized(tmp, 0, sizeof(vtree_node_t), &type);
+  MPI_Type_commit(&type);
+
+  //    MPI_Type_free(&uint128_type);
+  MPI_Type_free(&tmp);
+
+  return type;
+}
+
+MPI_Datatype create_packet_type() {
+  static MPI_Datatype type = MPI_DATATYPE_NULL;
+  if (type != MPI_DATATYPE_NULL)
+    return type;
+
+  packet dummy;
+  MPI_Aint base, disp[2];
+  int blocklen[2] = {1, 1};
+  MPI_Datatype types[2] = {MPI_INT32_T, create_vtree_node_type()};
+
+  MPI_Get_address(&dummy, &base);
+  MPI_Get_address(&dummy.available, &disp[0]);
+  MPI_Get_address(&dummy.state, &disp[1]);
+  for (int i = 0; i < 2; i++)
+    disp[i] -= base;
+
+  MPI_Datatype tmp;
+  MPI_Type_create_struct(2, blocklen, disp, types, &tmp);
+  MPI_Type_create_resized(tmp, 0, sizeof(packet), &type);
+  MPI_Type_commit(&type);
+  MPI_Type_free(&tmp);
+
+  return type;
+}
 
