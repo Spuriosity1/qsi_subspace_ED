@@ -63,13 +63,15 @@ void get_all_ring_ops(std::vector<SymbolicPMROperator>& opset, const nlohmann::j
 	}
 }
 
+
 struct constr_explorer_mpi {
 	constr_explorer_mpi(const nlohmann::json& data,
             const std::filesystem::path& workdir_,
             const std::string& job_tag_
             ) : 
         workdir(workdir_),
-        job_tag(job_tag_)
+        job_tag(job_tag_),
+        db_log(my_rank)
     {
         get_all_ring_ops(opset, data);
         MPI_Comm_size(MPI_COMM_WORLD, &world_size);
@@ -231,8 +233,10 @@ protected:
     std::filesystem::path workdir;
     std::string job_tag;
 
-    void db_print(const std::string& msg){
-        std::cout<<"[rank "<<my_rank<<"] " << msg;
+    RankLogger db_log;
+
+    std::ostream& db_print(const std::string& msg=""){
+        return db_log << msg;
     }
 
     Uint128Hash hash_f;

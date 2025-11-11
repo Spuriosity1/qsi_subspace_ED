@@ -113,3 +113,23 @@ size_t MPIContext<state_t, idx_t>::rank_of_idx(idx_t J) const {
     // this should almost never happen (possible if we serch for psi nonexistent -- in this case we can safely hand it off to any old node)
     return world_size-1;
 }
+
+
+
+class RankLogger {
+    const int& rank;
+public:
+    RankLogger(const int& r) : rank(r) {}
+
+    template<typename T>
+    auto& operator<<(const T& value) {
+        std::cout << "[rank " << rank << "] " << value;
+return std::cout;
+    }
+
+    // support std::endl and other manipulators
+    auto& operator<<(std::ostream& (*manip)(std::ostream&)) {
+        std::cout << manip;
+return std::cout;
+    }
+};

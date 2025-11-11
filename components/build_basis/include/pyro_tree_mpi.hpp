@@ -3,6 +3,7 @@
 #include <random>
 #include <vector>
 #include <csignal>
+#include "mpi_context.hpp"
 #include "pyro_tree.hpp"
 
 #include <unistd.h>
@@ -85,6 +86,7 @@ class mpi_par_searcher : public T {
     // MPI message tags
     static constexpr int TAG_WORK_REQUEST = 1;
     static constexpr int TAG_WORK_RESPONSE = 2;
+    static constexpr int TAG_WORK_DATA = 3;
 
     static constexpr int TAG_SHUTDOWN_RING = 300;
 //    static constexpr int TAG_SHUTDOWN_COMPLETE = 301;
@@ -113,12 +115,21 @@ class mpi_par_searcher : public T {
     void receive_initial_work();
     bool request_work_from_shuffled();
     bool request_work_from(int target_rank);
-    bool check_work_requests(bool force_reject=false);
+    bool check_work_requests(bool allow_steal=true);
 
     bool check_termination_requests(MPI_Request* send);
     void initiate_termination_check(MPI_Request* send);
 
     std::mt19937 rng;
+
+
+    RankLogger db_log;
+
+    std::ostream& db_print(const std::string& msg=""){
+        return db_log << msg;
+    }
+
+    int continue_exit;
 
 
 public:
@@ -136,7 +147,8 @@ mpi_par_searcher(const lattice& lat, unsigned num_spinon_pairs,
     job_tag(job_tag_),
     perm(perm_),
     shard( workdir / ("shard-" + job_tag + "-" + std::to_string(my_rank) + ".bin"), buf_entries ),
-    checkpoint( workdir / ("checkpoint-" + job_tag + "-" + std::to_string(my_rank) + ".bin") )
+    checkpoint( workdir / ("checkpoint-" + job_tag + "-" + std::to_string(my_rank) + ".bin") ),
+    db_log(my_rank)
     {
         GLOBAL_SHUTDOWN_REQUEST=0;
         signal(SIGINT, sig_handler);
