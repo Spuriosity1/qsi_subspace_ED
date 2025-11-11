@@ -6,38 +6,76 @@
 
 volatile sig_atomic_t GLOBAL_SHUTDOWN_REQUEST=0;
 
-MPI_Datatype create_vtree_node_type(){
-    static MPI_Datatype vtree_node_type = MPI_DATATYPE_NULL;
+MPI_Datatype create_vtree_node_type() {
+    static MPI_Datatype type = MPI_DATATYPE_NULL;
+    if (type != MPI_DATATYPE_NULL)
+        return type;
 
-    if (vtree_node_type == MPI_DATATYPE_NULL){
+    vtree_node_t dummy;
+    MPI_Aint base, disp[3];
+    int blocklen[3] = {1, 1, 1};
+//    MPI_Datatype types[3] = {MPI_BYTE, MPI_UNSIGNED, MPI_UNSIGNED};
 
-        vtree_node_t dummy;
+    MPI_Get_address(&dummy, &base);
+    MPI_Get_address(&dummy.state_thus_far, &disp[0]);
+    MPI_Get_address(&dummy.curr_spin, &disp[1]);
+    MPI_Get_address(&dummy.num_spinon_pairs, &disp[2]);
 
-        int block_lengths[3] = {16, 1, 1};
-        MPI_Aint displacements[3];
-        MPI_Datatype types[3] = {MPI_BYTE, MPI_UNSIGNED, MPI_UNSIGNED};
+    for (int i = 0; i < 3; i++)
+        disp[i] -= base;
 
-        MPI_Aint base;
-        MPI_Get_address(&dummy, &base);
-        MPI_Get_address(&dummy.state_thus_far, &displacements[0]);
-        MPI_Get_address(&dummy.curr_spin, &displacements[1]);
-        MPI_Get_address(&dummy.num_spinon_pairs, &displacements[2]);
+    // For the 128-bit field, send 16 bytes as a contiguous block
+    // but better to use MPI_Type_contiguous(16, MPI_BYTE)
+    MPI_Datatype uint128_type;
+    MPI_Type_contiguous(16, MPI_BYTE, &uint128_type);
+    MPI_Type_commit(&uint128_type);
 
-        displacements[0] -= base;
-        displacements[1] -= base;
-        displacements[2] -= base;
+    MPI_Datatype tmp;
+    MPI_Type_create_struct(3, blocklen, disp,
+                           (MPI_Datatype[]){uint128_type, MPI_UNSIGNED, MPI_UNSIGNED},
+                           &tmp);
 
-        // Fix the size of the first block to cover the entire Uint128 object
-        MPI_Datatype tmp;
-        MPI_Type_create_struct(3, block_lengths, displacements, types, &tmp);
+    MPI_Type_create_resized(tmp, 0, sizeof(vtree_node_t), &type);
+    MPI_Type_commit(&type);
 
-        // Resize to the real sizeof(vtree_node_t) so MPI doesn’t mis-align consecutive elements
-        MPI_Type_create_resized(tmp, 0, sizeof(vtree_node_t), &vtree_node_type);
-        MPI_Type_commit(&vtree_node_type);
-        MPI_Type_free(&tmp);
-    }
+    MPI_Type_free(&uint128_type);
+    MPI_Type_free(&tmp);
 
-    return vtree_node_type;
+    return type;
+}
+
+
+#pragma pack(push,1)
+struct packet {
+    int available;
+    vtree_node_t state;
+};
+
+#pragma pack(pop)
+
+MPI_Datatype create_packet_type() {
+    static MPI_Datatype type = MPI_DATATYPE_NULL;
+    if (type != MPI_DATATYPE_NULL)
+        return type;
+
+    packet dummy;
+    MPI_Aint base, disp[2];
+    int blocklen[2] = {1, 1};
+    MPI_Datatype types[2] = {MPI_INT, create_vtree_node_type()};
+
+    MPI_Get_address(&dummy, &base);
+    MPI_Get_address(&dummy.available, &disp[0]);
+    MPI_Get_address(&dummy.state, &disp[1]);
+    for (int i = 0; i < 2; i++)
+        disp[i] -= base;
+
+    MPI_Datatype tmp;
+    MPI_Type_create_struct(2, blocklen, disp, types, &tmp);
+    MPI_Type_create_resized(tmp, 0, sizeof(packet), &type);
+    MPI_Type_commit(&type);
+    MPI_Type_free(&tmp);
+
+    return type;
 }
 
 
@@ -177,7 +215,7 @@ requires std::derived_from<T, lat_container>
 bool mpi_par_searcher<T>::check_work_requests(bool allow_steal){
     MPI_Status status;
     int flag;
-    auto vtree_mpi_type = create_vtree_node_type();
+//    auto packet_mpi_type = create_packet_type();
 
     MPI_Iprobe(MPI_ANY_SOURCE, TAG_WORK_REQUEST, MPI_COMM_WORLD, &flag, &status);
     if (flag) {
@@ -185,21 +223,23 @@ bool mpi_par_searcher<T>::check_work_requests(bool allow_steal){
         MPI_Recv(&requester_rank, 1, MPI_INT, status.MPI_SOURCE, TAG_WORK_REQUEST, 
                      MPI_COMM_WORLD, MPI_STATUS_IGNORE);
 
+        static packet p_send;
         // send work if available
         if (!allow_steal || my_job_stack.size() < 3){
             // if unavailable, refuse
-            int available = WORK_UNAVAILABLE;
-            MPI_Send(&available, 1, MPI_INT, requester_rank, TAG_WORK_RESPONSE, MPI_COMM_WORLD);
+            p_send.available = WORK_UNAVAILABLE;
         } else {
-            int available = WORK_AVAILABLE;
-            MPI_Request hs_req_1;
-            MPI_Request hs_req_2;
-            MPI_Isend(&available, 1, MPI_INT, requester_rank, TAG_WORK_RESPONSE, MPI_COMM_WORLD, &hs_req_1);
-            vtree_node_t state_to_send = pop_hardest_job();
-            MPI_Isend(&state_to_send, 1, vtree_mpi_type, requester_rank, TAG_WORK_DATA, MPI_COMM_WORLD, &hs_req_2);
-            MPI_Wait(&hs_req_1, MPI_STATUS_IGNORE);
-            MPI_Wait(&hs_req_2, MPI_STATUS_IGNORE);
+            p_send.available = WORK_AVAILABLE;
+            p_send.state = pop_hardest_job();
         }
+
+        printHex(
+        std::cout <<my_rank<<"] sending " << (p_send.available ? "AVAIL " : "UNAVAIL ") ,
+                p_send.state.state_thus_far)<<" @ spin "<<p_send.state.curr_spin<<" to " << requester_rank<<std::endl;
+        MPI_Send(&p_send, 1, create_packet_type(), requester_rank,
+                TAG_WORK_RESPONSE, MPI_COMM_WORLD);
+//        MPI_Ssend(&p_send, sizeof(packet), MPI_BYTE, requester_rank, TAG_WORK_RESPONSE, MPI_COMM_WORLD);
+
     }
     return flag;
 }
@@ -236,10 +276,10 @@ bool mpi_par_searcher<T>::request_work_from(int target_rank)
         return false;
     }
 
-    int available;
-    MPI_Irecv(&available, 1, MPI_INT, target_rank, TAG_WORK_RESPONSE, MPI_COMM_WORLD, &req_recv);
 
-//    db_print("R <- ") << target_rank << " tag "<<TAG_WORK_RESPONSE<<std::endl;
+    auto packet_mpi_type = create_packet_type();
+    packet received;
+    MPI_Irecv(&received, 1, packet_mpi_type, target_rank, TAG_WORK_RESPONSE, MPI_COMM_WORLD, &req_recv);
 
     // await recv success
     for (dt=0.001; !flag && dt < MAX_DELAY; dt*=2) {
@@ -253,15 +293,13 @@ bool mpi_par_searcher<T>::request_work_from(int target_rank)
         return false;
     }
 
-    if (available == WORK_AVAILABLE) {
-        auto vtree_mpi_type = create_vtree_node_type();
-        vtree_node_t node_obtained;
 
-        std::cout <<my_rank<<"] Awaiting work from rank " <<target_rank<< "... "<< std::flush;
-        MPI_Recv(&node_obtained, 1, vtree_mpi_type, target_rank, TAG_WORK_DATA, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-        my_job_stack.emplace_back(node_obtained);
+    printHex(
+            std::cout <<my_rank<<"] got " << (received.available ? "AVAIL " : "UNAVAIL ") ,
+            received.state.state_thus_far)<<" @ spin "<<received.state.curr_spin<<" from " << target_rank<<std::endl;
 
-        std::cout <<"done! "<<std::endl;
+    if (received.available == WORK_AVAILABLE) {
+        my_job_stack.push_back(received.state);
         return true;
     }
 
@@ -298,7 +336,7 @@ bool mpi_par_searcher<T>::request_work_from_shuffled(){
     }
 
 
-    std::cout << my_rank << "] work request denied "<<std::endl;
+    std::cout << my_rank << "] all ranks empty "<<std::endl;
     
     // All ranks were empty
     return false;
@@ -379,7 +417,7 @@ bool mpi_par_searcher<T>::check_termination_requests(MPI_Request* send_req){
 
     }
 
-
+    
     return false;
 }
 
@@ -417,9 +455,6 @@ void mpi_par_searcher<T>::build_state_tree(){
             local_processed++;
         }
 
-        // check for requesters
-        check_work_requests();
-        iter_count=0;
 
         if (GLOBAL_SHUTDOWN_REQUEST) {
           break;
@@ -434,6 +469,10 @@ void mpi_par_searcher<T>::build_state_tree(){
         // service ring-token requests
         if (check_termination_requests(&fin_send_req))
             break;
+
+
+        // check for requesters
+        iter_count=0;
 
         // if idle: ask for work
         if (my_job_stack.empty()) {
@@ -454,6 +493,7 @@ void mpi_par_searcher<T>::build_state_tree(){
         } else {
             idle_iterations = 0;
         }
+        check_work_requests();
     }
 
     std::cout<<my_rank<<"] entering termination "<<std::endl;

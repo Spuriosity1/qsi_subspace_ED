@@ -69,6 +69,10 @@ requires std::derived_from<T, lat_container>
 class mpi_par_searcher : public T {
 //    static mpi_par_searcher<T>* global_self;
 
+    struct WorkResponse {
+        int available;
+        vtree_node_t job;
+    };
 
     int world_size;
     int my_rank;
@@ -86,7 +90,7 @@ class mpi_par_searcher : public T {
     // MPI message tags
     static constexpr int TAG_WORK_REQUEST = 1;
     static constexpr int TAG_WORK_RESPONSE = 2;
-    static constexpr int TAG_WORK_DATA = 3;
+//    static constexpr int TAG_WORK_DATA = 3;
 
     static constexpr int TAG_SHUTDOWN_RING = 300;
 //    static constexpr int TAG_SHUTDOWN_COMPLETE = 301;
