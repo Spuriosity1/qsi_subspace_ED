@@ -119,6 +119,7 @@ void mpi_par_searcher<T>::state_tree_init(){
 template<typename T>
 requires std::derived_from<T, lat_container>
 vtree_node_t mpi_par_searcher<T>::pop_hardest_job(){
+    assert(my_job_stack.size() > 0);
     // the job with the lowest spin ID is the most time consuming
     unsigned lowest_spin_id = std::numeric_limits<unsigned>::max();
     int i=0;
@@ -148,7 +149,7 @@ bool mpi_par_searcher<T>::check_work_requests(bool allow_steal){
         MPI_Recv(&requester_rank, 1, MPI_INT, status.MPI_SOURCE, TAG_WORK_REQUEST, 
                      MPI_COMM_WORLD, MPI_STATUS_IGNORE);
 
-        static packet p_send;
+        packet p_send;
         // send work if available
         if (!allow_steal || my_job_stack.size() < 3){
             // if unavailable, refuse
@@ -193,7 +194,7 @@ bool mpi_par_searcher<T>::request_work_from(int target_rank)
     for (dt=0.001; !flag && dt < MAX_DELAY; dt*=2) {
         MPI_Test(&req_send, &flag, MPI_STATUS_IGNORE);
         t=MPI_Wtime();
-        while(MPI_Wtime() < t+dt) check_work_requests(false);
+        while(MPI_Wtime() < t+dt); // check_work_requests(false);
     }
 
     if(!flag){
@@ -210,7 +211,7 @@ bool mpi_par_searcher<T>::request_work_from(int target_rank)
     for (dt=0.001; !flag && dt < MAX_DELAY; dt*=2) {
         MPI_Test(&req_recv, &flag, MPI_STATUS_IGNORE);
         t=MPI_Wtime();
-        while(MPI_Wtime() < t+dt) check_work_requests(false);
+        while(MPI_Wtime() < t+dt);// check_work_requests(false);
     }
 
     if(!flag){

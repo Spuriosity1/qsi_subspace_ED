@@ -150,20 +150,36 @@ void test_packet_sendrecv(MPI_Datatype packet_type) {
         return;
     }
 
-    packet pkt;
-    memset(&pkt, rank ? 0x22 : 0x11, sizeof(pkt));
-    pkt.available = (rank == 0 ? 999 : 0);
-
-    if (rank == 0)
-        MPI_Send(&pkt, 1, packet_type, 1, 123, MPI_COMM_WORLD);
-    else if (rank == 1) {
-        packet recv_pkt;
-        MPI_Recv(&recv_pkt, 1, packet_type, 0, 123, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-        printf("✅ packet send/recv ok: available=%d first bytes: %02X %02X %02X %02X\n",
-               recv_pkt.available,
-               ((unsigned char*)&recv_pkt)[0], ((unsigned char*)&recv_pkt)[1],
-               ((unsigned char*)&recv_pkt)[2], ((unsigned char*)&recv_pkt)[3]);
+    packet pkt, recv_pkt, tmp_pkt;
+    if (rank == 0){
+        pkt.state.state_thus_far.uint64[0] = 0xF000000F;
+        pkt.state.state_thus_far.uint64[1] = 0xF008800F;
+        pkt.state.curr_spin = 4;
+        pkt.state.num_spinon_pairs = 11;
+        pkt.available = 0;
+    } else {   
+        pkt.state.state_thus_far.uint64[0] = 0xABABCDCD;
+        pkt.state.state_thus_far.uint64[1] = 0xFEFE0101;
+        pkt.state.curr_spin = 1000;
+        pkt.state.num_spinon_pairs = 0;
+        pkt.available = 999;
     }
+
+
+    MPI_Sendrecv(&pkt, 1, packet_type, (rank +1) % size, 123,
+            &recv_pkt, 1, packet_type, (rank + size - 1) % size,
+            123, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+
+    MPI_Sendrecv(&recv_pkt, 1, packet_type, (rank +size -1) % size, 123,
+            &tmp_pkt, 1, packet_type, (rank + size + 1) % size,
+            123, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+
+    if ( memcmp(&tmp_pkt, &pkt, sizeof(tmp_pkt)) != 0 ){      
+        throw std::logic_error("Round trip was not a no-op!");
+    }
+
+    assert(pkt.state.state_thus_far == tmp_pkt.state.state_thus_far);
+
 }
 
 
