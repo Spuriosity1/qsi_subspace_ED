@@ -69,7 +69,7 @@ struct packet {
 };
 #pragma pack(pop)
 
-MPI_Datatype create_Uint128_type();
+//MPI_Datatype create_Uint128_type();
 
 MPI_Datatype create_vtree_node_type();
 
