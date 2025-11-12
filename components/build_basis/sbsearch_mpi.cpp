@@ -57,6 +57,8 @@ int main (int argc, char *argv[]) {
 
     std::filesystem::path inpath(infilename);
 
+    std::cout << "sizeof(vtree_node_t): " << sizeof(vtree_node_t) << std::endl;
+    std::cout << "alignof(vtree_node_t): " << alignof(vtree_node_t) << std::endl;
 
 	ifstream ifs(infilename);
 	json data = json::parse(ifs);

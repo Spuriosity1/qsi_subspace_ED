@@ -373,6 +373,8 @@ std::vector<size_t> sort_indexes(const std::vector<T> &v) {
   return idx;
 }
 
+static_assert(std::is_trivially_copyable_v<vtree_node_t>, 
+              "Cannot safely MPI_Send this type");
 
 template<typename T>
 requires std::derived_from<T, lat_container>
