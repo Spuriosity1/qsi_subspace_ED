@@ -4,10 +4,12 @@
 
 
 #ifdef USE_APPLE_ACCELERATE
-#include <version>
-#include <Accelerate/Accelerate.h>
+	#include <version>
+	#include <Accelerate/Accelerate.h>
 #else
-#include <cblas.h>
+extern "C" {
+	#include <cblas.h>
+}
 #endif
 
 namespace projED {

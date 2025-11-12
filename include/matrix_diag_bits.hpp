@@ -49,7 +49,7 @@ constexpr Spectra::SortRule default_sort_rule() {
 
 
 template<typename OpType, typename T, RealOrCplx S>
-void compute_spectrum_iterative(const T& ham, VectorXd& evals, MatrixX<S>& evecs, const argparse::ArgumentParser& settings)
+void compute_spectrum_iterative(const T& ham, VectorXd& evals, Matrix<S, Dynamic, Dynamic>& evecs, const argparse::ArgumentParser& settings)
 {
     OpType op(ham); // move
 
