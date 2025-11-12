@@ -142,7 +142,7 @@ std::vector<ShardContribution> partition_shard(const std::filesystem::path& shar
         }
         bin.out.close();
         
-        contrib.emplace_back(sid, bin.count, shard_file);
+        contrib.emplace_back( ShardContribution{sid, bin.count, shard_file.string()});
     }
     return contrib;
 }

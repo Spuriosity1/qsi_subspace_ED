@@ -73,7 +73,10 @@ message('compiler is ', cpp_compiler.get_id())
   endif
 elif blas_backend == 'mkl'
   mkl_dep = dependency('mkl-dynamic-lp64-seq', required: false)
-  if not mkl_dep.found()
+  if mkl_dep.found()
+    message('detected MKL')
+  else
+    message('manually detecting mkl')
     # Fallback: manual MKL detection
     mkl_root = get_option('mkl_root')
     if mkl_root == ''
@@ -140,47 +143,36 @@ endif
 message('Using BLAS backend: @0@'.format(blas_backend))
 
 
-
-mpi_dep = dependency('mpi', language: 'cpp', required:true)
-
-hdf5_raw_dep = dependency('hdf5',
-  language: 'c',
-  required: false,
-  not_found_message: 'dependency HDF5 not found')
+# MPI and HDF5 
+hdf5_root = get_option('hdf5_root')
+mpi_root = get_option('mpi_root')
 
 
-if hdf5_raw_dep.found()
-
-  hdf5_is_parallel = false
-  # Check if h5pcc exists and supports parallel
-  
-  # Check for parallel support
-  cpp = meson.get_compiler('cpp')
-  parallel_test = '''
-  #include <H5pubconf.h>
-  #ifndef H5_HAVE_PARALLEL
-  #error "No parallel"
-  #endif
-  int main() { return 0; }
-  '''
-
-  hdf5_is_parallel = cpp.compiles(parallel_test, 
-    dependencies: hdf5_raw_dep,
-    name: 'HDF5 parallel support')
-
-  h5_dep_dep = [hdf5_raw_dep]
-  if hdf5_is_parallel
-    message('HDF5 has parallel support')
-    h5_dep_dep += mpi_dep
-  else
-    error('HDF5 does not have parallel support')
-  endif
-
-  hdf5_dep = declare_dependency(
-    dependencies: h5_dep_dep
-    )
+if mpi_root != ''
+  message('Using custom MPI root: ' + mpi_root)
+  mpi_dep = dependency('mpi', method: 'pkg-config', required: true,
+                       dirs: [join_paths(mpi_root, 'lib', 'pkgconfig'),
+                              join_paths(mpi_root, 'lib64', 'pkgconfig')])
+else
+  mpi_dep = dependency('mpi', required: true)
 endif
 
+if hdf5_root != ''
+  message('Using custom HDF5 at ' + hdf5_root)
+
+  hdf5_inc = include_directories(join_paths(hdf5_root, 'include'))
+  hdf5_libdir = join_paths(hdf5_root, 'lib')
+
+  hdf5_dep = declare_dependency(
+    include_directories: hdf5_inc,
+    link_args: ['-L' + hdf5_libdir, '-lhdf5', '-lmpi']
+  )
+else
+  hdf5_dep = declare_dependency(
+		  dependencies: 
+		  [dependency('hdf5', language: 'c', required: true),
+		  mpi_dep])
+endif
 
 
 
