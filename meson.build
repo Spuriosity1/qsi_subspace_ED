@@ -161,7 +161,8 @@ if hdf5_raw_dep.found()
   #ifndef H5_HAVE_PARALLEL
   #error "No parallel"
   #endif
-  int main() { return 0; }
+  int main() { return 0;
+    }
   '''
 
   hdf5_is_parallel = cpp.compiles(parallel_test, 
