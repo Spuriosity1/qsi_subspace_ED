@@ -130,11 +130,15 @@ vtree_node_t mpi_par_searcher<T>::pop_hardest_job(){
             min_idx = i;
         }
     }
+    assert(min_idx == 0);
     vtree_node_t tmp = my_job_stack[min_idx];
     my_job_stack.erase(std::next(my_job_stack.begin(), min_idx));
     return tmp;
 }
 
+
+
+/*
 //non-blocking check whether there are any nodes requesting work
 template<typename T>
 requires std::derived_from<T, lat_container>
@@ -169,6 +173,7 @@ bool mpi_par_searcher<T>::check_work_requests(bool allow_steal){
     }
     return flag;
 }
+
 
 // non-blocking request 
 template<typename T>
@@ -231,6 +236,7 @@ bool mpi_par_searcher<T>::request_work_from(int target_rank)
 
     return false;
 }
+
 
 template<typename T>
 requires std::derived_from<T, lat_container>
@@ -347,6 +353,25 @@ bool mpi_par_searcher<T>::check_termination_requests(MPI_Request* send_req){
     return false;
 }
 
+*/
+
+
+template <typename T>
+std::vector<size_t> sort_indexes(const std::vector<T> &v) {
+
+  // initialize original index locations
+  std::vector<size_t> idx(v.size());
+  iota(idx.begin(), idx.end(), 0);
+
+  // sort indexes based on comparing values in v
+  // using std::stable_sort instead of std::sort
+  // to avoid unnecessary index re-orderings
+  // when v contains elements of equal values 
+  stable_sort(idx.begin(), idx.end(),
+       [&v](size_t i1, size_t i2) {return v[i1] < v[i2];});
+
+  return idx;
+}
 
 
 template<typename T>
@@ -357,18 +382,17 @@ void mpi_par_searcher<T>::build_state_tree(){
 
     // Part 2: All nodes do their part with load balancing
     // main work loop
-    size_t iter_count = 0;
     size_t local_processed =0;
     size_t num_checks =0;
-    size_t idle_iterations=0;
-
-    MPI_Request fin_send_req = MPI_REQUEST_NULL;
+    size_t iter_count;
 
 //    bool force_reject = false;
 
     while (true) {
         // Process local work
-        while (!my_job_stack.empty() && iter_count < CHECK_INTERVAL) {
+        for (iter_count=0;
+                !my_job_stack.empty() && iter_count < CHECK_INTERVAL;
+                iter_count++) {
             if (my_job_stack.top().curr_spin == 
                     static_cast<T*>(this)->lat.spins.size()) {
                 shard.push(
@@ -381,6 +405,56 @@ void mpi_par_searcher<T>::build_state_tree(){
             local_processed++;
         }
 
+        // sync point: All-to-all comms
+        static const unsigned SPINID_RANK_EMPTY = std::numeric_limits<unsigned>::max();
+
+        int n_idle =0;
+        // Rebalance job stacks across ranks
+
+        // Gather stack sizes
+        int my_size = my_job_stack.size();
+        std::vector<int> all_sizes(world_size);
+        MPI_Allgather(&my_size, 1, MPI_INT,
+                all_sizes.data(), 1, MPI_INT, MPI_COMM_WORLD);
+
+        // Count idle ranks
+        for (int size : all_sizes) {
+            if (size == 0) n_idle++;
+        }
+
+        if (n_idle > 0) {
+            if (n_idle == world_size) goto end_of_loop;
+
+            // Find one donor and one receiver
+            int donor = -1, receiver = -1;
+            for (int i = 0; i < world_size; i++) {
+                if (all_sizes[i] == 0 && receiver == -1) {
+                    receiver = i;
+                } else if (all_sizes[i] > 1 && donor == -1) {
+                    donor = i;
+                }
+            }
+
+            if (donor != -1 && receiver != -1) {
+
+            // Transfer shallowest node from donor to receiver
+            if (my_rank == donor) {
+                MPI_Send(&my_job_stack.front(), 
+                        sizeof(vtree_node_t), MPI_BYTE, receiver, 0, MPI_COMM_WORLD);
+                my_job_stack.erase(my_job_stack.begin());
+
+                std::cout<<my_rank<<"] donate -> "<<receiver<<std::endl;
+            } else if (my_rank == receiver) {
+                vtree_node_t received_node;
+                MPI_Recv(&received_node, sizeof(vtree_node_t),
+                        MPI_BYTE, donor, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+
+                std::cout<<my_rank<<"] recv <- "<<donor<<std::endl;
+                my_job_stack.push_back(received_node);
+            }
+            }
+            
+        }
 
         if (GLOBAL_SHUTDOWN_REQUEST) {
           break;
@@ -392,50 +466,9 @@ void mpi_par_searcher<T>::build_state_tree(){
             std::cout<<my_rank<<"] bottom job @ spin "<<my_job_stack[0].curr_spin<<std::endl;
         }
 
-        // service ring-token requests
-        if (check_termination_requests(&fin_send_req))
-            break;
-
-
-        // check for requesters
-        iter_count=0;
-
-        // if idle: ask for work
-        if (my_job_stack.empty()) {
-            bool got_work = request_work_from_shuffled();
-            
-            if (!got_work) {
-                idle_iterations++;
-
-                // Rank 0: After being idle for a bit, enter termination phase
-                if (idle_iterations > 3) {
-                    break;
-                }
-
-                std::this_thread::sleep_for(std::chrono::microseconds(1000));
-            } else {
-                idle_iterations = 0;
-            }
-        } else {
-            idle_iterations = 0;
-        }
-        check_work_requests();
     }
 
-    std::cout<<my_rank<<"] entering termination "<<std::endl;
-
-    // termination phase
-    while (!GLOBAL_SHUTDOWN_REQUEST){
-        if (my_rank==0 && fin_send_req == MPI_REQUEST_NULL){
-            std::cout << "MPI termination begin\n";
-            initiate_termination_check(&fin_send_req);
-        }
-        // service ring-token requests
-        if (check_termination_requests(&fin_send_req))
-            break;
-        // check for requesters
-        check_work_requests();
-    }
+end_of_loop:
 
     if (GLOBAL_SHUTDOWN_REQUEST) {
         // graceful exit mid-processing
@@ -499,16 +532,18 @@ _build_state_dfs(lat_container::cust_stack& node_stack,
 template class mpi_par_searcher<lat_container>;
 template class mpi_par_searcher<lat_container_with_sector>;
 
-MPI_Datatype create_Uint128_type() {
-  static MPI_Datatype uint128_type = MPI_DATATYPE_NULL;
-  if (uint128_type != MPI_DATATYPE_NULL)
-    return uint128_type;
+//MPI_Datatype create_Uint128_type() {
+//  static MPI_Datatype uint128_type = MPI_DATATYPE_NULL;
+//  if (uint128_type != MPI_DATATYPE_NULL)
+//    return uint128_type;
+//
+//  MPI_Type_contiguous(16, MPI_BYTE, &uint128_type);
+//  MPI_Type_commit(&uint128_type);
+//
+//  return uint128_type;
+//}
 
-  MPI_Type_contiguous(16, MPI_BYTE, &uint128_type);
-  MPI_Type_commit(&uint128_type);
 
-  return uint128_type;
-}
 MPI_Datatype create_vtree_node_type() {
   static MPI_Datatype type = MPI_DATATYPE_NULL;
   if (type != MPI_DATATYPE_NULL)
@@ -516,7 +551,7 @@ MPI_Datatype create_vtree_node_type() {
 
   vtree_node_t dummy;
   MPI_Aint base, disp[3];
-  int blocklen[3] = {1, 1, 1};
+  int blocklen[3] = {sizeof(Uint128), 1, 1};
 
   MPI_Get_address(&dummy, &base);
   MPI_Get_address(&dummy.state_thus_far, &disp[0]);
@@ -529,7 +564,7 @@ MPI_Datatype create_vtree_node_type() {
   // For the 128-bit field, send 16 bytes as a contiguous block
   // but better to use MPI_Type_contiguous(16, MPI_BYTE)
 
-  MPI_Datatype types[3] = {create_Uint128_type(), MPI_UNSIGNED, MPI_UNSIGNED};
+  MPI_Datatype types[3] = {MPI_BYTE, MPI_UNSIGNED, MPI_UNSIGNED};
 
   MPI_Datatype tmp;
   MPI_Type_create_struct(3, blocklen, disp, types, &tmp);
@@ -542,28 +577,29 @@ MPI_Datatype create_vtree_node_type() {
   return type;
 }
 
-MPI_Datatype create_packet_type() {
-  static MPI_Datatype type = MPI_DATATYPE_NULL;
-  if (type != MPI_DATATYPE_NULL)
-    return type;
 
-  packet dummy;
-  MPI_Aint base, disp[2];
-  int blocklen[2] = {1, 1};
-  MPI_Datatype types[2] = {MPI_INT32_T, create_vtree_node_type()};
-
-  MPI_Get_address(&dummy, &base);
-  MPI_Get_address(&dummy.available, &disp[0]);
-  MPI_Get_address(&dummy.state, &disp[1]);
-  for (int i = 0; i < 2; i++)
-    disp[i] -= base;
-
-  MPI_Datatype tmp;
-  MPI_Type_create_struct(2, blocklen, disp, types, &tmp);
-  MPI_Type_create_resized(tmp, 0, sizeof(packet), &type);
-  MPI_Type_commit(&type);
-//  MPI_Type_free(&tmp);
-
-  return type;
-}
+//MPI_Datatype create_packet_type() {
+//  static MPI_Datatype type = MPI_DATATYPE_NULL;
+//  if (type != MPI_DATATYPE_NULL)
+//    return type;
+//
+//  packet dummy;
+//  MPI_Aint base, disp[2];
+//  int blocklen[2] = {1, 1};
+//  MPI_Datatype types[2] = {MPI_INT32_T, create_vtree_node_type()};
+//
+//  MPI_Get_address(&dummy, &base);
+//  MPI_Get_address(&dummy.available, &disp[0]);
+//  MPI_Get_address(&dummy.state, &disp[1]);
+//  for (int i = 0; i < 2; i++)
+//    disp[i] -= base;
+//
+//  MPI_Datatype tmp;
+//  MPI_Type_create_struct(2, blocklen, disp, types, &tmp);
+//  MPI_Type_create_resized(tmp, 0, sizeof(packet), &type);
+//  MPI_Type_commit(&type);
+////  MPI_Type_free(&tmp);
+//
+//  return type;
+//}
 

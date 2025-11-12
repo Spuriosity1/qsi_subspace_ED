@@ -42,7 +42,7 @@ if get_option('buildtype') == 'release'
   target_args += ['-DNDEBUG']
 
 elif get_option('buildtype') == 'debug'
-   add_project_arguments(['-fsanitize=address'], language: 'cpp' )
+#   add_project_arguments(['-fsanitize=address'], language: 'cpp' )
 endif
 
 

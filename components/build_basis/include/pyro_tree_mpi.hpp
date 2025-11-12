@@ -62,18 +62,15 @@ class CheckpointWriter {
 
 volatile extern sig_atomic_t GLOBAL_SHUTDOWN_REQUEST;
 
-#pragma pack(push,1)
-struct packet {
-    vtree_node_t state;
-    int32_t available;
-};
-#pragma pack(pop)
-
-MPI_Datatype create_Uint128_type();
+//#pragma pack(push,1)
+//struct packet {
+//    vtree_node_t state;
+//    int32_t available;
+//};
 
 MPI_Datatype create_vtree_node_type();
 
-MPI_Datatype create_packet_type();
+//MPI_Datatype create_packet_type();
 
 template<typename T>
 requires std::derived_from<T, lat_container>
@@ -111,6 +108,7 @@ class mpi_par_searcher : public T {
     lat_container::cust_stack my_job_stack;
 
     vtree_node_t pop_hardest_job();
+    int lowest_spon_id_on_stack();
 
 	void _build_state_dfs(lat_container::cust_stack &node_stack,
 			unsigned long max_stack_size = (1ul << 40));
