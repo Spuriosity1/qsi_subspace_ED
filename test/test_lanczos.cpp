@@ -18,10 +18,11 @@ struct MockBasis {
 
 template<RealOrCplx T>
 struct MockHam {
-    MockHam(const Eigen::MatrixX<T>& _M, const size_t dim) : mat(_M), dim_(dim) {}
+    MockHam(const Eigen::Matrix<T, Eigen::Dynamic, Eigen::Dynamic>& _M,
+			const size_t dim) : mat(_M), dim_(dim) {}
     size_t cols() const { return dim_; }
 
-    Eigen::MatrixX<T> mat;
+    Eigen::Matrix<T, Eigen::Dynamic, Eigen::Dynamic> mat;
     void evaluate(const double* in, double* out) const {
         Eigen::Map<const Eigen::VectorXd> vin(in, dim_);
         Eigen::Map<Eigen::VectorXd> vout(out, dim_);
@@ -140,7 +141,7 @@ int main(int argc, char** argv) {
     // Exact solution with Eigen
     Eigen::SelfAdjointEigenSolver<Eigen::MatrixXd> solver(M);
     double eigval_exact = solver.eigenvalues()(0);
-    auto eigenvector_exact = solver.eigenvectors()(Eigen::all, 0);
+    auto eigenvector_exact = solver.eigenvectors().col(0);
 
     std::cout << "Lanczos smallest eigenvalue: " << eigval_lanczos << "\n";
     std::cout << "Exact   smallest eigenvalue: " << eigval_exact << "\n";

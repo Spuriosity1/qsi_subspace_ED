@@ -8,6 +8,61 @@
 #include <iostream>
 #include <sstream>
 #include <bit>
+//
+#include <cstdint>
+#include <climits>
+
+/*
+#if defined(__INTEL_LLVM_COMPILER)
+#include <concepts>
+#endif
+
+constexpr int bit_width(uint64_t x) noexcept {
+    if (x == 0) return 0;
+    
+#if defined(__GNUC__) || defined(__clang__) || defined(__INTEL_LLVM_COMPILER)
+    // Use compiler intrinsics for best performance
+    return 64 - __builtin_clzll(x);
+#elif defined(_MSC_VER)
+    unsigned long idx;
+    _BitScanReverse64(&idx, x);
+    return idx + 1;
+#else
+    #warning "using untested, manual bit_width code!"
+    // Portable fallback using De Bruijn multiplication
+    x |= x >> 1;
+    x |= x >> 2;
+    x |= x >> 4;
+    x |= x >> 8;
+    x |= x >> 16;
+    x |= x >> 32;
+    
+    static constexpr int debruijn_table[64] = {
+        0,  47,  1, 56, 48, 27,  2, 60,
+       57, 49, 41, 37, 28, 16,  3, 61,
+       54, 58, 35, 52, 50, 42, 21, 44,
+       38, 32, 29, 23, 17, 11,  4, 62,
+       46, 55, 26, 59, 40, 36, 15, 53,
+       34, 51, 20, 43, 31, 22, 10, 45,
+       25, 39, 14, 33, 19, 30,  9, 24,
+       13, 18,  8, 12,  7,  6,  5, 63
+    };
+    
+    return debruijn_table[(x * 0x03f79d71b4cb0a89ULL) >> 58] + 1;
+#endif
+}
+
+// Overloads for other unsigned types
+constexpr int bit_width(uint32_t x) noexcept {
+    if (x == 0) return 0;
+#if defined(__GNUC__) || defined(__clang__)
+    return 32 - __builtin_clz(x);
+#else
+    return bit_width(uint64_t(x));
+#endif
+}
+
+*/
 
 
 union Uint128 {

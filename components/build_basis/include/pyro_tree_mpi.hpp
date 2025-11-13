@@ -86,9 +86,10 @@ class mpi_par_searcher : public T {
 
 
     static constexpr unsigned INITIAL_DEPTH_FACTOR = 5;
-    static constexpr int CHECK_INTERVAL = 10000;
-    static constexpr int PRINT_INTERVAL = 50; // print this many checks
-
+    int CHECK_INTERVAL = 100000;
+    int PRINT_INTERVAL = 50; // print this many checks
+    int MIN_CHUNK_SIZE = 3; // miimum stack size before steals are accepted
+                        
     // MPI message tags
     static constexpr int TAG_WORK_REQUEST = 1;
     static constexpr int TAG_WORK_RESPONSE = 2;
@@ -98,9 +99,14 @@ class mpi_par_searcher : public T {
     static constexpr int NUM_TERMINATE_LOOPS = 3;
 
 
+
+
     // Work request status
     static constexpr int WORK_AVAILABLE = 1;
     static constexpr int WORK_UNAVAILABLE = 0;
+
+
+    static constexpr unsigned SPINID_RANK_EMPTY = std::numeric_limits<unsigned>::max();
 
     ShardWriter shard;
     CheckpointWriter checkpoint;
@@ -108,6 +114,11 @@ class mpi_par_searcher : public T {
     lat_container::cust_stack my_job_stack;
 
     vtree_node_t pop_hardest_job();
+    void handle_send_request(int dest_rank);
+    bool handle_shutdown_ring(bool& shutdown_continues);
+    bool recv_stack_state(int src_rank);
+    bool handle_signals(int& flag, MPI_Status& status);
+
     int lowest_spon_id_on_stack();
 
 	void _build_state_dfs(lat_container::cust_stack &node_stack,
@@ -119,12 +130,15 @@ class mpi_par_searcher : public T {
     void state_tree_init();
     void distribute_initial_work(std::queue<vtree_node_t>& starting_nodes);
     void receive_initial_work();
-    bool request_work_from_shuffled();
-    bool request_work_from(int target_rank);
-    bool check_work_requests(bool allow_steal=true);
+//    bool request_work_from_shuffled();
+    void request_work_from(int target_rank);
+//    bool check_work_requests(bool allow_steal=true);
 
-    bool check_termination_requests(MPI_Request* send);
-    void initiate_termination_check(MPI_Request* send);
+
+
+
+//    bool check_termination_requests(MPI_Request* send);
+//    void initiate_termination_check(MPI_Request* send);
 
     std::mt19937 rng;
 
@@ -135,7 +149,6 @@ class mpi_par_searcher : public T {
         return db_log << msg;
     }
 
-    int continue_exit;
 
 
 public:
@@ -167,9 +180,20 @@ mpi_par_searcher(const lattice& lat, unsigned num_spinon_pairs,
         GLOBAL_SHUTDOWN_REQUEST=1;
     }
 
+    void set_iter_opts(
+    int check_interval = 100000,
+    int print_interval = 50, // print this many checks
+    int min_chunk_size = 3 // miimum stack size before steals are accepted
+        ) {
+        this->CHECK_INTERVAL = check_interval;
+        this->PRINT_INTERVAL = print_interval;
+        this->MIN_CHUNK_SIZE = min_chunk_size;
+    }
+
 /////
 
     void build_state_tree();
+    void build_state_tree_allgather();
 
     void finalise_shards(){
         shard.finalize(true);

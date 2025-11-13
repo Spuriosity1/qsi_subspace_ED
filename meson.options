@@ -13,3 +13,8 @@ option('mkl_root',
   description: 'Path to Intel MKL root directory (overrides MKLROOT env var)'
 )
 
+option('hdf5_root', type: 'string', value: '', description: 'Path to custom HDF5 installation (prefix directory)')
+option('mpi_root', type: 'string', value: '', description: 'Path to custom MPI installation (prefix directory)')
+
+  
+
