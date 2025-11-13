@@ -39,6 +39,18 @@ int main (int argc, char *argv[]) {
         .help("RAM buffer size for the state tree")
         .default_value(1<<20)
         .scan<'i', int>();
+    prog.add_argument("--check_interval")
+        .help("Iterations before checking for dry ranks")
+        .default_value(10000)
+        .scan<'i', int>();
+    prog.add_argument("--print_interval")
+        .help("number of check cycles before printing debug info")
+        .default_value(50)
+        .scan<'i', int>();
+    prog.add_argument("--chunk_size")
+        .help("minimum size of a stack to permit sending to another rank")
+        .default_value(2)
+        .scan<'i', int>();
     try {
         prog.parse_args(argc, argv);
     } catch (const std::exception& err){
@@ -80,11 +92,15 @@ int main (int argc, char *argv[]) {
     MPI_Init(nullptr, nullptr);
 	
 
+    auto print_interval = prog.get<int>("--print_interval");
+    auto check_interval = prog.get<int>("--check_interval");
+    auto chunk_size = prog.get<int>("--chunk_size");
     if (target_sector.size() == 0){
         mpi_par_searcher<lat_container> L(lat, num_spinon_pairs, perm,
                 tmp_outpath,
                 inpath.stem(),
                 buffer_size);
+        L.set_iter_opts(check_interval, print_interval, chunk_size);
         L.build_state_tree();
         L.finalise_shards();
     } else {
@@ -93,6 +109,7 @@ int main (int argc, char *argv[]) {
                 inpath.stem(),
                 buffer_size);
 
+        L.set_iter_opts(check_interval, print_interval, chunk_size);
         L.set_sector(target_sector);
         L.build_state_tree();
         L.finalise_shards();
