@@ -230,11 +230,13 @@ hid_t create_hdf5_dataset(const std::string& filename, size_t batch_size) {
     hsize_t dims[2]       = {0, 2};
     hsize_t maxdims[2]    = {H5S_UNLIMITED, 2};
     hsize_t chunk_dims[2] = {batch_size, 2};
+    static const int COMPRESSION_LEVEL = 5;
     
     hid_t file_id = H5Fcreate((filename + ".h5").c_str(),
                               H5F_ACC_TRUNC, H5P_DEFAULT, H5P_DEFAULT);
     hid_t dataspace_id = H5Screate_simple(2, dims, maxdims);
     hid_t plist_id = H5Pcreate(H5P_DATASET_CREATE);
+    H5Pset_deflate(plist_id, COMPRESSION_LEVEL);
     H5Pset_chunk(plist_id, 2, chunk_dims);
     hid_t dataset_id = H5Dcreate(file_id, "basis", H5T_NATIVE_UINT64,
                                  dataspace_id, H5P_DEFAULT, plist_id, H5P_DEFAULT);
