@@ -183,11 +183,11 @@ mpi_root = get_option('mpi_root')
 #=======
 if mpi_root != ''
   message('Using custom MPI root: ' + mpi_root)
-  mpi_dep = dependency('mpi', method: 'pkg-config', required: true,
+  mpi_dep = dependency('mpi', method: 'pkg-config', required: true, language: 'cpp',
                        dirs: [join_paths(mpi_root, 'lib', 'pkgconfig'),
                               join_paths(mpi_root, 'lib64', 'pkgconfig')])
 else
-  mpi_dep = dependency('mpi', required: true)
+  mpi_dep = dependency('mpi', required: true, language:'cpp')
 endif
 
 if hdf5_root != ''

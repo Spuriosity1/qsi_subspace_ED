@@ -225,19 +225,52 @@ void sort_shard_file(const std::string& filename,
     }
 }
 
+// Print HDF5 error stack and throw
+inline void h5_fail(const char* msg) {
+    // Prints entire error stack to stderr
+    H5Eprint2(H5E_DEFAULT, stderr);
+    throw std::runtime_error(msg);
+}
+
+// Check an HDF5 return ID
+inline void h5_expect_id(hid_t id, const char* msg) {
+    if (id < 0) h5_fail(msg);
+}
+
+// Check an HDF5 return status (herr_t)
+inline void h5_expect_ok(herr_t status, const char* msg) {
+    if (status < 0) h5_fail(msg);
+}
+
+
 // Create HDF5 dataset with unlimited first dimension
 hid_t create_hdf5_dataset(const std::string& filename, size_t batch_size) {
     hsize_t dims[2]       = {0, 2};
     hsize_t maxdims[2]    = {H5S_UNLIMITED, 2};
     hsize_t chunk_dims[2] = {batch_size, 2};
     
-    hid_t file_id = H5Fcreate((filename + ".h5").c_str(),
+   std::string out_file_with_ext = filename + ".h5";
+
+    std::cout<<"Creating file: "<<out_file_with_ext<<std::endl;
+    hid_t file_id = H5Fcreate(out_file_with_ext.c_str(),
                               H5F_ACC_TRUNC, H5P_DEFAULT, H5P_DEFAULT);
+    h5_expect_id(file_id, "File creation");
+    
     hid_t dataspace_id = H5Screate_simple(2, dims, maxdims);
+    h5_expect_id(dataspace_id, "dataspace creation");
+
     hid_t plist_id = H5Pcreate(H5P_DATASET_CREATE);
-    H5Pset_chunk(plist_id, 2, chunk_dims);
+    h5_expect_id(plist_id, "plist creation");
+
+
+    h5_expect_ok(
+            H5Pset_chunk(plist_id, 2, chunk_dims),
+            "H5Pset_chunk failed");
+
     hid_t dataset_id = H5Dcreate(file_id, "basis", H5T_NATIVE_UINT64,
                                  dataspace_id, H5P_DEFAULT, plist_id, H5P_DEFAULT);
+    h5_expect_id(dataset_id, "dataset creation");
+
     H5Pclose(plist_id);
     H5Sclose(dataspace_id);
     H5Fclose(file_id);
