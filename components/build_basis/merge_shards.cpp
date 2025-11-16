@@ -244,7 +244,7 @@ inline void h5_expect_ok(herr_t status, const char* msg) {
 
 
 // Create HDF5 dataset with unlimited first dimension
-hid_t create_hdf5_dataset(const std::string& filename, size_t batch_size) {
+std::pair<hid_t, hid_t> create_hdf5_dataset(const std::string& filename, size_t batch_size) {
     hsize_t dims[2]       = {0, 2};
     hsize_t maxdims[2]    = {H5S_UNLIMITED, 2};
     hsize_t chunk_dims[2] = {batch_size, 2};
@@ -276,9 +276,9 @@ hid_t create_hdf5_dataset(const std::string& filename, size_t batch_size) {
 
     H5Pclose(plist_id);
     H5Sclose(dataspace_id);
-    H5Fclose(file_id);
+//    H5Fclose(file_id);
     
-    return dataset_id;
+    return std::make_pair(file_id, dataset_id);
 }
 
 // Write buffer to HDF5 dataset
@@ -392,11 +392,11 @@ void external_mergesort_mpi(const std::vector<std::string> &shard_files,
     
     // STEP 2: Only rank 0 performs the final merge
     if (rank == 0) {
-        hid_t dataset_id = create_hdf5_dataset(outfilename, batch_size);
+        auto [file_id, dataset_id] = create_hdf5_dataset(outfilename, batch_size);
         size_t total_merged = merge_to_hdf5(shard_files, dataset_id, batch_size);
         H5Dclose(dataset_id);
-        
         std::cout << "K-way merge complete. Total elements: " << total_merged << "\n";
+        H5Fclose(file_id);
     }
     
     MPI_Barrier(MPI_COMM_WORLD);
