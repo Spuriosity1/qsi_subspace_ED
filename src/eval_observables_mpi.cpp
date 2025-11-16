@@ -5,7 +5,10 @@
 #include <stdexcept>
 #include <vector>
 #include <fstream>
+#include "H5Fpublic.h"
+#include "mpi.h"
 #include "physics/geometry.hpp"
+#include "blas_adapter.hpp"
 
 //#include "matrix_diag_bits.hpp"
 #include "expectation_eval.hpp"
@@ -17,28 +20,6 @@
 using json=nlohmann::json;
 using namespace std;
 
-void obtain_flags(
-    bool& calc_ring,
-    bool& calc_ring_ring,
-    bool& calc_partial_vol,
-    const argparse::ArgumentParser& prog){
-
-    calc_ring=true;
-    calc_ring_ring=true;
-    calc_partial_vol=true;
-
-    if (prog.is_used("--calculate")){
-        calc_ring =        false;
-        calc_ring_ring =   false;
-        calc_partial_vol = false;
-        auto calc_opts = prog.get<std::vector<std::string>>("--calculate");
-        for (auto& s : calc_opts){
-            if (s == "ring") calc_ring=true;
-            if (s == "ring_ring") calc_ring_ring=true;
-            if (s == "partial_vol") calc_partial_vol=true;
-        }
-    }
-}
 
 //typedef ZBasisBST_MPI basis_t;
 //
@@ -78,7 +59,7 @@ void load_state(std::vector<double>& psi, const MPI_ZBasisBST& basis, const std:
 		if (status < 0) throw HDF5Error(file_id, dataspace_id, dataset_id, "load_state: Failed to get dimensions");
         
         hsize_t row_width = dims[1];
-        if (col >= row_width) {
+        if (static_cast<hsize_t>(col) >= row_width) {
             throw std::runtime_error("col selected >= row width ("+
                     std::to_string(row_width)+")");}
         hsize_t total_rows = dims[0];
@@ -155,22 +136,24 @@ void load_state(std::vector<double>& psi, const MPI_ZBasisBST& basis, const std:
 	}
 }
 
+
+
+typedef MPI_ZBasisBST basis_t;
     
 int main(int argc, char* argv[]) {
 	argparse::ArgumentParser prog("eval_observables");
-	prog.add_argument("output_file");
+	prog.add_argument("eigenvalue_datafile")
+        .help("the '.eigs.h5' data output HDF5 file");
 	prog.add_argument("--latfile_dir")
+        .help("The directory containing all lattice files (usually not needed)")
         .default_value("../lattice_files");
 	prog.add_argument("-s", "--n_spinons")
         .default_value(0)
         .scan<'i',int>();
-    prog.add_argument("--calculate")
-        .choices("ring", "ring_ring", "partial_vol")
-        .nargs(argparse::nargs_pattern::at_least_one);
-	prog.add_argument("--n_eigvecs", "-N")
-		.help("Number of eigenvectors to check")
-		.default_value(2)
-		.scan<'i', int>();
+//	prog.add_argument("--n_eigvecs", "-N")
+//		.help("Number of eigenvectors to check")
+//		.default_value(2)
+//		.scan<'i', int>();
 
     try {
         prog.parse_args(argc, argv);
@@ -181,11 +164,11 @@ int main(int argc, char* argv[]) {
     }
 
 
-    bool calc_ring, calc_ring_ring, calc_partial_vol;
+//    bool calc_ring, calc_ring_ring, calc_partial_vol;
 
-    obtain_flags(calc_ring, calc_ring_ring, calc_partial_vol, prog);
+//    obtain_flags(calc_ring, calc_ring_ring, calc_partial_vol, prog);
 
-    auto in_datafile=fs::path(prog.get<std::string>("output_file"));
+    auto in_datafile=fs::path(prog.get<std::string>("eigenvalue_datafile"));
 
     hid_t in_fid = H5Fopen(in_datafile.c_str(), H5F_ACC_RDONLY, H5P_DEFAULT);
     if (in_fid == H5I_INVALID_HID) {
@@ -199,13 +182,16 @@ int main(int argc, char* argv[]) {
     std::string dset_name = read_string_from_hdf5(in_fid, "dset_name");
     fs::path latfile_dir(prog.get<std::string>("--latfile_dir"));
     H5Fclose(in_fid);
-
+    
+//    fs::path output_dir = latfile_dir;
+//    output_dir.replace_extension(".out.csv");
+    MPI_Init(&argc, &argv);
 
 	// Step 1: Load ring data from JSON
     fs::path latfile = latfile_dir/latfile_name;
 	std::ifstream jfile(latfile);
 	if (!jfile) {
-		std::cerr << "Failed to open JSON file\n";
+		std::cerr << "Failed to open JSON file: " << latfile << "\n";
 		return 1;
 	}
 	json jdata;
@@ -214,24 +200,89 @@ int main(int argc, char* argv[]) {
 	// Step 2: Load basis from H5
     std::cout<<"Loading basis..."<<std::endl;
 
-    MPI_ZBasisBST basis;
+    basis_t basis;
     std::cout<<"[MPI_BST]  Loading basis..."<<std::endl;
     // NOTE n_spinons not handled properly
-    MPIContext ctx = load_basis(basis, prog);
+    MPIContext ctx = basis.load_from_file( get_basis_file(latfile, 0, dset_name!="basis"), 
+            dset_name
+            );
     std::cout<<"[MPI_BST]  Done! local basis dim="<<basis.dim()<<std::endl;
 
     // Step 3: Slab load of the state
     std::vector<double> psi;
     load_state(psi, basis, in_datafile, ctx, 0);
 
+
+    // Step 4: the rings
+    auto [ringL, ringR, sl] = get_ring_ops(jdata);
+    std::vector<MPILazyOpSum<double, basis_t>> lazy_ring_operators;
+    for (auto& O : ringL){
+        lazy_ring_operators.emplace_back(basis, O, ctx);
+    }
+
+    auto lazy_ringR_0 = MPILazyOpSum<double, basis_t>(basis, ringR[0], ctx);
+
+    std::vector<double> chi, u;
+    chi.resize(ctx.local_block_size());
+    u.resize(ctx.local_block_size());
+
+
+    size_t n_operators = ringL.size();
+    std::vector<double> expect_O(n_operators); // < O >
+    std::vector<double> expect_O_O(n_operators); // < O_0' O_j >
+
     // Step 4: evaluate the observables (matrix free)
-    
+    {
+        if (ctx.my_rank == 0)
+            cout<<"Compute <O>... "<<flush;
+ 
+        for (int opi=0; opi<n_operators; opi++){
 
+            cout<<opi<<" " <<flush;
+            auto op = lazy_ring_operators[opi];
+            op.evaluate(psi.data(), chi.data());
+            if (opi == 0){
+                u = chi;
+            }
+            // |chi> = O * |psi>
+            double res_local = projED::inner(chi, psi);
+            double res;
+            MPI_Reduce(&res_local, &res, 1, MPI_DOUBLE, MPI_SUM, 0, MPI_COMM_WORLD);
+            // res now contains full total <O psi | psi>
+            if (ctx.my_rank == 0){
+                expect_O[opi] = res;
+            }
+            // < psi | O_0' O_j | psi > == <u | chi >
+            res_local = projED::inner(u, chi);
+            MPI_Reduce(&res_local, &res, 1, MPI_DOUBLE, MPI_SUM, 0, MPI_COMM_WORLD);
+            // res now contains full total <O_0 psi | O_j psi>
+            if (ctx.my_rank == 0){
+                expect_O_O[opi] = res;
+            }
+        }
+ 
+        if (ctx.my_rank == 0){
+            hid_t out_fid =
+                H5Fcreate(in_datafile.replace_extension(".out.h5").c_str(),
+                        H5F_ACC_TRUNC, H5P_DEFAULT, H5P_DEFAULT);
+            if (out_fid < 0)
+                throw std::runtime_error("Failed to create HDF5 file");
+            cout << "Done!" << endl;
 
-    
+            // write out the data
 
+            write_string_to_hdf5(out_fid, "latfile_json", latfile_name);
+            write_string_to_hdf5(out_fid, "dset_name", dset_name);
+            write_dataset(out_fid, "sublat", sl, sl.size(), 1);
 
+            write_expectation_vals_h5(out_fid, "ring", expect_O, ringL.size(), 1);
+            write_expectation_vals_h5(out_fid, "ring_2", expect_O_O, ringL.size(), 1);
 
-            
+            H5Fclose(out_fid);
+        }
+    }
+
+    MPI_Finalize();
+
     return 0;
 }

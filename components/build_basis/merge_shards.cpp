@@ -203,7 +203,7 @@ void sort_file_external(const std::string& filename,
 
 // Sort a single shard file in-place using external sort if needed
 void sort_shard_file(const std::string& filename,
-                     size_t memory_limit = 1 << 20,
+                     size_t memory_limit = 1 << 20, // memory limit in bytes
                      bool force_multi_thread = false) {
     // Get file size
     std::ifstream file(filename, std::ios::binary | std::ios::ate);
