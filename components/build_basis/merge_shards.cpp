@@ -368,12 +368,11 @@ void parallel_sort_shards(const std::vector<std::string>& shard_files,
 void external_mergesort_mpi(const std::vector<std::string> &shard_files,
                             const std::string &outfilename,
                             size_t batch_size = 1 << 16,
+                            size_t memory_limit = 1 << 30,
                             bool force_external_sort = false) {
     int rank, size;
     MPI_Comm_rank(MPI_COMM_WORLD, &rank);
     MPI_Comm_size(MPI_COMM_WORLD, &size);
-    
-    static const size_t memory_limit = 1 << 20;
     
     // STEP 1: Distribute shard sorting across MPI processes
     if (rank == 0) {
@@ -422,6 +421,11 @@ int main(int argc, char* argv[]) {
         .default_value(static_cast<size_t>(1 << 16))
         .scan<'i', size_t>()
         .help("Batch size for buffered merging");
+
+    prog.add_argument("--memory_limit_per_task", "-m")
+        .default_value(static_cast<size_t>(1 << 30))
+        .scan<'i', size_t>()
+        .help("Batch size for buffered merging");
     
     try {
         prog.parse_args(argc, argv);
@@ -450,9 +454,10 @@ int main(int argc, char* argv[]) {
     
     std::string outfilename = prog.get<std::string>("--output");
     size_t batch_size = prog.get<size_t>("--batch_size");
+    size_t memory_limit = prog.get<size_t>("--memory_limit_per_task");
     
     try {
-        external_mergesort_mpi(shards, outfilename, batch_size);
+        external_mergesort_mpi(shards, outfilename, batch_size, memory_limit);
     } catch (const std::exception& e) {
         if (rank == 0) {
             std::cerr << "Error: " << e.what() << std::endl;
