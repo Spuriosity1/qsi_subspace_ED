@@ -273,7 +273,6 @@ int main(int argc, char* argv[]) {
 
             write_string_to_hdf5(out_fid, "latfile_json", latfile_name);
             write_string_to_hdf5(out_fid, "dset_name", dset_name);
-            write_dataset(out_fid, "sublat", sl, sl.size(), 1);
 
             write_expectation_vals_h5(out_fid, "ring", expect_O, ringL.size(), 1);
             write_expectation_vals_h5(out_fid, "ring_2", expect_O_O, ringL.size(), 1);
