@@ -19,6 +19,9 @@ int main(int argc, char* argv[]) {
 	prog.add_argument("lattice_file");
 	prog.add_argument("-s", "--sector");
 
+    prog.add_argument("--basis_file", "-b")
+        .help("A basis file (HDF5 format). Defaults to ${lattice_file%.json}.h5");
+
     // G specification
     {
         auto &group = prog.add_mutually_exclusive_group(true);

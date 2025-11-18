@@ -12,7 +12,7 @@ basis_common_mpi_src = files([
 
 
 partition_basis = executable('partition_basis', files('partition_basis.cpp'),
-    dependencies: common_dep,
+    dependencies: [common_dep, mpi_dep],
     include_directories: basis_inc,
     cpp_args: target_args
     )
@@ -45,12 +45,26 @@ sbsearch_mpi = executable('sbsearch_mpi',
   )
 
 merge_shards = executable('merge_shards', 'merge_shards.cpp',
-  dependencies: common_dep,
+  dependencies: [common_dep, mpi_dep],
   include_directories:basis_inc,
   cpp_args: target_args,
   install: true
   )
 
+
+sort_shard = executable('sort_shard', files('sort_shard.cpp'),
+    dependencies: common_dep,
+    include_directories: basis_inc,
+    cpp_args: target_args,
+    install: true
+    )
+
+sort_shard = executable('merge_sorted_shards', files('merge_sorted_shards.cpp'),
+    dependencies: [common_dep, hdf5_dep],
+    include_directories: basis_inc,
+    cpp_args: target_args,
+    install: true
+    )
 
 partition_shard = executable('partition_shard', files('partition_shard.cpp'),
     dependencies: common_dep,
