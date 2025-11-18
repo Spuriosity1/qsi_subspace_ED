@@ -60,6 +60,7 @@ inline std::vector<Uint128> read_basis_hdf5(
 		int ndims = H5Sget_simple_extent_ndims(dataspace_id);
 		if (ndims != 2) throw HDF5Error(file_id, dataspace_id, dataset_id, "read_basis: Expected 2D data");
 		
+        static_assert(sizeof(hsize_t) == sizeof(int64_t), "hsize_t is too small to index the dataset correctly");
 		hsize_t dims[2];
 		status = H5Sget_simple_extent_dims(dataspace_id, dims, nullptr);
 		if (status < 0) throw HDF5Error(file_id, dataspace_id, dataset_id, "read_basis: Failed to get dimensions");
