@@ -183,9 +183,14 @@ mpi_root = get_option('mpi_root')
 #=======
 if mpi_root != ''
   message('Using custom MPI root: ' + mpi_root)
-  mpi_dep = dependency('mpi', method: 'pkg-config', required: true, language: 'cpp',
-                       dirs: [join_paths(mpi_root, 'lib', 'pkgconfig'),
-                              join_paths(mpi_root, 'lib64', 'pkgconfig')])
+
+  mpi_inc = include_directories(join_paths(mpi_root, 'include'))
+  mpi_libdir = join_paths(mpi_root, 'lib/release')
+  mpi_dep = declare_dependency(
+    include_directories: mpi_inc,
+    link_args: [
+      '-L' +mpi_libdir, '-lmpi']
+    )
 else
   mpi_dep = dependency('mpi', required: true, language:'cpp')
 endif
@@ -198,7 +203,8 @@ if hdf5_root != ''
 
   hdf5_dep = declare_dependency(
     include_directories: hdf5_inc,
-    link_args: ['-L' + hdf5_libdir, '-lhdf5', '-lmpi']
+    link_args: ['-L' + hdf5_libdir, '-lhdf5'],
+    dependencies: mpi_dep
   )
 else
   hdf5_dep = declare_dependency(
@@ -265,7 +271,8 @@ diag_DOQSI_ham = executable('diag_DOQSI_ham',
   dependencies: [g_deps, eigen_dep, operator_dep, linalg_routines_dep, spectra_dep],
   include_directories: inc,
   link_with: expectation_eval,
-  cpp_args: target_args
+  cpp_args: target_args,
+  install: true
   )
 
 diag_DOQSI_ham_mpi = executable('diag_DOQSI_ham_mpi',
@@ -273,7 +280,8 @@ diag_DOQSI_ham_mpi = executable('diag_DOQSI_ham_mpi',
   dependencies: [g_deps, eigen_dep, operator_mpi_dep, linalg_routines_mpi_dep],
   include_directories: inc,
   link_with: expectation_eval,
-  cpp_args: target_args
+  cpp_args: target_args,
+  install: true
   )
 
 

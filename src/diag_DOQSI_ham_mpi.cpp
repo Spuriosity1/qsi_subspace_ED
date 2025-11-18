@@ -18,6 +18,8 @@ int main(int argc, char* argv[]) {
 	argparse::ArgumentParser prog(argv[0]);
 	prog.add_argument("lattice_file");
 	prog.add_argument("-s", "--sector");
+    prog.add_argument("--basis_file", "-b")
+        .help("A basis file (HDF5 format). Defaults to ${lattice_file%.json}.h5");
 
     // G specification
     {
@@ -134,10 +136,9 @@ int main(int argc, char* argv[]) {
     std::cout<<"[rank "<<ctx.my_rank<<"] "<<res;
 
 
-    std::cout << "Eigenvalues:\n" << eigval << "\n\n";
     std::string filename = s.str()+".eigs.h5";
 
-
+    std::cout << "Eigenvalues:\n" << eigval << "\n\n";
 	std::cout << "Writing to\n"<<filename<<std::endl;
 
     // Create parallel file access property list

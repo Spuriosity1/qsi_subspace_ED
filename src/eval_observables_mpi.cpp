@@ -230,6 +230,7 @@ int main(int argc, char* argv[]) {
     size_t n_operators = ringL.size();
     std::vector<double> expect_O(n_operators); // < O >
     std::vector<double> expect_O_O(n_operators); // < O_0' O_j >
+    std::vector<double> expect_F(n_operators); // < O'_j O_j >
 
     // Step 4: evaluate the observables (matrix free)
     {
@@ -237,14 +238,13 @@ int main(int argc, char* argv[]) {
             cout<<"Compute <O>... "<<flush;
  
         for (int opi=0; opi<n_operators; opi++){
-
             cout<<opi<<" " <<flush;
             auto op = lazy_ring_operators[opi];
             op.evaluate(psi.data(), chi.data());
             if (opi == 0){
                 u = chi;
             }
-            // |chi> = O * |psi>
+            // |chi> = O_j |psi>
             double res_local = projED::inner(chi, psi);
             double res;
             MPI_Reduce(&res_local, &res, 1, MPI_DOUBLE, MPI_SUM, 0, MPI_COMM_WORLD);
@@ -252,12 +252,20 @@ int main(int argc, char* argv[]) {
             if (ctx.my_rank == 0){
                 expect_O[opi] = res;
             }
+
             // < psi | O_0' O_j | psi > == <u | chi >
             res_local = projED::inner(u, chi);
             MPI_Reduce(&res_local, &res, 1, MPI_DOUBLE, MPI_SUM, 0, MPI_COMM_WORLD);
             // res now contains full total <O_0 psi | O_j psi>
             if (ctx.my_rank == 0){
                 expect_O_O[opi] = res;
+            }
+
+            // Flippability === <chi | chi> == <psi | O_j' O_j |psi>
+            res_local = projED::inner(chi, chi);
+            MPI_Reduce(&res_local, &res, 1, MPI_DOUBLE, MPI_SUM, 0, MPI_COMM_WORLD);
+            if (ctx.my_rank == 0){
+                expect_F[opi] = res;
             }
         }
  
@@ -275,6 +283,7 @@ int main(int argc, char* argv[]) {
             write_string_to_hdf5(out_fid, "dset_name", dset_name);
 
             write_expectation_vals_h5(out_fid, "ring", expect_O, ringL.size(), 1);
+            write_expectation_vals_h5(out_fid, "flippability", expect_F, ringL.size(), 1);
             write_expectation_vals_h5(out_fid, "ring_2", expect_O_O, ringL.size(), 1);
 
             H5Fclose(out_fid);
