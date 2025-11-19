@@ -90,8 +90,6 @@ int main(int argc, char* argv[]) {
 
     std::stringstream s;
 
-
-
     if (prog.is_used("--g")){
 
         auto gv = prog.get<std::vector<double>>("--g");
@@ -99,9 +97,7 @@ int main(int argc, char* argv[]) {
 
         snprintf(outfilename_buf, 1024, "g0=%.4f%%g1=%.4f%%g2=%.4f%%g3=%.4f%%",
                 gv[0], gv[1], gv[2],gv[3]);
-
     } else {
-
         auto Jpm = prog.get<double>("--Jpm");
         auto Bv = prog.get<std::vector<double>>("B");
 

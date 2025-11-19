@@ -75,7 +75,7 @@ struct Representation {
 // Stores only one representative of each orbit, skipping states 
 // entirely if they aren't present. Two parallel arrays:
 // states -> the rerpresentatives, UInt128
-// rep_norms -> doubles, rep_norms[i] is || P_{\Gamma} 
+// rep_norms -> doubles, rep_norms[i] is op-norm of P_{\Gamma} 
 template <RealOrCplx R>
 class GAdaptedZBasisBST : public ZBasisBST {
 protected:
@@ -85,7 +85,6 @@ protected:
 
     // internal states buffer (inherited) is
     // now understood as containing only the canonical representative
-
 
     // calculates <beta_j | P_\gamma |beta_j>
     double calc_overlap(const state_t& psi){
@@ -104,14 +103,14 @@ protected:
         for (const auto& psi : states){
             // skip if we have seen psi before
             if (seen.contains(psi)) continue;
-
-            // calculate the overlap
-
-            // since states are sorted, we only need to push the first one
+            // since states are sorted, we only need to push the first one we 
+            // encounter (TODO verify)
             representatives.push_back(psi);
 
             rep.G.orbit(psi, curr_orbit);
             seen.insert(curr_orbit.begin(), curr_orbit.end());
+
+            // build the operator
         }
 
         std::swap(representatives, this->states);

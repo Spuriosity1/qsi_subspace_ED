@@ -37,11 +37,9 @@ struct MPILazyOpSum {
 	void evaluate_add(const coeff_t* x, coeff_t* y) const; 
 
 protected:
-    // public for debugging only
     void evaluate_add_diagonal(const coeff_t* x, coeff_t* y) const;
 //    void evaluate_add_off_diag_sync(const coeff_t* x, coeff_t* y) const;
     void evaluate_add_off_diag_pipeline(const coeff_t* x, coeff_t* y) const;
-
 
 	const B& basis;
 	const SymbolicOpSum<coeff_t> ops;
