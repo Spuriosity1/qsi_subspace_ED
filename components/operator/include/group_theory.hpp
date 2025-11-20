@@ -1,11 +1,11 @@
 #pragma once
-#include "benes_network.hpp"
+//#include "benes_network.hpp"
 #include "operator.hpp"
 #include <algorithm>
 #include <set>
 #include <vector>
+#include <cassert>
 
-using namespace Benes;
 
 struct qres_SymbolicPMROperator : public SymbolicPMROperator {
 
@@ -14,21 +14,21 @@ struct qres_SymbolicPMROperator : public SymbolicPMROperator {
 
 
 // the strategy: precompute all of these permuters ahead of time
-template<typename T>
+template<typename state_t>
 struct PermutationGroup {
     using perm_t = std::vector<ZBasisBase::idx_t>;
 
     PermutationGroup(std::vector<perm_t>& generators);
 
-    void orbit(const T& psi, std::set<T>& orbit) const;
-    void orbit(const T& psi, std::vector<T>& orbit) const;
+    void orbit(const state_t& psi, std::set<state_t>& orbit) const;
+    void orbit(const state_t& psi, std::vector<state_t>& orbit) const;
 
 
-    // does not sort or de-duplicate
-    void make_representative(T& psi) const; 
+    // repalces psi by its canonical representative in the G-orbit
+    void make_representative(state_t& psi) const; 
 
-    T get_representative(const T& state){
-        T r = state;
+    state_t get_representative(const state_t& state){
+        state_t r = state;
         make_representative(r);
         return r;
     }
@@ -39,12 +39,18 @@ struct PermutationGroup {
     }
 
     perm_t operator[](size_t i) const {
+        assert(i < this->size());
         return group_elements[i];
     }
 
+//    auto get_permuter(size_t i ) const {
+//        assert(i < this->size());
+//        return permuters[i];
+//    }
+
     protected:
     std::vector<perm_t> group_elements;
-    std::vector<BenesNetwork<T>> permuters;
+//    std::vector<BenesNetwork<state_t>> permuters;
     // Compose two permutations: result[i] = a[b[i]]
     static perm_t compose(const perm_t& a, const perm_t& b) {
         perm_t result(a.size());
@@ -165,7 +171,8 @@ void PermutationGroup<T>::orbit(const T& psi, std::vector<T>& orbit) const{
 template <typename T>
 void PermutationGroup<T>::make_representative(T& psi) const {
     // up to roughly n=100, vector is faster than set
-    T min {static_cast<uint64_t>(-1), static_cast<uint64_t>(-1)};
+    T min = 0;
+    min = ~min;
     for (const auto& g : permuters){
         auto chi = g.apply(psi);
         if (chi < min) {

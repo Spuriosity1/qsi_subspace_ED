@@ -51,27 +51,16 @@ PermutationGroup<T>::PermutationGroup(std::vector<perm_t>& generators){
 }
 
 
-
 // specialisations
-template <>
-PermutationGroup<Uint128>::PermutationGroup(std::vector<perm_t>& generators);
-template <>
-PermutationGroup<__int128>::PermutationGroup(std::vector<perm_t>& generators);
-template <>
-PermutationGroup<uint64_t>::PermutationGroup(std::vector<perm_t>& generators);
-template <>
-PermutationGroup<uint32_t>::PermutationGroup(std::vector<perm_t>& generators);
-template <>
-PermutationGroup<uint16_t>::PermutationGroup(std::vector<perm_t>& generators);
-template <>
-PermutationGroup<uint8_t>::PermutationGroup(std::vector<perm_t>& generators);
+template struct PermutationGroup<Uint128>;
+template struct PermutationGroup<__int128>;
+template struct PermutationGroup<uint64_t>;
+template struct PermutationGroup<uint32_t>;
+template struct PermutationGroup<uint16_t>;
+template struct PermutationGroup<uint8_t>;
 
 // signed (untested, use with great care)
-template <>
-PermutationGroup<int64_t>::PermutationGroup(std::vector<perm_t>& generators);
-template <>
-PermutationGroup<int32_t>::PermutationGroup(std::vector<perm_t>& generators);
-template <>
-PermutationGroup<int16_t>::PermutationGroup(std::vector<perm_t>& generators);
-template <>
-PermutationGroup<int8_t>::PermutationGroup(std::vector<perm_t>& generators);
+template struct PermutationGroup<int64_t>;
+template struct PermutationGroup<int32_t>;
+template struct PermutationGroup<int16_t>;
+template struct PermutationGroup<int8_t>;

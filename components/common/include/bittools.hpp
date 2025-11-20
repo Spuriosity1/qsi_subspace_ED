@@ -261,14 +261,14 @@ inline Uint128 make_mask(T idx){
     return res;
 }
 
-template <typename T>
-requires std::convertible_to<T, size_t>
-inline Uint128 permute(const Uint128& x, const std::vector<T>& I) {
+template <typename UintT, typename T>
+requires std::convertible_to<T, uint8_t>
+inline UintT permute(const UintT& x, const std::vector<T>& I) {
     // Applies the permutation I to the bits of x
     // such that y & (1 << I[n]) == x & (1 << n)
-    Uint128 y = 0;
-    for (size_t n = 0; n < I.size(); n++) {
-        size_t to = static_cast<size_t>(I[n]);
+    UintT y = 0;
+    for (uint8_t n = 0; n < I.size(); n++) {
+        uint8_t to = static_cast<uint8_t>(I[n]);
         y |= ((x >> n) & 1) << to;
     }
     return y;
@@ -277,6 +277,24 @@ inline Uint128 permute(const Uint128& x, const std::vector<T>& I) {
 
 // Alternative: Hexadecimal output operator
 inline std::ostream& printHex(std::ostream& os, const Uint128& val) {
+    std::ios_base::fmtflags flags = os.flags();
+    
+    os << "0x" << std::hex << std::setfill('0');
+    
+    // Print high 64 bits if non-zero
+    if (val.uint64[1] != 0) {
+        os << val.uint64[1];
+        os << std::setw(16) << val.uint64[0];
+    } else {
+        os << val.uint64[0];
+    }
+    
+    os.flags(flags);
+    return os;
+}
+
+
+inline std::ostream& operator<<(std::ostream& os, const Uint128& val) {
     std::ios_base::fmtflags flags = os.flags();
     
     os << "0x" << std::hex << std::setfill('0');

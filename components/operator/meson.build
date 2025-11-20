@@ -1,7 +1,7 @@
 operator_inc = [include_directories('include'), common_inc]
 
 operator_src = ['src/operator.cpp', 
-  'src/group_theory.cpp', 
+#  'src/group_theory.cpp', 
   'src/operator_matrix.cpp']
 
 operator_dep_set = [g_deps, eigen_dep, omp_dep ]
