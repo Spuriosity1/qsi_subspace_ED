@@ -27,6 +27,20 @@ test_PMR_operator = executable('test_PMR_operator',
   install : false
   )
 
+test_permutations = executable('test_permutations', 
+  'test_permutations.cpp', 
+  include_directories: inc,
+  dependencies: common_dep,
+  install: false
+  )
+
+#test_q_basis = executable('test_q_basis',
+#  'test_q_basis.cpp',
+#  include_directories: inc,
+#  dependencies: operator_dep,
+#  install : false
+#  )
+
 test_lanczos = executable('test_lanczos',
   'test_lanczos.cpp',
   include_directories: inc,
