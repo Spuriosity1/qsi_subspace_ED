@@ -86,9 +86,9 @@ class mpi_par_searcher : public T {
 
 
     static constexpr unsigned INITIAL_DEPTH_FACTOR = 5;
-    int CHECK_INTERVAL = 100000;
-    int PRINT_INTERVAL = 50; // print this many checks
-    int MIN_CHUNK_SIZE = 3; // miimum stack size before steals are accepted
+    size_t CHECK_INTERVAL = 100000;
+    size_t PRINT_INTERVAL = 50; // print this many checks
+    size_t MIN_CHUNK_SIZE = 3; // miimum stack size before steals are accepted
                         
     // MPI message tags
     static constexpr int TAG_WORK_REQUEST = 1;

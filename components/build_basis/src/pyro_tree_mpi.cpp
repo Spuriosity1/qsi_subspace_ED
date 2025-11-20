@@ -297,7 +297,8 @@ void mpi_par_searcher<T>::build_state_tree(){
     while (true) {
         // Process local work
         for (iter_count = 0;
-             !my_job_stack.empty() && iter_count < CHECK_INTERVAL;
+                !my_job_stack.empty() && 
+                iter_count < static_cast<size_t>(CHECK_INTERVAL);
              iter_count++)
         {
             if (my_job_stack.top().curr_spin ==
@@ -342,7 +343,7 @@ void mpi_par_searcher<T>::build_state_tree(){
         if (my_job_stack.empty()){
             if (world_size==1) break;
             if (!shutdown_continues && active_request == -1) {
-                if (steal_idx < steal_targets.size() ) {
+                if (steal_idx < static_cast<int>(steal_targets.size()) ) {
 //                    if ( active_request == -1){
                         request_work_from(steal_targets[steal_idx]);
                         active_request = steal_idx;
