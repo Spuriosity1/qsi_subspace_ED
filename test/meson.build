@@ -31,6 +31,7 @@ test_permutations = executable('test_permutations',
   'test_permutations.cpp', 
   include_directories: inc,
   dependencies: common_dep,
+  cpp_args: target_args,
   install: false
   )
 

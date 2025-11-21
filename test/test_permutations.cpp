@@ -7,6 +7,7 @@
 using UintT = Uint128;
 
 // Test function
+template<typename Perm128>
 bool test_benes_permutation(const std::vector<uint8_t>& perm, const std::string& test_name) {
     constexpr size_t N = sizeof(UintT) * 8;
     assert(perm.size() == N);
@@ -14,7 +15,7 @@ bool test_benes_permutation(const std::vector<uint8_t>& perm, const std::string&
     std::cout << "Running test: " << test_name << std::endl;
     
     // Build Benes network
-    Permute128 p(perm);
+    Perm128 p(perm);
     
     // Test multiple input values
     std::vector<UintT> test_values;
@@ -50,7 +51,7 @@ bool test_benes_permutation(const std::vector<uint8_t>& perm, const std::string&
         if (benes_result != naive_result) {
             std::cout << "  FAILED on test value " << i << std::endl;
             std::cout << "    Input: " <<  input << std::endl;
-            std::cout << "    Benes: " <<  benes_result << std::endl;
+            std::cout << "    Perm: " <<  benes_result << std::endl;
             std::cout << "    Naive: " <<  naive_result << std::endl;
             
             all_passed = false;
@@ -65,8 +66,10 @@ bool test_benes_permutation(const std::vector<uint8_t>& perm, const std::string&
     return all_passed;
 }
 
-int main() {
-    std::cout << "=== Benes Network Permutation Tests ===" << std::endl << std::endl;
+template<typename Perm>
+int test_all(const std::string& name){
+
+    std::cout << "=== "<<name<<" Permutation Tests ===" << std::endl << std::endl;
     
     int passed = 0;
     int total = 0;
@@ -79,7 +82,7 @@ int main() {
             perm[i]=i;
 
         total++;
-        if (test_benes_permutation(perm, "Identity ")) passed++;
+        if (test_benes_permutation<Perm>(perm, "Identity ")) passed++;
     }
     
     // Test 2: Reverse permutation 
@@ -87,7 +90,7 @@ int main() {
         for(int i=0; i<128; i++)
             perm[i]=127-i;
         total++;
-        if (test_benes_permutation(perm, "Reverse ")) passed++;
+        if (test_benes_permutation<Perm>(perm, "Reverse ")) passed++;
     }
     
     // Test 3: Swap adjacent pairs 
@@ -95,7 +98,7 @@ int main() {
         for(int i=0; i<128; i++)
             perm[i]= 2*(i/2) + 1 - i%2;
         total++;
-        if (test_benes_permutation(perm, "Swap pairs ")) passed++;
+        if (test_benes_permutation<Perm>(perm, "Swap pairs ")) passed++;
     }
     
     // Test 4: Rotate left 
@@ -103,15 +106,17 @@ int main() {
         for(int i=0; i<128; i++)
             perm[i]=(i+1) % 128;
         total++;
-        if (test_benes_permutation(perm, "Rotate left ")) passed++;
+        if (test_benes_permutation<Perm>(perm, "Rotate left ")) passed++;
     }
     
     // Test 5: Random permutation 
     {
         std::mt19937 rng;
+        for(int i=0; i<128; i++)
+            perm[i]=i;
         std::shuffle(perm.begin(), perm.end(), rng);
         total++;
-        if (test_benes_permutation(perm, "Random ")) passed++;
+        if (test_benes_permutation<Perm>(perm, "Random ")) passed++;
     }
       
     std::cout << "==================================" << std::endl;
@@ -124,4 +129,28 @@ int main() {
         std::cout << "Some tests FAILED! ✗" << std::endl;
         return 1;
     }
+}
+
+
+int main() {
+  int errors=0;
+  int attempted = 0;
+#if defined(__AVX512F__)
+errors += test_all<Permute128_AVX512>("AVX512");
+attempted++;
+#endif
+#if defined(__AVX2__)
+errors += test_all<Permute128_AVX2>("AVX2");
+attempted++;
+#endif
+errors += test_all<Permute128_fallback>("default");
+attempted++;
+
+std::cout << "============================\n"
+          << "==         Summary        ==\n"
+          << "============================\n"
+          << (attempted - errors) << " / " << attempted << " tests succeeeded" <<
+          std::endl;
+
+
 }

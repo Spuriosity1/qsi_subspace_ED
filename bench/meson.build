@@ -28,6 +28,15 @@ bench_apply = executable('bench_apply',
   )
 
 
+bench_permutations = executable('bench_permutations',
+  'bench_permutations.cpp',
+  include_directories: [inc],
+  dependencies: [common_dep],
+  cpp_args: target_args,
+  install: false
+  )
+
+
 bench_apply_mpi = executable('bench_apply_mpi',
   'bench_apply_mpi.cpp',
   include_directories: [inc, operator_inc],
