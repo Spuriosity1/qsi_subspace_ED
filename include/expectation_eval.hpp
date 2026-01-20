@@ -78,7 +78,7 @@ void write_cplx_dataset(hid_t file_id, const char* name, const std::complex<doub
 
 
 template<typename T>
-requires std::convertible_to<T, int>
+//requires std::convertible_to<T, int>
 void write_integer(hid_t file_id, const char* name, T value);
 
 

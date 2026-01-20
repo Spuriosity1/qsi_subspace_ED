@@ -20,6 +20,7 @@
 #include <filesystem> // C++17
 #include <unordered_map>
 #include <algorithm>
+
 					  
 namespace fs = std::filesystem;
 
@@ -133,11 +134,6 @@ struct ZBasisBase {
         std::vector<state_t> states;
 };
 
-template<typename T>
-concept Basis =  std::derived_from<T, ZBasisBase> &&
-requires (T b, const ZBasisBase::state_t& state, ZBasisBase::idx_t& J) {
-    { b.search(state, J) } -> std::same_as<int>;
-};
 
 
 // Wrapper for a std::vector implementing indexable set semantics
@@ -258,7 +254,7 @@ struct SymbolicPMROperator {
         require_down |= down_mask & (~b.X_mask);
         up_mask = b.up_mask | require_up;
         down_mask = b.down_mask | require_down;
-        if ((up_mask & down_mask) != 0)
+        if ((up_mask & down_mask) != Uint128(0))
             sign =0; // we killed the operator
         return *this;
     }

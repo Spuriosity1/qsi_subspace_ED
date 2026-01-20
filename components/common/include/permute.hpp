@@ -217,7 +217,7 @@ public:
         }
 
         for (int i=0; i<128; i++){
-            if (i < indices.size()){
+            if (static_cast<size_t>(i) < indices.size()){
                 I[indices[i]] = i;
             } else {
                 I[i] = i;

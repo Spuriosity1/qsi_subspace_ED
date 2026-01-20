@@ -28,7 +28,7 @@ template<> inline MPI_Datatype get_mpi_type<Uint128>() {
 }
 
 
-template <typename state_t, std::integral idx_t>
+template <typename state_t, typename idx_t>
 struct MPIContext {
     MPIContext(){
         MPI_Comm_size(MPI_COMM_WORLD, &world_size);
@@ -89,7 +89,7 @@ struct MPIContext {
 
 
 
-template <typename state_t, std::integral idx_t>
+template <typename state_t, typename idx_t>
 size_t MPIContext<state_t, idx_t>::rank_of_state(state_t psi) const {
     // linear search, all states should fit in cache unless # nodes is very large
     // IMPORTANT: never checks state_partition[world_size] itself, which may
@@ -104,7 +104,7 @@ size_t MPIContext<state_t, idx_t>::rank_of_state(state_t psi) const {
 }
 
 // returns the rank on which a specified psi can be found
-template <typename state_t, std::integral idx_t>
+template <typename state_t, typename idx_t>
 size_t MPIContext<state_t, idx_t>::rank_of_idx(idx_t J) const {
     // linear search, all states should fit in cache unless # nodes is very large
     for (int n=0; n<world_size; n++){

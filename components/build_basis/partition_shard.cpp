@@ -255,7 +255,7 @@ int main(int argc, char* argv[]) {
     MPI_Comm_rank(MPI_COMM_WORLD, &rank);
     MPI_Comm_size(MPI_COMM_WORLD, &world_size);
 
-    if (world_size != shards.size()){
+    if (static_cast<size_t>(world_size) != shards.size()){
         std::cerr<<"Error: call with "<<shards.size()<<
             " MPI tasks\n";
         MPI_Finalize();

@@ -73,7 +73,7 @@ MPI_Datatype create_vtree_node_type();
 //MPI_Datatype create_packet_type();
 
 template<typename T>
-requires std::derived_from<T, lat_container>
+//requires std::derived_from<T, lat_container>
 class mpi_par_searcher : public T {
 //    static mpi_par_searcher<T>* global_self;
     int world_size;

@@ -32,7 +32,7 @@ auto bench(const std::string& name, const std::vector<Uint128>& test_values){
 
     auto nreps = test_values.size();
 
-    std::cout << "Duration: "<<elapsed_seconds/nreps<<" per call\n";
+    std::cout << "Duration: "<<elapsed_seconds.count()/nreps<<" per call\n";
     return elapsed_seconds;
 }
 
@@ -75,7 +75,7 @@ int main(int argc, char* argv[]) {
     }
     auto finish{std::chrono::steady_clock::now()};
     std::chrono::duration<double> elapsed_seconds{finish - start};
-    std::cout << "Duration: "<<elapsed_seconds/nreps<<"\n";
+    std::cout << "Duration: "<< elapsed_seconds.count()/nreps<<"\n";
     
     bench<Permute128_fallback>("DEFAULT", test_values);
 

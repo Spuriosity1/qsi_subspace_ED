@@ -7,7 +7,7 @@ volatile sig_atomic_t GLOBAL_SHUTDOWN_REQUEST=0;
 
 
 template<typename T>
-requires std::derived_from<T, lat_container>
+//requires std::derived_from<T, lat_container>
 void mpi_par_searcher<T>::distribute_initial_work(std::queue<vtree_node_t>& starting_nodes){
     std::cout<<"Distributing initial work (clean run)";
 
@@ -59,7 +59,7 @@ void mpi_par_searcher<T>::distribute_initial_work(std::queue<vtree_node_t>& star
 }
 
 template<typename T>
-requires std::derived_from<T, lat_container>
+//requires std::derived_from<T, lat_container>
 void mpi_par_searcher<T>::receive_initial_work(){
     assert(my_rank != 0);
 
@@ -83,7 +83,7 @@ void mpi_par_searcher<T>::receive_initial_work(){
 
 
 template<typename T>
-requires std::derived_from<T, lat_container>
+//requires std::derived_from<T, lat_container>
 void mpi_par_searcher<T>::state_tree_init(){
     // Look for a checkpoint from an old run
     checkpoint.load_stack(my_job_stack);
@@ -117,7 +117,7 @@ void mpi_par_searcher<T>::state_tree_init(){
 }
 
 template<typename T>
-requires std::derived_from<T, lat_container>
+//requires std::derived_from<T, lat_container>
 vtree_node_t mpi_par_searcher<T>::pop_hardest_job(){
     assert(my_job_stack.size() > 0);
     // the job with the lowest spin ID is the most time consuming
@@ -138,7 +138,7 @@ vtree_node_t mpi_par_searcher<T>::pop_hardest_job(){
 
 
 template<typename T>
-requires std::derived_from<T, lat_container>
+//requires std::derived_from<T, lat_container>
 void mpi_par_searcher<T>::request_work_from(int target_rank){
     db_print("Requesting work from rank ")<<target_rank<<std::endl;
     char dummy=0;
@@ -168,7 +168,7 @@ static_assert(std::is_trivially_copyable_v<vtree_node_t>,
 
 
 template<typename T>
-requires std::derived_from<T, lat_container>
+//requires std::derived_from<T, lat_container>
 void mpi_par_searcher<T>::handle_send_request(int dest_rank){
     char dummy;
     MPI_Recv(&dummy, 1, MPI_BYTE, dest_rank, TAG_WORK_REQUEST,
@@ -188,7 +188,7 @@ void mpi_par_searcher<T>::handle_send_request(int dest_rank){
 
 // return value: successful receipt
 template<typename T>
-requires std::derived_from<T, lat_container>
+//requires std::derived_from<T, lat_container>
 bool mpi_par_searcher<T>::recv_stack_state(int src_rank){
     vtree_node_t tmp;
     MPI_Recv(&tmp, 1, create_vtree_node_type(), src_rank, TAG_WORK_RESPONSE, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
@@ -204,7 +204,7 @@ bool mpi_par_searcher<T>::recv_stack_state(int src_rank){
 
 // rreturns true if we should exit
 template<typename T>
-requires std::derived_from<T, lat_container>
+//requires std::derived_from<T, lat_container>
 bool mpi_par_searcher<T>::handle_shutdown_ring(bool& shutdown_continues){
     // early exit if world size is trivial
     if (world_size == 1) return true;
@@ -273,7 +273,7 @@ auto obtain_ring_targets(int world_size, int my_rank){
 
 
 template<typename T>
-requires std::derived_from<T, lat_container>
+//requires std::derived_from<T, lat_container>
 void mpi_par_searcher<T>::build_state_tree(){
     // Part 1: initialise
     state_tree_init();
@@ -396,7 +396,7 @@ void mpi_par_searcher<T>::build_state_tree(){
 
 
 template<typename T>
-requires std::derived_from<T, lat_container>
+//requires std::derived_from<T, lat_container>
 void mpi_par_searcher<T>::build_state_tree_allgather(){
     // Part 1: initialise
     state_tree_init();
@@ -511,7 +511,7 @@ end_of_loop:
 
 
 template<typename T>
-requires std::derived_from<T, lat_container>
+//requires std::derived_from<T, lat_container>
 void mpi_par_searcher<T>::
 _build_state_bfs(std::queue<vtree_node_t>& node_queue, 
 		unsigned long max_stack_size){
@@ -531,7 +531,7 @@ _build_state_bfs(std::queue<vtree_node_t>& node_queue,
 }
 
 template<typename T>
-requires std::derived_from<T, lat_container>
+//requires std::derived_from<T, lat_container>
 void mpi_par_searcher<T>::
 _build_state_dfs(lat_container::cust_stack& node_stack, 
 		unsigned long max_queue_len){

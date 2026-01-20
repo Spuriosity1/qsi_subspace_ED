@@ -1,7 +1,7 @@
 project('projected_ed', ['cpp', 'c'],
   version: '1.0.0',
   meson_version : '>= 1.7.0',
-  default_options : [ 'warning_level=1', 'buildtype=release', 'cpp_std=c++20' ]
+  default_options : [ 'warning_level=1', 'buildtype=release', 'cpp_std=c++17' ]
 )
 
 cmake = import('cmake')

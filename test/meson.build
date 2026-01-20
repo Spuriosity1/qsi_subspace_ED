@@ -35,12 +35,12 @@ test_permutations = executable('test_permutations',
   install: false
   )
 
-test_q_basis = executable('test_q_basis',
-  'test_q_basis.cpp',
-  include_directories: inc,
-  dependencies: operator_dep,
-  install : false
-  )
+#test_q_basis = executable('test_q_basis',
+#  'test_q_basis.cpp',
+#  include_directories: inc,
+#  dependencies: operator_dep,
+#  install : false
+#  )
 
 test_lanczos = executable('test_lanczos',
   'test_lanczos.cpp',

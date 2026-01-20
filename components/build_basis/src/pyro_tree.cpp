@@ -10,7 +10,9 @@
 
 #include <hdf5.h>
 #include <cinttypes>
-#include <barrier>
+
+
+#include "barrier_shim.hpp"
 #include <future>
 
 
@@ -212,7 +214,7 @@ void lat_container_with_sector::fork_state(std::queue<vtree_node_t>& to_examine)
 }
 
 template<typename T>
-requires std::derived_from<T, lat_container>
+//requires std::derived_from<T, lat_container>
 void pyro_vtree<T>::build_state_tree(){
     lat_container::cust_stack to_examine;
 	// seed the root node
@@ -238,7 +240,7 @@ void pyro_vtree<T>::build_state_tree(){
 }
 
 template<typename T>
-requires std::derived_from<T, lat_container>
+//requires std::derived_from<T, lat_container>
 void pyro_vtree<T>::sort(){
 	if (this->is_sorted) return;
 	std::sort(state_list.begin(), state_list.end());
@@ -351,7 +353,7 @@ int cmp_uint128( const void* a, const void*b){
 
 
 template<typename T>
-requires std::derived_from<T, lat_container>
+//requires std::derived_from<T, lat_container>
 void pyro_vtree_parallel<T>::sort() {
     if (this->is_sorted) return;
     
@@ -419,7 +421,7 @@ void pyro_vtree_parallel<T>::sort() {
 
 
 template<typename T>
-requires std::derived_from<T, lat_container>
+//requires std::derived_from<T, lat_container>
 void pyro_vtree_parallel<T>::
 _build_state_bfs(std::queue<vtree_node_t>& node_stack, 
 		unsigned long max_queue_len){
@@ -435,7 +437,7 @@ _build_state_bfs(std::queue<vtree_node_t>& node_stack,
 }
 
 template<typename T>
-requires std::derived_from<T, lat_container>
+//requires std::derived_from<T, lat_container>
 void pyro_vtree_parallel<T>::
 _build_state_dfs(lat_container::cust_stack& node_stack, 
 		unsigned thread_id, 
@@ -484,7 +486,7 @@ bool any_full(const std::vector<T>& job_stacks){
 
 
 template<typename T>
-requires std::derived_from<T, lat_container>
+//requires std::derived_from<T, lat_container>
 void pyro_vtree_parallel<T>::build_state_tree(){
 	// strategy: fork nodes until we exceed the thread pool	
 	// BFS to keep the layer of all threads roughly the same
@@ -523,7 +525,7 @@ void pyro_vtree_parallel<T>::build_state_tree(){
         rebalance_stacks(job_stacks);
         work_to_do = any_full(job_stacks);
     };
-    std::barrier sync_point(n_threads, on_completion);
+    Barrier sync_point(n_threads, on_completion);
 
     for (unsigned tid = 0; tid < n_threads; ++tid) {
         threads.emplace_back([this, tid, &sync_point, &work_to_do]() {
@@ -566,7 +568,7 @@ void pyro_vtree_parallel<T>::build_state_tree(){
 // IO
 
 template<typename T>
-requires std::derived_from<T, lat_container>
+//requires std::derived_from<T, lat_container>
 void pyro_vtree<T>::permute_spins(const std::vector<size_t>& perm) {
 	for (auto& b : this->state_list) {
 		b = permute(b, perm);
@@ -575,7 +577,7 @@ void pyro_vtree<T>::permute_spins(const std::vector<size_t>& perm) {
 
 
 template<typename T>
-requires std::derived_from<T, lat_container>
+//requires std::derived_from<T, lat_container>
 void pyro_vtree_parallel<T>::permute_spins(const std::vector<size_t>& perm) {
     std::vector<std::thread> threads;
     for (auto& l : state_set){
@@ -632,7 +634,7 @@ void par_searcher::build_state_tree(){
         rebalance_stacks(job_stacks);
         work_to_do = any_full(job_stacks);
     };
-    std::barrier sync_point(n_threads, on_completion);
+    Barrier sync_point(n_threads, on_completion);
 
     for (unsigned tid = 0; tid < n_threads; ++tid) {
         threads.emplace_back([this, tid, &sync_point, &work_to_do]() {

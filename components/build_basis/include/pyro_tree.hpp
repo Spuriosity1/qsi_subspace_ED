@@ -132,7 +132,7 @@ struct lat_container_with_sector : public lat_container {
 
 
 template<typename LatContainer>
-requires std::derived_from<LatContainer, lat_container>
+//requires std::derived_from<LatContainer, lat_container>
 struct pyro_vtree : public LatContainer {
 	pyro_vtree(const lattice& lat, unsigned num_spinon_pairs) :
 		LatContainer(lat, num_spinon_pairs) {
@@ -174,7 +174,7 @@ protected:
 
 
 template<typename LatContainer>
-requires std::derived_from<LatContainer, lat_container>
+//requires std::derived_from<LatContainer, lat_container>
 struct pyro_vtree_parallel : public LatContainer {
 	pyro_vtree_parallel(const lattice &lat, unsigned num_spinon_pairs, 
 			unsigned n_threads = 1)

@@ -73,12 +73,13 @@ int ZBasisInterp::search(const state_t& state, idx_t& J) const {
 
 void ZBasisInterp::find_bounds(){
     bounds.clear();
-    for (idx_t J=0; J<dim(); J++){
+    for (idx_t J = 0; J < dim(); J++) {
         uint64_t state_hi = states[J].uint64[1];
-        if (bounds.contains(state_hi)){
-            bounds[state_hi].second = J;
+        auto it = bounds.find(state_hi);
+        if (it != bounds.end()) {
+            it->second.second = J;
         } else {
-            bounds[state_hi].first = J;
+            bounds[state_hi].first  = J;
             bounds[state_hi].second = J;
         }
     }

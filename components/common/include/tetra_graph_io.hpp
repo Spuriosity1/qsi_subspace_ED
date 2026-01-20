@@ -88,7 +88,7 @@ inline lattice read_latfile_json(const std::string& file){
 
 
 template<typename T>
-requires std::convertible_to<T, size_t>
+//requires std::convertible_to<T, size_t>
 inline std::vector<T> invperm(const std::vector<T>&perm){
 	std::vector<T> iperm(perm.size());
 	for (size_t i=0; i<perm.size(); i++){

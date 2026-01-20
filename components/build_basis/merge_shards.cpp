@@ -21,7 +21,7 @@ void parallel_sort_shards(const std::vector<std::string>& shard_files,
                           int size) {
     // Each process sorts a subset of shards using round-robin distribution
     for (size_t i = rank; i < shard_files.size(); i += size) {
-        if (rank == 0 || i == rank) {
+        if (rank == 0 || i == static_cast<size_t>(rank)) {
             std::cout << "Rank " << rank << " sorting shard " << i 
                       << ": " << shard_files[i] << "\n";
         }

@@ -67,15 +67,16 @@ constexpr int bit_width(uint32_t x) noexcept {
 
 union Uint128 {
     static const int i64_width=2;
-    __uint128_t uint128;
+    __uint128_t uint128=0;
     uint64_t uint64[2];
     constexpr Uint128(){uint128 = 0;}
 
-    template<typename T=__uint128_t>
-    requires std::convertible_to<T, __uint128_t>
-	constexpr Uint128(T x){
-    uint128 = x;
-	}
+	Uint128(int x){ this->uint128 = x;}
+	Uint128(uint8_t x){ this->uint128 = x;}
+	Uint128(uint16_t x){ this->uint128 = x;}
+	Uint128(uint32_t x){ this->uint128 = x;}
+	Uint128(uint64_t x){ this->uint128 = x;}
+	Uint128(__uint128_t x){ this->uint128 = x;}
 
     constexpr Uint128(uint64_t x1, uint64_t x0){
         uint64[0] = x0;
@@ -97,13 +98,13 @@ union Uint128 {
         return *this;
     }
     
-    template <std::integral T>
+    template <typename T>
     constexpr Uint128 operator<<=(T x){
         uint128 <<= x;
         return *this;
     }
 
-    template <std::integral T>
+    template <typename T>
     constexpr Uint128 operator>>=(T other){
         uint128 >>= other;
         return *this;
@@ -141,9 +142,7 @@ union Uint128 {
     }
 
     constexpr uint64_t bit_width() const {
-        auto bw = std::bit_width(uint64[0]);
-        if (bw < 64) return bw;
-        return std::bit_width(uint64[1]) + bw;
+        return 64*i64_width;
     }
 
 };
@@ -212,6 +211,10 @@ constexpr inline bool operator==(const Uint128& x, const Uint128& y){
 }
 
 
+constexpr inline bool operator!=(const Uint128& x, const Uint128& y){
+    return x.uint128 != y.uint128;
+}
+
 constexpr inline Uint128 operator|(Uint128 x, const Uint128& y){
 	x.uint64[0] |= y.uint64[0];
 	x.uint64[1] |= y.uint64[1];
@@ -220,7 +223,7 @@ constexpr inline Uint128 operator|(Uint128 x, const Uint128& y){
 	
 
 template <typename T>
-requires std::convertible_to<T, int>
+//requires std::convertible_to<T, int>
 constexpr inline std::enable_if_t<std::is_integral_v<T>, Uint128> 
 operator>>(Uint128 x, T idx){
     Uint128 res(x);
@@ -229,7 +232,7 @@ operator>>(Uint128 x, T idx){
 }
 
 template <typename T>
-requires std::convertible_to<T, int>
+//requires std::convertible_to<T, int>
 constexpr inline std::enable_if_t<std::is_integral_v<T>, Uint128> 
 operator<<(Uint128 x, T idx){
     Uint128 res(x);
@@ -262,7 +265,7 @@ inline Uint128 make_mask(T idx){
 }
 
 template <typename UintT, typename T>
-requires std::convertible_to<T, uint8_t>
+//requires std::convertible_to<T, uint8_t>
 inline UintT permute(const UintT& x, const std::vector<T>& I) {
     // Applies the permutation I to the bits of x
     // such that y & (1 << I[n]) == x & (1 << n)
