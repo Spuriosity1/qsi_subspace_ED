@@ -19,6 +19,8 @@ int main(int argc, char* argv[]){
 	prog.add_argument("--n_spinons")
         .default_value(0)
         .scan<'i', int>();
+    prog.add_argument("--basis_file", "-b")
+        .help("A basis file (HDF5 format). Defaults to ${lattice_file%.json}.h5");
 
     prog.add_argument("--seed")
         .help("Seed for the RNG")
