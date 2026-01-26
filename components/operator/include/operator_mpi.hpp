@@ -2,7 +2,7 @@
 #include "operator.hpp"
 #include <cassert>
 #include <mpi.h>
-#include <bit>
+//#include <bit>
 #include "mpi_context.hpp"
 
 typedef MPIContext<ZBasisBST::state_t, ZBasisBST::idx_t> MPIctx;

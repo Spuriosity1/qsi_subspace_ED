@@ -35,7 +35,7 @@ void load_state(std::vector<double>& psi, const MPI_ZBasisBST& basis, const std:
         if (plist_id < 0) throw HDF5Error(-1, -1, -1, "load_state: Failed to create file access property list");
         
         status = H5Pset_fapl_mpio(plist_id, MPI_COMM_WORLD, MPI_INFO_NULL);
-        H5Pset_all_coll_metadata_ops(plist_id, true);
+        //H5Pset_all_coll_metadata_ops(plist_id, true);
         if (status < 0) throw HDF5Error(-1, -1, -1, "load_state: Failed to set MPI-IO properties");
         
         // Open the file collectively

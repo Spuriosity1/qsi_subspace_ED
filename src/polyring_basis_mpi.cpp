@@ -12,6 +12,8 @@
 #include <unordered_set>
 #include "mpi_context.hpp"
 #include "operator.hpp"
+
+#include <numeric> // std::reducee
 #include <mpi.h>
 
 using namespace std;
@@ -185,7 +187,7 @@ struct constr_explorer_mpi {
                      MPI_INT, MPI_COMM_WORLD);
 
         // allocate memory to reveive the states
-        size_t n_received = std::reduce(recvcounts.begin(), recvcounts.end(), 0);
+        size_t n_received =  std::accumulate(recvcounts.begin(), recvcounts.end(), 0);
         std::vector<state_t> recvbuf(n_received);
 
         sendbuf.clear();

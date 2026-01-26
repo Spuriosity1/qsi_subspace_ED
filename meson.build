@@ -7,7 +7,7 @@ project('projected_ed', ['cpp', 'c'],
 cmake = import('cmake')
 
 # add_project_arguments(['
-add_project_link_arguments(['-pthread'], language: 'cpp' )
+add_project_link_arguments(['-pthread','-lstdc++fs', '-lgomp'], language: 'cpp' )
 
 # Compiler flags for 128-bit integer support
 cpp_compiler = meson.get_compiler('cpp')

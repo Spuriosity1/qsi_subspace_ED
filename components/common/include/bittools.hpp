@@ -7,7 +7,7 @@
 #include <string>
 #include <iostream>
 #include <sstream>
-#include <bit>
+// #include <bit>
 //
 #include <cstdint>
 #include <climits>
@@ -71,11 +71,7 @@ union Uint128 {
     uint64_t uint64[2];
     constexpr Uint128(){uint128 = 0;}
 
-	Uint128(int x){ this->uint128 = x;}
-	Uint128(uint8_t x){ this->uint128 = x;}
-	Uint128(uint16_t x){ this->uint128 = x;}
-	Uint128(uint32_t x){ this->uint128 = x;}
-	Uint128(uint64_t x){ this->uint128 = x;}
+	//Uint128(uint64_t x){ this->uint128 = x;}
 	Uint128(__uint128_t x){ this->uint128 = x;}
 
     constexpr Uint128(uint64_t x1, uint64_t x0){
