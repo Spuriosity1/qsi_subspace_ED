@@ -45,11 +45,11 @@ void check_lanczos_convergence(
             std::cout << "[Lanczos] Converged at iteration " << iteration 
                       << " with eigenvalue " << eigval << "\n";
         }
-        res.converged= true;
+        res.eigval_converged= true;
         return;
     }
 
-    res.converged= false;
+    res.eigval_converged= false;
 }
 
 template<typename _S>
@@ -94,7 +94,7 @@ Result lanczos_iterate(ApplyFn evaluate_add,
     betas.resize(0);
     
     Result retval;
-
+    retval.eigvec_converged = false;
 
     // Compared to implementation written in 
     // https://slepc.upv.es/documentation/reports/str5.pdf
@@ -152,7 +152,8 @@ Result lanczos_iterate(ApplyFn evaluate_add,
                 std::cout << "Iter "<< iter_no << " eigval error " << retval.eigval_error << "\n";
             }
 
-            if (retval.converged) {
+            if (retval.eigval_converged && ritz ) {
+                retval.eigvec_converged = true;
                 break;
             }
         }
@@ -202,7 +203,6 @@ Result eigval0_impl(ApplyFn apply_add, double& eigval,
     std::cout << "[Lanczos] finding lowest eigenvalue\n";
     Result res;
     res = lanczos_iterate(apply_add, v, alphas, betas, settings);
-
     std::cout << "[Lanczos] tridiagonalising in Krylov space\n";
     std::vector<double> ritz;
 
@@ -221,6 +221,7 @@ Result eigval0_impl(ApplyFn apply_add, double& eigval,
     res = lanczos_iterate(apply_add, v, alphas, betas, settings,
             &ritz, &evector
             );
+
     std::swap(evector, v);
     return res;
 }

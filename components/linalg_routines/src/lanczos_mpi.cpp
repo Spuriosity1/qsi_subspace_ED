@@ -5,6 +5,7 @@
 #include <iostream>
 #include "common_bits_mpi.hpp"
 #include "operator_mpi.hpp"
+#include "checkpoint_utils.hpp"
 
 namespace projED {
 namespace lanczos_mpi {
@@ -46,11 +47,11 @@ void check_lanczos_convergence(
             std::cout << "[Lanczos] Converged at iteration " << iteration 
                       << " with eigenvalue " << eigval << "\n";
         }
-        res.converged= true;
+        res.eigval_converged= true;
         return;
     }
 
-    res.converged= false;
+    res.eigval_converged= false;
 }
 
 
@@ -62,8 +63,8 @@ Result lanczos_iterate(ApplyFn evaluate_add,
     std::vector<double>& alphas,
     std::vector<double>& betas,
         const Settings& settings,
-        const std::vector<double>* ritz = nullptr,   // optional
-        std::vector<_S>* eigvec = nullptr        // optional accumulator
+        const std::vector<double>* ritz,   // optional
+        std::vector<_S>* eigvec        // optional accumulator
         )
 {
     // Work share scheme: node 0 manages the global recurrence
@@ -152,14 +153,14 @@ Result lanczos_iterate(ApplyFn evaluate_add,
             }
 
             // Broadcast convergence status to all ranks
-            int converged_flag = retval.converged ? 1 : 0;
+            int converged_flag = retval.eigval_converged ? 1 : 0;
             MPI_Bcast(&converged_flag, 1, MPI_INT, 0, MPI_COMM_WORLD);
             MPI_Bcast(&retval.eigval_error, 1, MPI_DOUBLE, 0, MPI_COMM_WORLD);
             MPI_Bcast(&eigval, 1, MPI_DOUBLE, 0, MPI_COMM_WORLD);
             
-            retval.converged = (converged_flag == 1);
+            retval.eigval_converged = (converged_flag == 1);
 
-            if (retval.converged) {
+            if (retval.eigval_converged) {
                 break;
             }
         }
@@ -188,7 +189,7 @@ Result lanczos_iterate(ApplyFn evaluate_add,
         retval.n_iterations = alphas.size();
     }
     MPI_Bcast(&retval.n_iterations, 1, MPI_INT, 0, MPI_COMM_WORLD);
-    MPI_Bcast(&retval.converged, 1, MPI_C_BOOL, 0, MPI_COMM_WORLD);
+    MPI_Bcast(&retval.eigval_converged, 1, MPI_C_BOOL, 0, MPI_COMM_WORLD);
     MPI_Bcast(&retval.eigval_error, 1, MPI_DOUBLE, 0, MPI_COMM_WORLD);
     MPI_Bcast(&retval.eigvec_error, 1, MPI_DOUBLE, 0, MPI_COMM_WORLD);
 
@@ -197,6 +198,183 @@ Result lanczos_iterate(ApplyFn evaluate_add,
 
 
 
+template<typename _S, typename ApplyFn>
+Result lanczos_iterate_checkpoint(ApplyFn evaluate_add,
+        std::vector<_S>& v, 
+        std::vector<double>& alphas,
+        std::vector<double>& betas,
+        const Settings& settings,
+        const std::string& checkpoint_file,
+        const std::vector<double>* ritz,
+        std::vector<_S>* eigvec)
+{
+    using namespace checkpoint;
+    
+    auto local_dim = v.size();
+    std::vector<_S> u(local_dim);
+    
+    Result retval;
+    retval.eigvec_converged = false;
+
+    double beta = 0.0;
+    double eigval = std::numeric_limits<double>::max();
+    size_t start_iter = 0;
+    
+    // Get SLURM job end time
+    time_t job_end_time = get_slurm_end_time();
+    if (settings.ctx.my_rank == 0 && job_end_time > 0) {
+        time_t now = std::time(nullptr);
+        int remaining_mins = (job_end_time - now) / 60;
+        std::cout << "[Lanczos] SLURM job has ~" << remaining_mins 
+                  << " minutes remaining\n";
+    }
+    
+    // Try to load checkpoint
+    CheckpointData<_S> ckpt_data;
+    bool loaded = load_checkpoint(checkpoint_file, ckpt_data, settings.ctx);
+    
+    if (loaded) {
+        // Resume from checkpoint
+        v = std::move(ckpt_data.v);
+        u = std::move(ckpt_data.u);
+        alphas = std::move(ckpt_data.alphas);
+        betas = std::move(ckpt_data.betas);
+        beta = ckpt_data.beta;
+        start_iter = ckpt_data.iteration;
+        eigval = ckpt_data.eigval;
+        
+        if (settings.ctx.my_rank == 0) {
+            std::cout << "[Lanczos] Resuming from iteration " << start_iter << "\n";
+        }
+    } else {
+        // Fresh start
+        std::mt19937 rng(settings.x0_seed);
+        set_random_unit_mpi<_S>(v, rng);
+        alphas.reserve(settings.krylov_dim);
+        betas.reserve(settings.krylov_dim);
+        alphas.resize(0);
+        betas.resize(0);
+    }
+
+    // Main iteration loop
+    for (size_t j = start_iter; j < settings.max_iterations; j++) {
+        // Check if we should checkpoint (every iteration or less frequently)
+        if (job_end_time > 0 && should_checkpoint(job_end_time, 3600)) {
+            // Save checkpoint
+            CheckpointData<_S> save_data;
+            save_data.v = v;
+            save_data.u = u;
+            save_data.alphas = alphas;
+            save_data.betas = betas;
+            save_data.beta = beta;
+            save_data.iteration = j;
+            save_data.eigval = eigval;
+            save_data.random_seed = settings.x0_seed;
+            
+            save_checkpoint(checkpoint_file, save_data, settings.ctx);
+            
+            if (settings.ctx.my_rank == 0) {
+                time_t now = std::time(nullptr);
+                int remaining_mins = (job_end_time - now) / 60;
+                std::cout << "[Lanczos] Checkpointed at iteration " << j 
+                          << " with " << remaining_mins << " minutes remaining\n";
+                std::cout << "[Lanczos] Exiting early to allow job restart\n";
+            }
+            
+            retval.eigval_converged = false;
+            retval.n_iterations = j;
+            retval.eigval_error = std::abs(eigval - 0.0); // Placeholder
+            return retval;
+        }
+        
+        // Optional accumulation of Ritz combination
+        if (eigvec && ritz && j < (size_t)ritz->size()) {
+            axpy(*eigvec, v, (*ritz)[j]);
+        }
+        
+        if (j > 0) {
+            mul(u, -beta);
+        }
+        
+        TIMEIT("u += Av ", evaluate_add(v.data(), u.data());)
+
+        // α_j = <v_j | u>
+        double alpha_local = innerReal(v, u);
+        double alpha;
+        MPI_Allreduce(&alpha_local, &alpha, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
+
+        // u -= α_j * v_j
+        axpy(u, v, -alpha);
+
+        // β_j = ||u||
+        double beta2_local = innerReal(u,u);
+        MPI_Allreduce(&beta2_local, &beta, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
+        beta = std::sqrt(beta);
+        
+        if (beta < settings.abs_tol) {
+            if (settings.ctx.my_rank == 0 && settings.verbosity > 0){
+                std::cout << "Lanczos breakdown at iteration "<<j<<std::endl;
+            }
+            break;
+        }
+
+        // Rotate vectors
+        std::swap(v, u);
+        mul(v, 1.0/beta);
+
+        if (settings.ctx.my_rank == 0 && settings.verbosity > 1) {
+            std::cout << "Iter "<< j << " a[j]="<<alpha<<" b[j]="<<beta << "\n";
+        }
+
+        alphas.push_back(alpha);
+        betas.push_back(beta);
+
+        // Convergence check
+        if (j >= settings.min_iterations) {
+            if (settings.ctx.my_rank == 0) {
+                check_lanczos_convergence<_S>(alphas, betas, eigval, j, settings, retval);
+                if (settings.verbosity > 0) {
+                    std::cout << "Iter "<< j << " eigval error " << retval.eigval_error << "\n";
+                }
+            }
+
+            int converged_flag = retval.eigval_converged ? 1 : 0;
+            MPI_Bcast(&converged_flag, 1, MPI_INT, 0, MPI_COMM_WORLD);
+            MPI_Bcast(&retval.eigval_error, 1, MPI_DOUBLE, 0, MPI_COMM_WORLD);
+            MPI_Bcast(&eigval, 1, MPI_DOUBLE, 0, MPI_COMM_WORLD);
+            
+            retval.eigval_converged = (converged_flag == 1);
+
+            if (retval.eigval_converged) {
+                if (ritz) retval.eigvec_converged = true;
+                break;
+            }
+        }
+    }
+
+    // Eigenvector verification
+    if (eigvec && settings.verify_eigenvector){
+        std::fill(u.begin(), u.end(), 0);
+        evaluate_add(eigvec->data(), u.data());
+        axpy(u, *eigvec, -eigval);
+
+        double err2_local = innerReal(u, u);
+        double err2;
+        MPI_Allreduce(&err2_local, &err2, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
+        retval.eigvec_error = sqrt(err2);
+    }
+
+    // Broadcast final results
+    if (settings.ctx.my_rank == 0) {
+        retval.n_iterations = alphas.size();
+    }
+    MPI_Bcast(&retval.n_iterations, 1, MPI_INT, 0, MPI_COMM_WORLD);
+    MPI_Bcast(&retval.eigval_converged, 1, MPI_C_BOOL, 0, MPI_COMM_WORLD);
+    MPI_Bcast(&retval.eigval_error, 1, MPI_DOUBLE, 0, MPI_COMM_WORLD);
+    MPI_Bcast(&retval.eigvec_error, 1, MPI_DOUBLE, 0, MPI_COMM_WORLD);
+
+    return retval;
+}
 
 
 
@@ -258,6 +436,27 @@ Result eigval0(projED::ComplexApplyFn f, double& eigval,
         ){
     return eigval0_impl<std::complex<double>,projED::ComplexApplyFn>(f, eigval, v, settings_);
 }
+
+
+template
+Result lanczos_iterate_checkpoint<std::complex<double>, projED::ComplexApplyFn>(projED::ComplexApplyFn evaluate_add,
+        std::vector<std::complex<double>>& v, 
+        std::vector<double>& alphas,
+        std::vector<double>& betas,
+        const Settings& settings,
+        const std::string& checkpoint_file,
+        const std::vector<double>* ritz,
+        std::vector<std::complex<double>>* eigvec);
+
+template
+Result lanczos_iterate_checkpoint<double, projED::RealApplyFn>(projED::RealApplyFn evaluate_add,
+        std::vector<double>& v, 
+        std::vector<double>& alphas,
+        std::vector<double>& betas,
+        const Settings& settings,
+        const std::string& checkpoint_file,
+        const std::vector<double>* ritz,
+        std::vector<double>* eigvec);
 
 // end namespaces
 }}

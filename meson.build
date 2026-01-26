@@ -279,7 +279,7 @@ diag_DOQSI_ham_mpi = executable('diag_DOQSI_ham_mpi',
   files(['src/diag_DOQSI_ham_mpi.cpp']),
   dependencies: [g_deps, eigen_dep, operator_mpi_dep, linalg_routines_mpi_dep],
   include_directories: inc,
-  link_with: expectation_eval,
+  link_with: [expectation_eval],
   cpp_args: target_args,
   install: true
   )
