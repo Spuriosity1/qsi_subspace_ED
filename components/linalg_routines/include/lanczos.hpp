@@ -21,7 +21,8 @@ struct Settings {
 
 
 struct Result {
-    bool converged;
+    bool eigval_converged;
+    bool eigvec_converged;
     size_t n_iterations;
     double eigval_error;
     double eigvec_error;
@@ -51,10 +52,11 @@ inline std::ostream& operator<<(std::ostream& os, const Result& res)
 {
         os << "Lanczos Algorithm Result:\n";
     os << "---------------------------\n";
-    os << "  Converged:         " << res.converged << "\n";
-    os << "  Iterations:        " << res.n_iterations << "\n";
-    os << "  Eigenvalue error:  " << res.eigval_error << "\n";
-    os << "  Eigenvector error: " << res.eigvec_error << "\n";
+    os << "  Eigenvalue converged: " << res.eigval_converged << "\n";
+    os << "  Eigenvect. converged: " << res.eigvec_converged << "\n";
+    os << "  Iterations:           " << res.n_iterations << "\n";
+    os << "  Eigenvalue error:     " << res.eigval_error << "\n";
+    os << "  Eigenvector error:    " << res.eigvec_error << "\n";
     os << "---------------------------\n";
     return os;
 }

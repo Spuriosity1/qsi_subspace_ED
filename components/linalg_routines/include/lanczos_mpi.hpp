@@ -36,6 +36,31 @@ inline std::ostream& operator<<(std::ostream& os, const Result& res)
 }
 
 
+
+template<typename _S, typename ApplyFn>
+Result lanczos_iterate(ApplyFn evaluate_add,
+        std::vector<_S>& v, 
+    std::vector<double>& alphas,
+    std::vector<double>& betas,
+        const Settings& settings,
+        const std::vector<double>* ritz = nullptr,   // optional
+        std::vector<_S>* eigvec = nullptr        // optional accumulator
+        );
+
+
+
+template<typename _S, typename ApplyFn>
+Result lanczos_iterate_checkpoint(ApplyFn evaluate_add,
+        std::vector<_S>& v, 
+    std::vector<double>& alphas,
+    std::vector<double>& betas,
+        const Settings& settings,
+        const std::string& checkpoint_file,
+        const std::vector<double>* ritz = nullptr,   // optional
+        std::vector<_S>* eigvec = nullptr        // optional accumulator
+        );
+
+
 // real and complex valued eigval0 routines.
 // Note that the dimension of the Hilbert space is inferred from v.
 Result eigval0(projED::RealApplyFn f, 

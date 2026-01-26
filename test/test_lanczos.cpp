@@ -159,7 +159,7 @@ int main(int argc, char** argv) {
     std::cout << "Eigenvector error: " << err_eigvec <<"\n";
 
     std::cout <<res;
-    if (!res.converged) {
+    if (!res.eigval_converged) {
         std::cout << "Test failed: Lanczos exceeded maximum iterations\n";
         return 1;
     } else if (err_eigval > 1e-4 ) {

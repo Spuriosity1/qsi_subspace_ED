@@ -10,6 +10,8 @@
 #include <fstream>
 #include <filesystem>
 
+#include "checkpoint_utils.hpp"
+
 using json = nlohmann::json;
 using namespace projED;
 
@@ -20,6 +22,16 @@ int main(int argc, char* argv[]) {
 	prog.add_argument("-s", "--sector");
     prog.add_argument("--basis_file", "-b")
         .help("A basis file (HDF5 format). Defaults to ${lattice_file%.json}.h5");
+
+    // Checkpointing
+    prog.add_argument("--checkpoint", "-c")
+        .help("Checkpoint file for resuming (default: auto-generated)")
+        .default_value(std::string(""));
+
+    prog.add_argument("--checkpoint_interval")
+        .help("Checkpoint every N iterations (0=only on time limit)")
+        .default_value(0)
+        .scan<'i', int>();
 
     // G specification
     {
@@ -61,6 +73,7 @@ int main(int argc, char* argv[]) {
 		std::cerr << prog;
         std::exit(1);
     }
+
 
     MPI_Init(&argc, &argv);
 
@@ -116,21 +129,86 @@ int main(int argc, char* argv[]) {
 
     s << prog.get<std::string>("--output_dir") << "/" << outfilename_buf;
 
+
+      // Build checkpoint filename
+    std::string checkpoint_file;
+    if (prog.get<std::string>("--checkpoint").empty()) {
+        // Auto-generate checkpoint filename based on parameters
+        checkpoint_file = s.str() + ".checkpoint.h5";
+    } else {
+        checkpoint_file = prog.get<std::string>("--checkpoint");
+    }
+    
+    if (ctx.my_rank == 0) {
+        std::cout << "[Main] Checkpoint file: " << checkpoint_file << "\n";
+    }
+
+    //////////////////////////////////
+    /// Build H
+
 	auto H = MPILazyOpSum(basis, H_sym, ctx);
 
     ////////////////////////////////////////
     // Do the diagonalisation
     lanczos_mpi::Settings settings(ctx);
     parse_lanczos_settings(prog, settings);
+
     RealApplyFn evadd = [H, ctx](const coeff_t* x_local, coeff_t* y_local){
         H.evaluate_add(x_local, y_local);
     };
+
     double eigval;
     std::vector<double> local_v0(ctx.local_block_size());
 
-    auto res = lanczos_mpi::eigval0(evadd, eigval, local_v0, settings);
+//    auto res = lanczos_mpi::eigval0(evadd, eigval, local_v0, settings);
+
+    std::vector<double> alphas, betas;
+
+    std::cout << "[Lanczos] finding lowest eigenvalue\n";
+    auto res=  lanczos_mpi::lanczos_iterate_checkpoint(evadd, local_v0, alphas, betas, settings, checkpoint_file);
+
     std::cout<<"[rank "<<ctx.my_rank<<"] "<<res;
 
+    // If we hit checkpoint and exited early, clean exit
+    if (!res.eigval_converged) {
+        if (ctx.my_rank == 0) {
+            std::cout << "[Main] Exited initial iteration at n="<<
+                res.n_iterations<<" due to time limit. Restart to continue.\n";
+        }
+        MPI_Finalize();
+        return 0; // Clean exit for restart
+    }
+
+    // If converged, compute final eigenvalue and eigenvector
+    std::cout << "[Lanczos] tridiagonalising in Krylov space\n";
+    std::vector<double> ritz;
+    std::vector tmp_alphas(alphas);
+    std::vector tmp_betas(betas);
+    tridiagonalise_one(tmp_alphas, tmp_betas, eigval, ritz);
+
+    if(settings.calc_eigenvector) {
+        std::cout << "[Lanczos] iterating to determine eigenvector\n";
+        std::vector<double> evector(ctx.local_block_size());
+        
+        // Second pass for eigenvector 
+        res = lanczos_mpi::lanczos_iterate_checkpoint(
+            evadd, local_v0, alphas, betas, settings, 
+            checkpoint_file + ".eigvec",
+            &ritz, &evector
+        );
+        std::swap(evector, local_v0);
+
+
+        // If we hit checkpoint and exited early, clean exit
+        if (!res.eigval_converged) {
+            if (ctx.my_rank == 0) {
+            std::cout << "[Main] Exited second iteration at n="<<
+                res.n_iterations<<" due to time limit. Restart to continue.\n";
+            }
+            MPI_Finalize();
+            return 0; // Clean exit for restart
+        }
+    }
 
     std::string filename = s.str()+".eigs.h5";
 
@@ -148,7 +226,6 @@ int main(int argc, char* argv[]) {
 
     // dummy (here in case we calc more later
     std::vector<double> eigvals{eigval};
-    
 
     // Write eigenvectors using parallel I/O: shape (dim, n_eigvecs)
     {
