@@ -1,0 +1,8 @@
+#!/bin/bash
+module purge
+module load rhel8/default-icl
+module load intel/mkl/2020.4
+module load eigen/latest
+
+export LD_LIBRARY_PATH=/home/als217/install/HDF_Group/HDF5/1.14.6/lib:${LD_LIBRARY_PATH}
+

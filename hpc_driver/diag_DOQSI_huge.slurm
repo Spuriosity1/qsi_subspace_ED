@@ -1,6 +1,6 @@
 #!/bin/bash
 
-#SBATCH -J bapply_mpi
+#SBATCH -J ddqsi
 #! Which project should be charged:
 #SBATCH -A CASTELNOVO-SL2-CPU
 #SBATCH -p icelake-himem
@@ -16,8 +16,8 @@
 #SBATCH --time=12:00:00
 #! What types of email messages do you wish to receive?
 #SBATCH --mail-type=START,END
-#SBATCH --output=track/bapply_mpi.%A_%a.out
-#SBATCH --error=track/bapply_mpi.%A_%a.error
+#SBATCH --output=track/ddqsi.%A_%a.out
+#SBATCH --error=track/ddqsi.%A_%a.error
 
 . /etc/profile.d/modules.sh                # Leave this line (enables the module command)
 module purge                               # Removes all modules still loaded
@@ -46,5 +46,5 @@ OUTPATH="/home/als217/silo/d128_result"
 
 mkdir -p $OUTPATH
 
-srun ../build/bench/diag_DOQSI_ham --g -2 1 1 1 ../../lattice_files/pyro_-2,2,2_2,-2,2_2,2,-2.json -o $OUTPATH
+srun ../build/diag_DOQSI_ham_mpi --g -2 1 1 1 ../../lattice_files/pyro_-2,2,2_2,-2,2_2,2,-2.json -o $OUTPATH --rtol -4 --atol -4
 
