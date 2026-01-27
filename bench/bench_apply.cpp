@@ -18,6 +18,8 @@ int main(int argc, char* argv[]){
 	argparse::ArgumentParser prog(argv[0]);
 	prog.add_argument("lattice_file");
 	prog.add_argument("-s", "--sector");
+    prog.add_argument("--basis_file", "-b")
+        .help("A basis file (HDF5 format). Defaults to ${lattice_file%.json}.h5");
 	prog.add_argument("--n_spinons")
         .default_value(0)
         .scan<'i', int>();

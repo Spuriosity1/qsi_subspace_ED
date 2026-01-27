@@ -153,7 +153,7 @@ int main(int argc, char* argv[]) {
     lanczos_mpi::Settings settings(ctx);
     parse_lanczos_settings(prog, settings);
 
-    RealApplyFn evadd = [H, ctx](const coeff_t* x_local, coeff_t* y_local){
+    RealApplyFn evadd = [&H, &ctx](const coeff_t* x_local, coeff_t* y_local){
         H.evaluate_add(x_local, y_local);
     };
 

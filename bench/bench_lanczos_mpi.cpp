@@ -118,7 +118,7 @@ int main(int argc, char* argv[]){
 
 
     using coeff_t = double;
-    RealApplyFn evadd = [H](const coeff_t* x, coeff_t* y){
+    RealApplyFn evadd = [&H](const coeff_t* x, coeff_t* y){
         H.evaluate_add(x, y);
     };
     double eigval_lanczos = 0.0;

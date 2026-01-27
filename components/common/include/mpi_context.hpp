@@ -47,7 +47,7 @@ struct MPIContext {
 
     // naively divides into index sectors
     void build_idx_partition(int64_t n_basis_states){
-        std::cout<<"Building index partion with "<<n_basis_states<<"states\n";
+        std::cout<<"Building index partion with "<<n_basis_states<<" states\n";
         if (world_size > n_basis_states) {
             throw std::runtime_error("Too many nodes for too small a basis!");
         }
@@ -82,7 +82,6 @@ struct MPIContext {
     size_t rank_of_state(state_t psi) const;
     // returns the node on which a specified global index can be found
     size_t rank_of_idx(idx_t J) const;
-
 
 };
 
