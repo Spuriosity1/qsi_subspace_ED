@@ -192,8 +192,10 @@ if mpi_root != ''
       '-L' +mpi_libdir, '-lmpi']
     )
 else
-  mpi_dep = dependency('mpi', required: true, language:'cpp')
+  mpi_dep = dependency('mpi', required: true, language: 'cpp')
 endif
+
+omp_dep = dependency('openmp', required: true, language: 'cpp')
 
 if hdf5_root != ''
   message('Using custom HDF5 at ' + hdf5_root)

@@ -484,6 +484,7 @@ void MPILazyOpSum<coeff_t, B>::evaluate_add_off_diag_pipeline(const coeff_t* x, 
 
          // Organize sends by destination rank
         BENCH_TIMER_TIMEIT(loc_apply_timer,
+
         for (ZBasisBase::idx_t il = 0; il < ctx.local_block_size(); ++il) {
             ZBasisBase::state_t state = basis[il];
             auto sign = op.applyState(state);
@@ -688,8 +689,6 @@ void MPILazyOpSum<coeff_t, B>::evaluate_add_off_diag_pipeline(const coeff_t* x, 
             t->print_summary();
         }
 #endif
-
-
 
 
 }

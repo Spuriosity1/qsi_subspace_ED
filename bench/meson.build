@@ -1,17 +1,3 @@
-# umap_memtest = executable('umap_memtest', 'src/umap_memtest.cpp', include_directories: inc)
-# umap_memtest = executable('map_memtest', 'src/map_memtest.cpp', include_directories: inc)
-# umap_memtest = executable('vector_memtest', 'src/vector_memtest.cpp', include_directories: inc)
-# 
-# 
-# udense_dep = dependency('unordered_dense', required:false)
-# 
-# if udense_dep.found()
-#   umap_memtest = executable('ankerl_memtest', 'src/ankerl_memtest.cpp', include_directories: inc, dependencies: udense_dep)
-#   map_choice = executable('map_choice', 'src/map_choice.cpp', include_directories: inc, dependencies: udense_dep)
-# endif
-
-
-
 
 # Benchmark test (if you want performance testing)
 benchmark_uint128 = executable('benchmark_uint128',
@@ -41,6 +27,14 @@ bench_apply_mpi = executable('bench_apply_mpi',
   'bench_apply_mpi.cpp',
   include_directories: [inc, operator_inc],
   dependencies: [common_dep, eigen_dep,  linalg_routines_dep, mpi_dep],
+  link_with: [bench_operator_mpi_lib],
+  install: false
+  )
+
+bench_apply_mpi = executable('bench_apply_mpi_omp',
+  'bench_apply_mpi.cpp',
+  include_directories: [inc, operator_inc],
+  dependencies: [common_dep, eigen_dep, linalg_routines_dep, mpi_dep, omp_dep],
   link_with: [bench_operator_mpi_lib],
   install: false
   )
