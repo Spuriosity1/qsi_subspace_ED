@@ -227,7 +227,7 @@ int main(int argc, char* argv[]) {
     u.resize(ctx.local_block_size());
 
 
-    size_t n_operators = ringL.size();
+    int n_operators = ringL.size();
     std::vector<double> expect_O(n_operators); // < O >
     std::vector<double> expect_O_O(n_operators); // < O_0' O_j >
     std::vector<double> expect_F(n_operators); // < O'_j O_j >

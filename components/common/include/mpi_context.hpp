@@ -47,15 +47,18 @@ struct MPIContext {
 
     // naively divides into index sectors
     void build_idx_partition(int64_t n_basis_states){
-        std::cout<<"Building index partion with "<<n_basis_states<<" states\n";
-        if (world_size > n_basis_states) {
-            throw std::runtime_error("Too many nodes for too small a basis!");
+        if (my_rank == 0){
+            std::cout<<"Building index partion with "<<n_basis_states<<" states\n";
+            if (world_size > n_basis_states) {
+                throw std::runtime_error("Too many nodes for too small a basis!");
+            }
         }
+
         int64_t n_per_rank = n_basis_states / world_size;
         for (int i=0; i<world_size; i++){
             idx_partition[i] = i * n_per_rank;
             if(idx_partition[i] < 0){
-                throw std::logic_error("integer udnerflow in idx_partition");
+                throw std::logic_error("integer underflow in idx_partition");
             }
         }
         idx_partition[world_size] = n_basis_states;
