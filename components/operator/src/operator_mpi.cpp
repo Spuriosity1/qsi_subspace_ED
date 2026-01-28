@@ -149,10 +149,12 @@ inline std::vector<Uint128> read_basis_hdf5(
 
         // Print diagnostics
         assert(ctx.idx_partition.size() == ctx.state_partition.size());
-        std::cout<<"Loaded basis chunk. Partition scheme:\n index\t state\n";
+        if (ctx.my_rank == 0){
+        std::cout<<"[Main] Loaded basis chunk. Partition scheme:\n index\t state\n";
         for (size_t i=0; i<ctx.idx_partition.size(); i++){
             std::cout<<ctx.idx_partition[i]<<"\t";
             printHex(std::cout, ctx.state_partition[i])<<"\n";
+        }
         }
 		
 		// Clean up
