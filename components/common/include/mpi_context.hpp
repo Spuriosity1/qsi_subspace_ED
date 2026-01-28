@@ -93,17 +93,43 @@ struct MPIContext {
 
 template <typename state_t, typename idx_t>
 size_t MPIContext<state_t, idx_t>::rank_of_state(state_t psi) const {
-    // linear search, all states should fit in cache unless # nodes is very large
-    // IMPORTANT: never checks state_partition[world_size] itself, which may
-    // overflow in the 128 site cache
-    for (int n=0; n<world_size; n++){
-        if (psi < state_partition[n+1]){
-            return n;
+//    // linear search, all states should fit in cache unless # nodes is very large
+//    // IMPORTANT: never checks state_partition[world_size] itself, which may
+//    // overflow in the 128 site cache
+//    for (int n=0; n<world_size; n++){
+//        if (psi < state_partition[n+1]){
+//            return n;
+//        }
+//    }
+//    // this should almost never happen (possible if we serch for psi nonexistent -- in this case we can safely hand it off to any old node)
+//    return world_size-1;
+     // We search over n in [0, world_size-1]
+    int lo = 0;
+    int hi = world_size - 1;
+
+    // Binary search until interval is small
+    while (hi - lo > 4) {
+        int mid = (lo + hi) >> 1;
+
+        // Compare against upper boundary of mid
+        if (psi < state_partition[mid + 1]) {
+            hi = mid;
+        } else {
+            lo = mid + 1;
         }
     }
-    // this should almost never happen (possible if we serch for psi nonexistent -- in this case we can safely hand it off to any old node)
-    return world_size-1;
+
+    // Tail scan (branch-predictable)
+    for (int n = lo; n <= hi; ++n) {
+        if (psi < state_partition[n + 1]) {
+            return static_cast<size_t>(n);
+        }
+    }
+
+    // Fallback (should be unreachable for valid states)
+    return static_cast<size_t>(world_size - 1);
 }
+
 
 // returns the rank on which a specified psi can be found
 template <typename state_t, typename idx_t>
