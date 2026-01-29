@@ -73,13 +73,11 @@ inline std::vector<Uint128> read_basis_hdf5(
             throw std::runtime_error("Basis is empty!");
         }
 
-        // build the index partition
-        ctx.build_idx_partition(dims[0]);
 
         // do some random access to figure out the terminal states
         {     
             // Each rank reads its boundary states directly from file
-            auto read_state = [&](hsize_t idx) {
+            auto read_state = [&](uint64_t idx) {
                 Uint128 val{};
                 hsize_t offset[2] = { idx, 0 };
                 hsize_t count[2]  = { 1, row_width };
@@ -96,15 +94,9 @@ inline std::vector<Uint128> read_basis_hdf5(
                 return val;
             };
 
-            for (int r = 0; r < ctx.world_size; ++r) {              
-                assert(ctx.idx_partition[r] < static_cast<int>(total_rows));
-                ctx.state_partition[r] = read_state(ctx.idx_partition[r]);
-            }
-
-            // one past last: last_state + 1
-            Uint128 last = read_state(total_rows - 1);
-            ++last.uint128;
-            ctx.state_partition[ctx.world_size] = last;
+            // build the index partition
+            ctx.partition_indices_equal(total_rows);
+            ctx.partition_basis(total_rows, read_state);
         }
     
         
@@ -147,14 +139,49 @@ inline std::vector<Uint128> read_basis_hdf5(
             if (status < 0) throw std::runtime_error("read_basis_hdf5: Failed to read local chunk");
         }
 
-        // Print diagnostics
-        assert(ctx.idx_partition.size() == ctx.state_partition.size());
-        if (ctx.my_rank == 0){
-        std::cout<<"[Main] Loaded basis chunk. Partition scheme:\n index\t state\n";
-        for (size_t i=0; i<ctx.idx_partition.size(); i++){
-            std::cout<<ctx.idx_partition[i]<<"\t";
-            printHex(std::cout, ctx.state_partition[i])<<"\n";
+        {
+            // populate mpi_context's buffer 
+            // TODO move this logic inside the operator class
+            std::unordered_set<uint64_t> hashes_seen_here;
+            for (hsize_t j=0; j<local_count; j++){
+                hashes_seen_here.insert(ctx.hash_state(result[j]));
+            }
+
+            std::vector<uint64_t> hashes_seen_here_v(hashes_seen_here.begin(),
+                    hashes_seen_here.end());
+
+            // MPI exchante number of unique hashes
+            std::vector<int> hash_counts(ctx.world_size);
+            int my_hash_count = hashes_seen_here.size();
+
+            MPI_Allgather(&my_hash_count, 1, get_mpi_type<int>(),
+                    hash_counts.data(), 1, get_mpi_type<int>(), MPI_COMM_WORLD);
+
+            auto g_total_unique_hashes = std::accumulate(
+                    hash_counts.begin(), hash_counts.end(),0);
+
+            std::vector<int> hash_displs(ctx.world_size);
+            hash_displs[0] = 0;
+            for (int i=1; i<ctx.world_size; i++){
+                hash_displs[i] = hash_displs[i-1] + hash_counts[i-1];
+            }
+
+            std::vector<uint64_t> g_hashes(g_total_unique_hashes);
+            
+            MPI_Allgatherv(
+                    hashes_seen_here_v.data(), hashes_seen_here.size(), get_mpi_type<uint64_t>(),
+                    g_hashes.data(), hash_counts.data(), hash_displs.data(), get_mpi_type<uint64_t>(), MPI_COMM_WORLD);
+
+            for (int r=0; r<ctx.world_size; r++){
+                ctx.insert_hashes(g_hashes, hash_displs[r], hash_counts[r], r);
+            }
+
+
         }
+
+        // Print diagnostics
+        if(ctx.my_rank == 0){
+            std::cout<<"[Main] Loaded basis chunk.\n"<<ctx;
         }
 		
 		// Clean up

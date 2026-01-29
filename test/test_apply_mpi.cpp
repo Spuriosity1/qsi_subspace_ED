@@ -63,7 +63,7 @@ int main(int argc, char* argv[]){
 
     // Step 2: load and partition the basis
     std::cout<<"[MPI_BST]  Loading basis..."<<std::endl;
-    MPIContext ctx = load_basis(basis, prog);
+    SparseMPIContext ctx = load_basis(basis, prog);
     std::cout<<"[MPI_BST]  Done! Basis dim="<<basis.dim()<<std::endl;
 
     std::cout<<"[BST]  Loading basis..."<<std::endl;

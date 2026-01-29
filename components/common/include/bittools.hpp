@@ -12,6 +12,7 @@
 #include <cstdint>
 #include <climits>
 
+
 /*
 #if defined(__INTEL_LLVM_COMPILER)
 #include <concepts>
@@ -79,29 +80,29 @@ union Uint128 {
         uint64[1] = x1;
     }
 
-    constexpr Uint128 operator^=(const Uint128& other){
+    constexpr Uint128& operator^=(const Uint128& other){
         uint128 ^= other.uint128;
         return *this;
     }
 
-    constexpr Uint128 operator&=(const Uint128& other){
+    constexpr Uint128& operator&=(const Uint128& other){
         uint128 &= other.uint128;
         return *this;
     }
 
-    constexpr Uint128 operator|=(const Uint128& other){
+    constexpr Uint128& operator|=(const Uint128& other){
         uint128 |= other.uint128;
         return *this;
     }
     
     template <typename T>
-    constexpr Uint128 operator<<=(T x){
+    constexpr Uint128& operator<<=(T x){
         uint128 <<= x;
         return *this;
     }
 
     template <typename T>
-    constexpr Uint128 operator>>=(T other){
+    constexpr Uint128& operator>>=(T other){
         uint128 >>= other;
         return *this;
     }
@@ -156,6 +157,17 @@ struct Uint128Eq {
 		return (a.uint64[0] == b.uint64[0]) && (a.uint64[1] == b.uint64[1]);
 	}
 };
+
+
+// Specialization for std::hash
+namespace std {
+    template<>
+    struct hash<Uint128> {
+        std::size_t operator()(const Uint128& b) const {
+            return Uint128Hash()(b);
+        }
+    };
+}
 
 
 constexpr inline   int   popcnt_u128 (const Uint128& n)

@@ -84,7 +84,7 @@ int main(int argc, char** argv) {
 
     // construct the basis partition
     MPIctx ctx;
-    ctx.build_idx_partition(dim);
+    ctx.partition_indices_equal(dim);
 
     // The random vector
     std::mt19937 rng(seed);
