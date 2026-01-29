@@ -203,7 +203,7 @@ int main(int argc, char* argv[]) {
     basis_t basis;
     std::cout<<"[MPI_BST]  Loading basis..."<<std::endl;
     // NOTE n_spinons not handled properly
-    MPIContext ctx = basis.load_from_file( get_basis_file(latfile, 0, dset_name!="basis"), 
+    SparseMPIContext ctx = basis.load_from_file( get_basis_file(latfile, 0, dset_name!="basis"), 
             dset_name
             );
     std::cout<<"[MPI_BST]  Done! local basis dim="<<basis.dim()<<std::endl;

@@ -5,7 +5,7 @@
 //#include <bit>
 #include "mpi_context.hpp"
 
-typedef MPIContext<ZBasisBST::state_t, ZBasisBST::idx_t> MPIctx;
+typedef SparseMPIContext<ZBasisBST::idx_t> MPIctx;
 
 struct MPI_ZBasisBST : public ZBasisBST 
 {

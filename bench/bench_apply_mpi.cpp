@@ -53,7 +53,7 @@ int main(int argc, char* argv[]){
 	jfile >> jdata;
 
     // Step 2: load and partition the basis
-    TIMEIT("Loading basis", MPIContext ctx = load_basis(basis, prog);)
+    TIMEIT("Loading basis", SparseMPIContext ctx = load_basis(basis, prog);)
     std::cout<<"[rank "<<ctx.my_rank<<"] Done! Basis dim="<<basis.dim()<<std::endl;
 
 
