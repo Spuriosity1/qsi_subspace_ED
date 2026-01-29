@@ -767,13 +767,6 @@ void MPILazyOpSum<coeff_t, B>::evaluate_add_off_diag_batched(const coeff_t* x, c
             
             auto target_rank = ctx.rank_of_state(state);
             int pos = send_cursors[target_rank]++;
-            if (pos >= static_cast<int>(send_state.size())){
-
-                std::cout <<"[rank "<<ctx.my_rank<<"] error. "<<
-                    "Target rank: "<<target_rank<<
-                    " pos: "<<pos<<std::endl;
-                throw std::logic_error("illegal pos");
-            }
             send_state[pos] = state;
             send_dy[pos] = c*x[il]*sign;
         }
