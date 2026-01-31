@@ -890,6 +890,7 @@ void MPILazyOpSum<coeff_t, basis_t>::allocate_temporaries() {
     recv_dy.resize(total_recv);
 
 
+#ifdef DEBUG
     std::cout <<"[alloc "<<ctx.my_rank<<"] Send Sizes: ";
     for (auto d : send_counts) std::cout << d <<", ";
     std::cout<<"\n\ttotal:"<<total_send<<std::endl;
@@ -897,7 +898,7 @@ void MPILazyOpSum<coeff_t, basis_t>::allocate_temporaries() {
     std::cout <<"[alloc "<<ctx.my_rank<<"] Send Displacements: ";
     for (auto d : send_displs) std::cout << d <<", ";
     std::cout<<std::endl;
-
+#endif
 
 
 }

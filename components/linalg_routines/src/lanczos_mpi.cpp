@@ -397,7 +397,9 @@ Result eigval0_impl(ApplyFn apply_add, double& eigval,
     std::vector<double> alphas;
     std::vector<double> betas;
 
-    std::cout << "[Lanczos] finding lowest eigenvalue\n";
+    if (settings.ctx.my_rank == 0){
+        std::cout << "[Lanczos Main] finding lowest eigenvalue\n";
+    }
     Result res = lanczos_iterate(apply_add, v, alphas, betas, settings);
 
     std::cout << "[Lanczos] tridiagonalising in Krylov space\n";
