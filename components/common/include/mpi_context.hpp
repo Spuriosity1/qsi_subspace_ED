@@ -160,6 +160,7 @@ void SparseMPIContext< idx_t>::estimate_optimal_mask(int64_t n_basis_states,
         const std::function<state_t(uint64_t)>& read_state)
 {
 
+
     // Downsample a random subset of the states
     std::mt19937_64 rng(100);
     auto dist = std::uniform_int_distribution<int64_t>(0,n_basis_states-1);
@@ -193,6 +194,10 @@ void SparseMPIContext< idx_t>::estimate_optimal_mask(int64_t n_basis_states,
         throw std::logic_error("Impossible mask state: indexing is broken"); 
         // early exit MUST have been triggered, or else all states are identical
     } 
+
+
+    std::cout<<"[ rank "<<this->my_rank<<" ] Bit mask " << bit_mask << 
+        " (top "<< n_bits <<" bits\n";
 }
 
 

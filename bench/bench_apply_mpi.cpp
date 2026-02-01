@@ -63,7 +63,11 @@ int main(int argc, char* argv[]){
     std::vector<double> gv {1.0, -0.2, -0.2, -0.2};
     build_hamiltonian(H_sym, jdata, gv);
 
-    auto H_mpi = MPILazyOpSum(basis, H_sym, ctx);
+    TIMEIT("operator construct",
+            auto H_mpi = MPILazyOpSum(basis, H_sym, ctx);
+          )
+
+    std::cout<<"[rank "<<ctx.my_rank<<"] op construct finish"<<std::endl;
 
     std::vector<double> v_local, u_local;
     v_local.resize(ctx.local_block_size());
