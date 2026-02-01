@@ -564,13 +564,6 @@ void MPILazyOpSum<coeff_t, B>::evaluate_add_off_diag_batched(const coeff_t* x, c
         &loc_apply_timer, &remx_wait_timer, &rem_apply_timer};
 
     
-    std::cout <<"[rank "<<ctx.my_rank<<"] Displacements: ";
-    for (auto d : send_displs) std::cout << d <<", ";
-    std::cout<<std::endl;
-
-    std::cout <<"[rank "<<ctx.my_rank<<"] Sizes: ";
-    for (auto d : send_counts) std::cout << d <<", ";
-    std::cout<<std::endl;
 
     // current positions in the send arrays
     std::vector<int> send_cursors = send_displs;                 
@@ -595,27 +588,72 @@ void MPILazyOpSum<coeff_t, B>::evaluate_add_off_diag_batched(const coeff_t* x, c
     }
     );
 
+
+
+    std::vector<MPI_Request> send_reqs;
+    std::vector<MPI_Request> recv_reqs;
+
+    std::vector<int> request_ranks;
+
+    const int STATE_REQ = 0x10000;
+    const int COEFF_REQ = 0x20000;
+
     for (int r=0; r<ctx.world_size; r++){
+        // make sure we did this correctly -- negligible cost
         assert(send_cursors[r] == send_displs[r] + send_counts[r]);
+
+    // these don't need sending or receiving
+        if (r==ctx.my_rank) continue; 
+        
+        if (send_counts[r] > 0){
+            request_ranks.push_back(r);
+        }
+
+        if (recv_counts[r] > 0){
+            MPI_Request req_state, req_dy;
+            MPI_Irecv(recv_state.data() + recv_displs[r], recv_counts[r], 
+                    get_mpi_type<ZBasisBST::state_t>(), r, STATE_REQ, 
+                    MPI_COMM_WORLD, &req_state); 
+            MPI_Irecv(recv_dy.data() + recv_displs[r], recv_counts[r], 
+                    get_mpi_type<coeff_t>(), r, COEFF_REQ, 
+                    MPI_COMM_WORLD, &req_dy); 
+
+            recv_reqs.emplace_back(req_state);
+            recv_reqs.emplace_back(req_dy);
+        }
+
+        if (send_counts[r] > 0){
+            MPI_Request req_state, req_dy;
+            MPI_Isend(send_state.data() + send_displs[r], send_counts[r],
+                    get_mpi_type<ZBasisBST::state_t>(), r, STATE_REQ, 
+                    MPI_COMM_WORLD, &req_state); 
+            MPI_Isend(send_dy.data() + send_displs[r], send_counts[r],
+                    get_mpi_type<coeff_t>(), r, COEFF_REQ, 
+                    MPI_COMM_WORLD, &req_dy);
+            send_reqs.emplace_back(req_state);
+            send_reqs.emplace_back(req_dy);
+        }
+        
     }
 
-    MPI_Request req_state, req_coeff;
-
-    MPI_Ialltoallv(
-        send_state.data(), send_counts_no_self.data(), send_displs.data(),
-        get_mpi_type<ZBasisBase::state_t>(),
-        recv_state.data(), recv_counts_no_self.data(), recv_displs.data(),
-        get_mpi_type<ZBasisBase::state_t>(),
-        MPI_COMM_WORLD, &req_state
-    );
-
-    MPI_Ialltoallv(
-        send_dy.data(), send_counts_no_self.data(), send_displs.data(),
-        get_mpi_type<coeff_t>(),
-        recv_dy.data(), recv_counts_no_self.data(), recv_displs.data(),
-        get_mpi_type<coeff_t>(),
-        MPI_COMM_WORLD, &req_coeff
-    );
+//    MPI_Request req_state, req_coeff;
+//
+//
+//    MPI_Ialltoallv(
+//        send_state.data(), send_counts_no_self.data(), send_displs.data(),
+//        get_mpi_type<ZBasisBase::state_t>(),
+//        recv_state.data(), recv_counts_no_self.data(), recv_displs.data(),
+//        get_mpi_type<ZBasisBase::state_t>(),
+//        MPI_COMM_WORLD, &req_state
+//    );
+//
+//    MPI_Ialltoallv(
+//        send_dy.data(), send_counts_no_self.data(), send_displs.data(),
+//        get_mpi_type<coeff_t>(),
+//        recv_dy.data(), recv_counts_no_self.data(), recv_displs.data(),
+//        get_mpi_type<coeff_t>(),
+//        MPI_COMM_WORLD, &req_coeff
+//    );
 
     assert(send_counts[ctx.my_rank] == recv_counts[ctx.my_rank]);
     const int loc_send_offset = send_displs[ctx.my_rank];
@@ -632,11 +670,25 @@ void MPILazyOpSum<coeff_t, B>::evaluate_add_off_diag_batched(const coeff_t* x, c
     }
     );
 
+    #ifdef SUBSPACE_ED_BENCHMARK_OPERATIONS
+        int num_send_neighbors = 0, num_recv_neighbors = 0;
+        for (int r = 0; r < ctx.world_size; r++) {
+            if (r != ctx.my_rank && send_counts[r] > 0) num_send_neighbors++;
+            if (r != ctx.my_rank && recv_counts[r] > 0) num_recv_neighbors++;
+        }
+        
+        if (ctx.my_rank == 0) {
+            std::cout << "Rank 0: " << num_send_neighbors << " send neighbors, "
+                      << num_recv_neighbors << " recv neighbors" << std::endl;
+        }
+    #endif
+
     // synchronise
     BENCH_TIMER_TIMEIT(remx_wait_timer,
-    MPI_Wait(&req_state, MPI_STATUS_IGNORE);
-    MPI_Wait(&req_coeff, MPI_STATUS_IGNORE);
+    MPI_Waitall(recv_reqs.size(), recv_reqs.data(), MPI_STATUSES_IGNORE);
+    MPI_Waitall(send_reqs.size(), send_reqs.data(), MPI_STATUSES_IGNORE);
     );
+    
 
     BENCH_TIMER_TIMEIT(rem_apply_timer,
     // Applying rank-local updates
