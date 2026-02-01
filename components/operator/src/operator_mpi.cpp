@@ -586,30 +586,17 @@ void MPILazyOpSum<coeff_t, B>::evaluate_add_off_diag_batched(const coeff_t* x, c
             ZBasisBase::state_t state = basis[il];
             auto sign = op.applyState(state);
             if (sign == 0) continue;
-
-            double dy = c*x[il]*sign;
             
             auto target_rank = ctx.rank_of_state(state);
-            if (target_rank == ctx.my_rank){
-               ZBasisBase::idx_t local_idx;     
-                ASSERT_STATE_FOUND("local",
-                    state,
-                    basis.search(state, local_idx)
-                    );
-                y[local_idx] += dy;
-            } else {
-                int pos = send_cursors[target_rank]++;
-                send_state[pos] = state;
-                send_dy[pos] = dy;
-            }
+            int pos = send_cursors[target_rank]++;
+            send_state[pos] = state;
+            send_dy[pos] = c*x[il]*sign;
         }
     }
     );
 
     for (int r=0; r<ctx.world_size; r++){
-        assert(
-                (r == ctx.my_rank) || 
-                (send_cursors[r] == send_displs[r] + send_counts[r]));
+        assert(send_cursors[r] == send_displs[r] + send_counts[r]);
     }
 
     MPI_Request req_state, req_coeff;
@@ -633,17 +620,17 @@ void MPILazyOpSum<coeff_t, B>::evaluate_add_off_diag_batched(const coeff_t* x, c
     assert(send_counts[ctx.my_rank] == recv_counts[ctx.my_rank]);
     const int loc_send_offset = send_displs[ctx.my_rank];
 
-//    BENCH_TIMER_TIMEIT(loc_apply_timer,
-//    for (int i=loc_send_offset; 
-//            i<loc_send_offset+send_counts[ctx.my_rank]; i++){
-//        ZBasisBase::idx_t local_idx;
-//        ASSERT_STATE_FOUND("local",
-//            send_state[i],
-//            basis.search(send_state[i], local_idx)
-//            );
-//        y[local_idx] += send_dy[i];
-//    }
-//    );
+    BENCH_TIMER_TIMEIT(loc_apply_timer,
+    for (int i=loc_send_offset; 
+            i<loc_send_offset+send_counts[ctx.my_rank]; i++){
+        ZBasisBase::idx_t local_idx;
+        ASSERT_STATE_FOUND("local",
+            send_state[i],
+            basis.search(send_state[i], local_idx)
+            );
+        y[local_idx] += send_dy[i];
+    }
+    );
 
     // synchronise
     BENCH_TIMER_TIMEIT(remx_wait_timer,
