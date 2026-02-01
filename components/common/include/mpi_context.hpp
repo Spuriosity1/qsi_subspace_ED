@@ -43,7 +43,11 @@ struct MPIContext {
         idx_partition.resize(world_size+1);
 
         char fname[100];
-        snprintf(fname, 100, "log_r%d.log", my_rank);
+        time_t now = time(nullptr);
+        struct tm* utc_time = gmtime(&now);
+        char timestamp[20];
+        strftime(timestamp, sizeof(timestamp), "%Y%m%dT%H%M%SZ", utc_time);
+        snprintf(fname, 100, "log_r%d_%s.log", my_rank, timestamp);
         log.open(fname);
     }
 
@@ -78,8 +82,6 @@ struct MPIContext {
         return *this;
     }
 
-    std::ofstream log;
-
 
     int world_size;
     int my_rank;
@@ -87,6 +89,7 @@ struct MPIContext {
     // sorted parallel arrays, both of length num_nodes + 1
     // rank 'n' handles states in interval [ state_partition[n], state_partition[n+1])
     std::vector<idx_t> idx_partition;
+    std::ofstream log;
 
     // Partitions the indices, roughly equal number on each rank
     void partition_indices_equal(int64_t n_basis_states){
