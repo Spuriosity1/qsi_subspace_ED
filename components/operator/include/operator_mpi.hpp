@@ -52,7 +52,9 @@ protected:
 	const SymbolicOpSum<coeff_t> ops;
     MPIctx& ctx;
 
-    // metadata
+    // metadata and buffers for MPI comms
+    std::unordered_map<ZBasisBase::state_t, coeff_t> local_accumulator;
+
     std::vector<coeff_t> send_dy; // contiguous buffer
     std::vector<ZBasisBST::state_t> send_state; 
     std::vector<int> send_displs;

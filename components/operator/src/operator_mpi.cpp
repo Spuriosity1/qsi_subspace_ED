@@ -733,12 +733,13 @@ void MPILazyOpSum<coeff_t, B>::evaluate_add_off_diag_batched(const coeff_t* x, c
     assert(send_dy.size() != 0);
     assert(send_state.size() == send_dy.size());
 
+    Timer dict_fill_timer("[initial dict populate]", ctx.my_rank);
     Timer initial_apply_timer("[initial apply]", ctx.my_rank);
     Timer loc_apply_timer("[local apply]", ctx.my_rank);
     Timer remx_wait_timer("[waiting for data]", ctx.my_rank);
     Timer rem_apply_timer("[remote apply]", ctx.my_rank);
 
-    std::vector<const Timer*> timers{&initial_apply_timer, 
+    std::vector<const Timer*> timers{&dict_fill_timer, &initial_apply_timer, 
         &loc_apply_timer, &remx_wait_timer, &rem_apply_timer};
 
     
@@ -756,26 +757,34 @@ void MPILazyOpSum<coeff_t, B>::evaluate_add_off_diag_batched(const coeff_t* x, c
     std::vector<int> recv_counts_no_self = recv_counts;
     send_counts_no_self[ctx.my_rank] = 0; // handle this separately
     recv_counts_no_self[ctx.my_rank] = 0; // handle this separately
+    
+
 
     // apply to all local basis vectors, il = local state index
-    BENCH_TIMER_TIMEIT(initial_apply_timer,
+    BENCH_TIMER_TIMEIT(dict_fill_timer,
     for (ZBasisBase::idx_t il = 0; il < ctx.local_block_size(); ++il) {
         for ( const auto& [c, op] : ops.off_diag_terms ){
             ZBasisBase::state_t state = basis[il];
             auto sign = op.applyState(state);
             if (sign == 0) continue;
             
-            auto target_rank = ctx.rank_of_state(state);
-            int pos = send_cursors[target_rank]++;
-            send_state[pos] = state;
-            send_dy[pos] = c*x[il]*sign;
+            local_accumulator[state] += c*x[il]*sign;
         }
     }
+    )
+
+    BENCH_TIMER_TIMEIT(initial_apply_timer,
+    for (auto& [psi, c] : local_accumulator){
+        auto target_rank = ctx.rank_of_state(psi);
+        int pos = send_cursors[target_rank]++;
+//            send_state[pos] = state;
+//            send_dy[pos] = c*x[il]*sign;
+        send_state[pos] = psi;
+        send_dy[pos] = c;
+    }
+    std::cout<<"Naive "<<send_state.size()<<" -> "<<local_accumulator.size()<<"\n";
     );
 
-    for (int r=0; r<ctx.world_size; r++){
-        assert(send_cursors[r] == send_displs[r] + send_counts[r]);
-    }
 
     MPI_Request req_state, req_coeff;
 
@@ -798,6 +807,8 @@ void MPILazyOpSum<coeff_t, B>::evaluate_add_off_diag_batched(const coeff_t* x, c
     assert(send_counts[ctx.my_rank] == recv_counts[ctx.my_rank]);
     const int loc_send_offset = send_displs[ctx.my_rank];
 
+
+    // Apply local updates first 
     BENCH_TIMER_TIMEIT(loc_apply_timer,
     for (int i=loc_send_offset; 
             i<loc_send_offset+send_counts[ctx.my_rank]; i++){
@@ -858,16 +869,22 @@ void MPILazyOpSum<coeff_t, basis_t>::allocate_temporaries() {
     std::fill(send_displs.begin(), send_displs.end(), 0);
     std::fill(recv_displs.begin(), recv_displs.end(), 0);
 
-    // TODO: consider a once-over compression step
+    // batch by state
     for (ZBasisBase::idx_t il = 0; il < ctx.local_block_size(); ++il) {
         for (auto& [c, op] : ops.off_diag_terms ) {
             ZBasisBase::state_t state = basis[il];
             auto sign = op.applyState(state);
             if (sign == 0) continue;
-            
-            auto target_rank = ctx.rank_of_state(state);
-            send_counts[target_rank]++;
+            local_accumulator[state] = 0;
+//            auto target_rank = ctx.rank_of_state(state);
+//            send_counts[target_rank]++;
         }
+    }
+
+    // count
+    for (const auto& [state, _] : local_accumulator){
+        auto target_rank = ctx.rank_of_state(state);
+        send_counts[target_rank]++;
     }
 
     MPI_Alltoall(send_counts.data(), 1, MPI_INT, recv_counts.data(), 1, MPI_INT, MPI_COMM_WORLD);
@@ -899,6 +916,7 @@ void MPILazyOpSum<coeff_t, basis_t>::allocate_temporaries() {
     for (auto d : send_displs) std::cout << d <<", ";
     std::cout<<std::endl;
 #endif
+
 
 
 }
