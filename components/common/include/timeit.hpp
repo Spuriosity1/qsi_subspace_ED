@@ -77,7 +77,7 @@ class Timer {
             return diff;
         }
 
-        void print_summary() const{
+        void print_summary(std::ostream& o) const{
             double acc = 0;
             double acc2 = 0;
             double min = std::numeric_limits<double>::max();
@@ -90,7 +90,7 @@ class Timer {
             }
             double avg = acc / times.size();
             if (times.size() > 1){
-            std::cout << name <<"\n"
+            o << name <<"\n"
                 <<"--------------------------------\n"
                 <<"\t"<<times.size()<<" samples\n"
                 <<"\tavg time " << avg <<"ms"
@@ -99,7 +99,7 @@ class Timer {
                 <<"\tmax time " << max <<"ms\n"
                 <<"--------------------------------\n";
             } else {
-                std::cout << name <<"\t "<<avg<<"ms\n";
+                o << name <<"\t "<<avg<<"ms\n";
             }
         }
 };

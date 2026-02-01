@@ -537,7 +537,7 @@ void MPILazyOpSum<coeff_t, B>::evaluate_add_off_diag_pipeline(const coeff_t* x, 
 // print diagnostics
 #ifdef SUBSPACE_ED_BENCHMARK_OPERATIONS
         for (auto t : timers){
-            t->print_summary();
+            t->print_summary(ctx.log);
         }
 #endif
 
@@ -706,7 +706,7 @@ void MPILazyOpSum<coeff_t, B>::evaluate_add_off_diag_batched(const coeff_t* x, c
 
 #ifdef SUBSPACE_ED_BENCHMARK_OPERATIONS
     for (auto t : timers){
-        t->print_summary();
+        t->print_summary(ctx.log);
     }
 #endif
 
