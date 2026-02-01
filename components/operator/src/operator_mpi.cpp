@@ -677,10 +677,9 @@ void MPILazyOpSum<coeff_t, B>::evaluate_add_off_diag_batched(const coeff_t* x, c
             if (r != ctx.my_rank && recv_counts[r] > 0) num_recv_neighbors++;
         }
         
-        if (ctx.my_rank == 0) {
-            std::cout << "Rank 0: " << num_send_neighbors << " send neighbors, "
-                      << num_recv_neighbors << " recv neighbors" << std::endl;
-        }
+        std::cout << "[ rank "<<ctx.my_rank<<" ] " << num_send_neighbors << " send neighbors, "
+                  << num_recv_neighbors << " recv neighbors" << std::endl;
+        
     #endif
 
     // synchronise
