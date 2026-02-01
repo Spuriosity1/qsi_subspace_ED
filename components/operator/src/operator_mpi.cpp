@@ -23,10 +23,10 @@
 
 #ifdef DEBUG
 #define DEBUG_PRINT_VEC(msg, op_index, vector, ctx) \
-            std::cout << msg<<" (op "<<op_index<<") [node "<<ctx.my_rank<< "]\n";\
+            ctx.log << msg<<" (op "<<op_index<<") [node "<<ctx.my_rank<< "]\n";\
             for (int r=0; r<ctx.world_size; r++){\
-                if (r == ctx.my_rank) std::cout<<"*";\
-                std::cout << "\tvector["<<r<<"] -> "<<curr_op_comm.send_states[r].size() <<"\n";\
+                if (r == ctx.my_rank) ctx.log<<"*";\
+                ctx.log << "\tvector["<<r<<"] -> "<<curr_op_comm.send_states[r].size() <<"\n";\
             }
 #else
 #define DEBUG_PRINT_VEC(msg, op_index, vector, ctx)
@@ -95,7 +95,6 @@ inline std::vector<Uint128> read_basis_hdf5(
             };
 
             // build the index partition
-            ctx.partition_indices_equal(total_rows);
             ctx.partition_basis(total_rows, read_state);
         }
     
@@ -180,9 +179,8 @@ inline std::vector<Uint128> read_basis_hdf5(
         }
 
         // Print diagnostics
-        if(ctx.my_rank == 0){
-            std::cout<<"[Main] Loaded basis chunk.\n"<<ctx;
-        }
+        ctx.log<<"[Main] Loaded basis chunk.\n"<<ctx;
+        
 		
 		// Clean up
 		H5Sclose(dataspace_id);
@@ -677,7 +675,7 @@ void MPILazyOpSum<coeff_t, B>::evaluate_add_off_diag_batched(const coeff_t* x, c
             if (r != ctx.my_rank && recv_counts[r] > 0) num_recv_neighbors++;
         }
         
-        std::cout << "[ rank "<<ctx.my_rank<<" ] " << num_send_neighbors << " send neighbors, "
+        ctx.log << "[ rank "<<ctx.my_rank<<" ] " << num_send_neighbors << " send neighbors, "
                   << num_recv_neighbors << " recv neighbors" << std::endl;
         
     #endif
@@ -764,13 +762,13 @@ void MPILazyOpSum<coeff_t, basis_t>::allocate_temporaries() {
 
 
 #ifdef DEBUG
-    std::cout <<"[alloc "<<ctx.my_rank<<"] Send Sizes: ";
-    for (auto d : send_counts) std::cout << d <<", ";
-    std::cout<<"\n\ttotal:"<<total_send<<std::endl;
+    ctx.log <<"[alloc] Send Sizes: ";
+    for (auto d : send_counts) ctx.log << d <<", ";
+    ctx.log<<"\n\ttotal:"<<total_send<<std::endl;
 
-    std::cout <<"[alloc "<<ctx.my_rank<<"] Send Displacements: ";
-    for (auto d : send_displs) std::cout << d <<", ";
-    std::cout<<std::endl;
+    ctx.log <<"[alloc] Send Displacements: ";
+    for (auto d : send_displs) ctx.log << d <<", ";
+    ctx.log<<std::endl;
 #endif
 
 

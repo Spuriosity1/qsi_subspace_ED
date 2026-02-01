@@ -1,7 +1,9 @@
 #pragma once
+#include <cstdio>
 #include <functional>
 #include <mpi.h>
 #include <complex>
+#include <fstream>
 #include <random>
 #include <unordered_set>
 #include "bittools.hpp"
@@ -35,32 +37,69 @@ template<> inline MPI_Datatype get_mpi_type<Uint128>() {
 
 template <typename idx_t>
 struct MPIContext {
-    MPIContext(){
+    MPIContext() {
         MPI_Comm_size(MPI_COMM_WORLD, &world_size);
         MPI_Comm_rank(MPI_COMM_WORLD, &my_rank);
         idx_partition.resize(world_size+1);
+
+        char fname[100];
+        snprintf(fname, 100, "log_r%d.log", my_rank);
+        log.open(fname);
     }
+
+    // destructor
+    ~MPIContext(){
+        log.close();
+    }
+
+    // Copy constructor
+    MPIContext(const MPIContext&) = delete;
+    
+    // Copy assignment operator
+    MPIContext& operator=(const MPIContext&) = delete;
+    
+    // Move constructor
+    MPIContext(MPIContext&& other) noexcept
+        : world_size(other.world_size),
+          my_rank(other.my_rank),
+          idx_partition(std::move(other.idx_partition)),
+          log(std::move(other.log)) {
+    }
+    
+    // Move assignment operator
+    MPIContext& operator=(MPIContext&& other) noexcept {
+        if (this != &other) {
+            log.close();
+            world_size = other.world_size;
+            my_rank = other.my_rank;
+            idx_partition = std::move(other.idx_partition);
+            log = std::move(other.log);
+        }
+        return *this;
+    }
+
+    std::ofstream log;
+
 
     int world_size;
     int my_rank;
-    
+
     // sorted parallel arrays, both of length num_nodes + 1
     // rank 'n' handles states in interval [ state_partition[n], state_partition[n+1])
     std::vector<idx_t> idx_partition;
 
     // Partitions the indices, roughly equal number on each rank
     void partition_indices_equal(int64_t n_basis_states){
-        if (this->my_rank == 0){
-            std::cout<<"Building index partion with "<<n_basis_states<<" states\n";
-            if (this->world_size > n_basis_states) {
-                throw std::runtime_error("Too many nodes for too small a basis!");
-            }
+        log<<"Building index partion with "<<n_basis_states<<" states\n";
+        if (this->world_size > n_basis_states) {
+            throw std::runtime_error("Too many nodes for too small a basis!");
         }
+        
 
         int64_t n_per_rank = n_basis_states / this->world_size;
-        for (int i=0; i<this->world_size; i++){
-            this->idx_partition[i] = i * n_per_rank;
-            if(this->idx_partition[i] < 0){
+        for (int r=0; r<this->world_size; r++){
+            this->idx_partition[r] = r * n_per_rank;
+            if(this->idx_partition[r] < 0){
                 throw std::logic_error("integer underflow in idx_partition");
             }
         }
@@ -85,6 +124,7 @@ struct MPIContext {
 
     // returns the node on which a specified global index can be found
     size_t rank_of_idx(idx_t J) const;
+
 
 };
 
@@ -126,7 +166,6 @@ struct SparseMPIContext : public MPIContext<idx_t> {
     void partition_basis(int64_t n_basis_states, 
             const std::function<state_t(uint64_t)>& read_state);
 
-    std::vector<state_t> state_partition;
 
     uint64_t hash_state(const state_t& psi) const{
         [[ likely ]] if (n_bits < 64) {
@@ -144,7 +183,11 @@ struct SparseMPIContext : public MPIContext<idx_t> {
         }
     }
 
+
+    std::vector<state_t> state_partition;
+
 private:
+    // sets bit_mask and n_bits to be the correct values
     void estimate_optimal_mask(int64_t n_basis_states, 
         const std::function<state_t(uint64_t)>& read_state);
 
@@ -196,8 +239,7 @@ void SparseMPIContext< idx_t>::estimate_optimal_mask(int64_t n_basis_states,
     } 
 
 
-    std::cout<<"[ rank "<<this->my_rank<<" ] Bit mask " << bit_mask << 
-        " (top "<< n_bits <<" bits\n";
+    this->log<<"Bit mask: " << bit_mask << " (top "<< n_bits <<" bits\n";
 }
 
 
@@ -206,6 +248,8 @@ void SparseMPIContext< idx_t>::partition_basis(int64_t n_basis_states,
         const std::function<state_t(uint64_t)>& read_state)
 {
     assert(n_basis_states > this->world_size);
+
+    if (this->my_rank == 0){
 
     estimate_optimal_mask(n_basis_states, read_state);
     // the job: find terminals that correspond to these 
@@ -217,8 +261,10 @@ void SparseMPIContext< idx_t>::partition_basis(int64_t n_basis_states,
     // populate idx_partition with a guess
     this->partition_indices_equal(n_basis_states);
   // Binary search for mask boundaries
-    for (int n = 1; n < this->world_size; n++) {
-        int64_t initial_guess = this->idx_partition[n];
+    for (int r = 1; r < this->world_size; r++) {
+        this->log << " Finding boundaries: rank "<<r<<"\n";
+
+        int64_t initial_guess = this->idx_partition[r];
         state_t target_mask = read_state(initial_guess) & bit_mask;
         
         // Binary search for the first index where (state & mask) == target_mask
@@ -245,32 +291,26 @@ void SparseMPIContext< idx_t>::partition_basis(int64_t n_basis_states,
             }
         }
         
-        this->idx_partition[n] = result;
-        this->state_partition[n] = read_state(result);
+        this->idx_partition[r] = result;
+        this->state_partition[r] = read_state(result);
     }
     
     this->state_partition[0] = read_state(0);
     this->state_partition[this->world_size] = ~Uint128(0);
 
+    } // end if statement: master node work
+
+    // share state_partition, idx_partition
+
+    MPI_Bcast(&n_bits, 1, get_mpi_type<int>(), 0, MPI_COMM_WORLD);
+    MPI_Bcast(&bit_mask, 1, get_mpi_type<Uint128>(), 0, MPI_COMM_WORLD);
+    MPI_Bcast(state_partition.data(), state_partition.size(), get_mpi_type<Uint128>(), 0, MPI_COMM_WORLD);
+    MPI_Bcast(this->idx_partition.data(), this->idx_partition.size(), get_mpi_type<idx_t>(),
+            0, MPI_COMM_WORLD);
 
 
-//    // tweak: shift idx_partition by binary search until we hit a mask boundary
-//    for (int n=1; n<this->world_size; n++){
-//        auto& J = this->idx_partition[n];
-//
-//        state_t lo = read_state(J-1);
-//        state_t hi = read_state(J);
-//        while( (lo&bit_mask) == (hi&bit_mask) ){
-//            J--;
-//            std::swap(lo, hi);
-//            lo = read_state(J-1);
-//        }
-//        this->state_partition[n] = hi;
-//    }
-//    this->state_partition[0] = read_state(0);
-//    // one past the end
-//    // !!! will break if we ever see 0xffffffffffffffffffffffffffffffff
-//    this->state_partition[this->world_size] = ~Uint128(0);
+
+
 }
 
 
@@ -302,7 +342,7 @@ auto& operator<<(std::ostream& os, const SparseMPIContext< idx_t>& ctx){
     os<<"Partition scheme:\n index\t state\n";
     for (size_t i=0; i<ctx.idx_partition.size(); i++){
         os<<ctx.idx_partition[i]<<"\t";
-        printHex(std::cout, ctx.state_partition[i])<<"\n";
+        printHex(os, ctx.state_partition[i])<<"\n";
     }
     return os;
 }

@@ -114,7 +114,7 @@ int main(int argc, char** argv) {
     }
 
     using coeff_t = double;
-    RealApplyFn evadd = [M, ctx, all_sizes, all_displs](const coeff_t* x_local, coeff_t* y_local){
+    RealApplyFn evadd = [&M, &ctx, all_sizes, all_displs](const coeff_t* x_local, coeff_t* y_local){
         // For testing: gather x to all ranks, apply full matrix, extract local portion
         // In production: use distributed matrix storage
         auto dim = M.cols();
