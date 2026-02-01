@@ -50,6 +50,8 @@
 #define BENCH_PRINT_VECTOR(msg, v)
 #endif
 
+#include <sstream>
+
 class Timer {
     using Units=std::milli;
     std::chrono::time_point<std::chrono::high_resolution_clock> tik_time;
@@ -87,6 +89,7 @@ class Timer {
                 max = std::max(max, t);
             }
             double avg = acc / times.size();
+            if (times.size() > 1){
             std::cout << name <<"\n"
                 <<"--------------------------------\n"
                 <<"\t"<<times.size()<<" samples\n"
@@ -95,5 +98,8 @@ class Timer {
                 <<"\tmin time " << min <<"ms\n"
                 <<"\tmax time " << max <<"ms\n"
                 <<"--------------------------------\n";
+            } else {
+                std::cout << name <<"\t "<<avg<<"ms\n";
+            }
         }
 };

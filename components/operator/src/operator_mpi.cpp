@@ -555,12 +555,12 @@ void MPILazyOpSum<coeff_t, B>::evaluate_add_off_diag_batched(const coeff_t* x, c
     assert(send_state.size() == send_dy.size());
 
     Timer initial_apply_timer("[initial apply]", ctx.my_rank);
-    Timer sort_vectors_timer("[sort]", ctx.my_rank);
+//    Timer sort_vectors_timer("[sort]", ctx.my_rank);
     Timer loc_apply_timer("[local apply]", ctx.my_rank);
     Timer remx_wait_timer("[waiting for data]", ctx.my_rank);
     Timer rem_apply_timer("[remote apply]", ctx.my_rank);
 
-    std::vector<const Timer*> timers{&initial_apply_timer, &sort_vectors_timer,
+    std::vector<const Timer*> timers{&initial_apply_timer,
         &loc_apply_timer, &remx_wait_timer, &rem_apply_timer};
 
     
@@ -586,49 +586,30 @@ void MPILazyOpSum<coeff_t, B>::evaluate_add_off_diag_batched(const coeff_t* x, c
             ZBasisBase::state_t state = basis[il];
             auto sign = op.applyState(state);
             if (sign == 0) continue;
+
+            double dy = c*x[il]*sign;
             
             auto target_rank = ctx.rank_of_state(state);
-            int pos = send_cursors[target_rank]++;
-            send_state[pos] = state;
-            send_dy[pos] = c*x[il]*sign;
+            if (target_rank == ctx.my_rank){
+               ZBasisBase::idx_t local_idx;     
+                ASSERT_STATE_FOUND("local",
+                    state,
+                    basis.search(state, local_idx)
+                    );
+                y[local_idx] += dy;
+            } else {
+                int pos = send_cursors[target_rank]++;
+                send_state[pos] = state;
+                send_dy[pos] = dy;
+            }
         }
     }
     );
 
-    // Sort 
-    BENCH_TIMER_TIMEIT(sort_vectors_timer,
-
-        // Sort both arrays by state to improve cache locality during basis.search()
-        size_t total_count = send_state.size(); // or send_cursors.back() if not using full buffer
-        std::vector<size_t> perm(total_count);
-        std::iota(perm.begin(), perm.end(), 0);
-
-        std::sort(perm.begin(), perm.end(),
-            [&](size_t i, size_t j) {
-            return send_state[i] < send_state[j];
-            });
-
-        // Apply permutation to both arrays
-        std::vector<bool> done(total_count, false);
-        for (size_t i = 0; i < total_count; ++i) {
-        if (done[i]) continue;
-
-        done[i] = true;
-        size_t prev_j = i;
-        size_t j = perm[i];
-
-        while (i != j) {
-            std::swap(send_state[prev_j], send_state[j]);
-            std::swap(send_dy[prev_j], send_dy[j]);
-            done[j] = true;
-            prev_j = j;
-            j = perm[j];
-        }
-        }
-        );
-
     for (int r=0; r<ctx.world_size; r++){
-        assert(send_cursors[r] == send_displs[r] + send_counts[r]);
+        assert(
+                (r == ctx.my_rank) || 
+                (send_cursors[r] == send_displs[r] + send_counts[r]));
     }
 
     MPI_Request req_state, req_coeff;
@@ -652,17 +633,17 @@ void MPILazyOpSum<coeff_t, B>::evaluate_add_off_diag_batched(const coeff_t* x, c
     assert(send_counts[ctx.my_rank] == recv_counts[ctx.my_rank]);
     const int loc_send_offset = send_displs[ctx.my_rank];
 
-    BENCH_TIMER_TIMEIT(loc_apply_timer,
-    for (int i=loc_send_offset; 
-            i<loc_send_offset+send_counts[ctx.my_rank]; i++){
-        ZBasisBase::idx_t local_idx;
-        ASSERT_STATE_FOUND("local",
-            send_state[i],
-            basis.search(send_state[i], local_idx)
-            );
-        y[local_idx] += send_dy[i];
-    }
-    );
+//    BENCH_TIMER_TIMEIT(loc_apply_timer,
+//    for (int i=loc_send_offset; 
+//            i<loc_send_offset+send_counts[ctx.my_rank]; i++){
+//        ZBasisBase::idx_t local_idx;
+//        ASSERT_STATE_FOUND("local",
+//            send_state[i],
+//            basis.search(send_state[i], local_idx)
+//            );
+//        y[local_idx] += send_dy[i];
+//    }
+//    );
 
     // synchronise
     BENCH_TIMER_TIMEIT(remx_wait_timer,
