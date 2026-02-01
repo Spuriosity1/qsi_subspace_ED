@@ -782,7 +782,8 @@ void MPILazyOpSum<coeff_t, B>::evaluate_add_off_diag_batched(const coeff_t* x, c
         send_state[pos] = psi;
         send_dy[pos] = c;
     }
-    std::cout<<"Naive "<<send_state.size()<<" -> "<<local_accumulator.size()<<"\n";
+    std::cout<<"Naive "<<ctx.local_block_size() * ops.off_diag_terms.size()<<
+    " -> "<<local_accumulator.size()<<"\n";
     );
 
 
