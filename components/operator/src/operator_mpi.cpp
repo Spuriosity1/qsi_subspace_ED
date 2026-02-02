@@ -74,7 +74,7 @@ inline std::vector<Uint128> read_basis_hdf5(
         }
 
 
-        // do some random access to figure out the terminal states
+        // calculate the index partition in an efficient manner
         {     
             // Each rank reads its boundary states directly from file
             auto read_state = [&](uint64_t idx) {
@@ -94,8 +94,9 @@ inline std::vector<Uint128> read_basis_hdf5(
                 return val;
             };
 
-            // build the index partition
-            ctx.partition_basis(total_rows, read_state);
+//            ctx.estimate_optimal_mask(total_rows, read_state, 4);
+            ctx.partition_indices_equal(total_rows);
+            ctx.populate_state_terminals(total_rows, read_state);
         }
     
         
@@ -138,48 +139,49 @@ inline std::vector<Uint128> read_basis_hdf5(
             if (status < 0) throw std::runtime_error("read_basis_hdf5: Failed to read local chunk");
         }
 
-        {
-            // populate mpi_context's buffer 
-            // TODO move this logic inside the operator class
-            std::unordered_set<uint64_t> hashes_seen_here;
-            for (hsize_t j=0; j<local_count; j++){
-                hashes_seen_here.insert(ctx.hash_state(result[j]));
-            }
-
-            std::vector<uint64_t> hashes_seen_here_v(hashes_seen_here.begin(),
-                    hashes_seen_here.end());
-
-            // MPI exchante number of unique hashes
-            std::vector<int> hash_counts(ctx.world_size);
-            int my_hash_count = hashes_seen_here.size();
-
-            MPI_Allgather(&my_hash_count, 1, get_mpi_type<int>(),
-                    hash_counts.data(), 1, get_mpi_type<int>(), MPI_COMM_WORLD);
-
-            auto g_total_unique_hashes = std::accumulate(
-                    hash_counts.begin(), hash_counts.end(),0);
-
-            std::vector<int> hash_displs(ctx.world_size);
-            hash_displs[0] = 0;
-            for (int i=1; i<ctx.world_size; i++){
-                hash_displs[i] = hash_displs[i-1] + hash_counts[i-1];
-            }
-
-            std::vector<uint64_t> g_hashes(g_total_unique_hashes);
-            
-            MPI_Allgatherv(
-                    hashes_seen_here_v.data(), hashes_seen_here.size(), get_mpi_type<uint64_t>(),
-                    g_hashes.data(), hash_counts.data(), hash_displs.data(), get_mpi_type<uint64_t>(), MPI_COMM_WORLD);
-
-            for (int r=0; r<ctx.world_size; r++){
-                ctx.insert_hashes(g_hashes, hash_displs[r], hash_counts[r], r);
-            }
-
-
-        }
+//        {
+//            // populate mpi_context's buffer 
+//            // TODO move this logic inside the operator class
+//            std::unordered_set<uint64_t> hashes_seen_here;
+//            for (hsize_t j=0; j<local_count; j++){
+//                hashes_seen_here.insert(ctx.hash_state(result[j]));
+//            }
+//
+//            std::vector<uint64_t> hashes_seen_here_v(hashes_seen_here.begin(),
+//                    hashes_seen_here.end());
+//
+//            // MPI exchange number of unique hashes
+//            std::vector<int> hash_counts(ctx.world_size);
+//            int my_hash_count = hashes_seen_here.size();
+//
+//            MPI_Allgather(&my_hash_count, 1, get_mpi_type<int>(),
+//                    hash_counts.data(), 1, get_mpi_type<int>(), MPI_COMM_WORLD);
+//
+//            auto g_total_unique_hashes = std::accumulate(
+//                    hash_counts.begin(), hash_counts.end(),0);
+//
+//            std::vector<int> hash_displs(ctx.world_size);
+//            hash_displs[0] = 0;
+//            for (int i=1; i<ctx.world_size; i++){
+//                hash_displs[i] = hash_displs[i-1] + hash_counts[i-1];
+//            }
+//
+//            std::vector<uint64_t> g_hashes(g_total_unique_hashes);
+//            
+//            MPI_Allgatherv(
+//                    hashes_seen_here_v.data(), hashes_seen_here.size(), get_mpi_type<uint64_t>(),
+//                    g_hashes.data(), hash_counts.data(), hash_displs.data(), get_mpi_type<uint64_t>(), MPI_COMM_WORLD);
+//
+////            for (int r=0; r<ctx.world_size; r++){
+////                ctx.insert_hashes(g_hashes, hash_displs[r], hash_counts[r], r);
+////            }
+//        }
 
         // Print diagnostics
-        ctx.log<<"[Main] Loaded basis chunk.\n"<<ctx;
+        ctx.log<<"Loaded basis chunk.\n"<<ctx;
+        if (ctx.my_rank == 0){
+            std::cout<<"[Main] "<<ctx;
+        }
         
 		
 		// Clean up
@@ -714,6 +716,57 @@ void MPILazyOpSum<coeff_t, B>::evaluate_add_off_diag_batched(const coeff_t* x, c
 
 
 template <RealOrCplx coeff_t, Basis basis_t>
+void MPILazyOpSum<coeff_t, basis_t>::rebalance_work(std::vector<int>& curr_work){
+
+    int target_work = std::accumulate(curr_work.begin(), curr_work.end(),0)
+        /ctx.world_size;
+
+    // Track what each rank steals from others and gives to others
+    // steals_from[r] = vector of (source_rank, amount) pairs
+    // gives_to[r] = vector of (dest_rank, amount) pairs
+    std::vector<std::vector<std::pair<int, int>>> steals_from(ctx.world_size);
+    std::vector<std::vector<std::pair<int, int>>> gives_to(ctx.world_size);
+    
+    int curr_r = 0;
+    while (curr_r < ctx.world_size - 1) {
+        if (curr_work[curr_r] < target_work) {
+            // Current node is too light, steal from rank r+1
+            int stolen = target_work - curr_work[curr_r];
+            steals_from[curr_r].push_back({curr_r + 1, stolen});
+            gives_to[curr_r + 1].push_back({curr_r, stolen});
+            curr_work[curr_r] += stolen;
+            curr_work[curr_r + 1] -= stolen;
+        } else if (curr_work[curr_r] > target_work) {
+            // Current node is too heavy, donate to the next rank
+            int given = curr_work[curr_r] - target_work;
+            gives_to[curr_r].push_back({curr_r + 1, given});
+            steals_from[curr_r + 1].push_back({curr_r, given});
+            curr_work[curr_r] -= given;
+            curr_work[curr_r + 1] += given;
+        } else {
+            curr_r++;
+        }
+    }
+    
+    // Execute the redistribution
+    // First, receive data that this rank is stealing from others
+    for (const auto& [source_rank, amount] : steals_from[ctx.my_rank]) {
+        // MPI_Recv or equivalent communication from source_rank
+        // receive 'amount' work items from source_rank
+    }
+    
+    // Then, send data that this rank is giving to others
+    for (const auto& [dest_rank, amount] : gives_to[ctx.my_rank]) {
+        // MPI_Send or equivalent communication to dest_rank
+        // send 'amount' work items to dest_rank
+    }
+    
+    // Update the cost_per_rank with the new distribution
+}
+
+
+
+template <RealOrCplx coeff_t, Basis basis_t>
 void MPILazyOpSum<coeff_t, basis_t>::allocate_temporaries() {
     // runs through the current local basis applying op to everything.
     // We cound how many we want to send to each rank, then exchange synchronously.
@@ -729,7 +782,6 @@ void MPILazyOpSum<coeff_t, basis_t>::allocate_temporaries() {
     std::fill(send_displs.begin(), send_displs.end(), 0);
     std::fill(recv_displs.begin(), recv_displs.end(), 0);
 
-    // TODO: consider a once-over compression step
     for (ZBasisBase::idx_t il = 0; il < ctx.local_block_size(); ++il) {
         for (auto& [c, op] : ops.off_diag_terms ) {
             ZBasisBase::state_t state = basis[il];
@@ -742,6 +794,12 @@ void MPILazyOpSum<coeff_t, basis_t>::allocate_temporaries() {
     }
 
     MPI_Alltoall(send_counts.data(), 1, MPI_INT, recv_counts.data(), 1, MPI_INT, MPI_COMM_WORLD);
+
+    // rebalance the load
+//    rebalance_work(send_counts);
+
+
+
 
     for (int r=1; r<ctx.world_size; r++){
         send_displs[r] = send_counts[r-1] + send_displs[r-1];
@@ -761,7 +819,8 @@ void MPILazyOpSum<coeff_t, basis_t>::allocate_temporaries() {
     recv_dy.resize(total_recv);
 
 
-#ifdef DEBUG
+
+    // logging
     ctx.log <<"[alloc] Send Sizes: ";
     for (auto d : send_counts) ctx.log << d <<", ";
     ctx.log<<"\n\ttotal:"<<total_send<<std::endl;
@@ -769,7 +828,6 @@ void MPILazyOpSum<coeff_t, basis_t>::allocate_temporaries() {
     ctx.log <<"[alloc] Send Displacements: ";
     for (auto d : send_displs) ctx.log << d <<", ";
     ctx.log<<std::endl;
-#endif
 
 
 }

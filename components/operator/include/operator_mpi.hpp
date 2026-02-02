@@ -71,6 +71,8 @@ private:
         std::vector<int>& bucket_starts
         ) const;
 
+    void rebalance_work(std::vector<int>& cost_per_rank);
+
 };
 
 

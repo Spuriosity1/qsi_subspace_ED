@@ -46,7 +46,7 @@ struct MPIContext {
         time_t now = time(nullptr);
         struct tm* utc_time = gmtime(&now);
         char timestamp[20];
-        strftime(timestamp, sizeof(timestamp), "%Y%m%dT%H%M%SZ", utc_time);
+        strftime(timestamp, sizeof(timestamp), "%Y-%m-%dT%H%M%SZ", utc_time);
         snprintf(fname, 100, "log_r%d_%s.log", my_rank, timestamp);
         log.open(fname);
     }
@@ -162,107 +162,137 @@ struct SparseMPIContext : public MPIContext<idx_t> {
     }
 
     // returns the node on which a specified psi can be found
-    size_t rank_of_state_slow(state_t psi) const;
-    size_t rank_of_state(state_t psi) const;
+    size_t rank_of_state_slow(const state_t& psi) const;
+    size_t rank_of_state(const state_t& psi) const;
     
 
-    void partition_basis(int64_t n_basis_states, 
+    void populate_state_terminals(int64_t n_basis_states, 
             const std::function<state_t(uint64_t)>& read_state);
 
 
-    uint64_t hash_state(const state_t& psi) const{
-        [[ likely ]] if (n_bits < 64) {
-            // can deduce partitioning from top half alone
-            return psi.uint64[1] & bit_mask.uint64[1];
-        } else {
-            return ((psi & bit_mask) >> (128-n_bits)).uint64[0];
-        }
-    }
-
-    void insert_hashes(const std::vector<uint64_t>&hash_buffer, 
-            int64_t displ, int64_t count, int rank){
-        for (int i=0; i<count; i++){
-            rank_index[hash_buffer[displ + i]] = rank;
-        }
-    }
+//    uint64_t hash_state(const state_t& psi) const{
+//        [[ likely ]] if (n_bits < 64) {
+//            // can deduce partitioning from top half alone
+//            return psi.uint64[1] & bit_mask.uint64[1];
+//        } else {
+//            return ((psi & bit_mask) >> (128-n_bits)).uint64[0];
+//        }
+//    }
+//
+//    void insert_hashes(const std::vector<uint64_t>&hash_buffer, 
+//            int64_t displ, int64_t count, int rank){
+//        for (int i=0; i<count; i++){
+//            rank_index[hash_buffer[displ + i]] = rank;
+//        }
+//    }
+//
+//    size_t n_hashes() const {
+//        return rank_index.size();
+//    }
 
 
     std::vector<state_t> state_partition;
 
-private:
+
     // sets bit_mask and n_bits to be the correct values
-    void estimate_optimal_mask(int64_t n_basis_states, 
-        const std::function<state_t(uint64_t)>& read_state);
+//    void estimate_optimal_mask(int64_t n_basis_states, 
+//        const std::function<state_t(uint64_t)>& read_state,
+//        int oversample=4);
 
-
-    std::unordered_map<uint64_t, int> rank_index;
-    Uint128 bit_mask;
+private:
+//    void make_bitmask_finer(){
+//        bit_mask >>= 1;
+//        n_bits++;
+//        bit_mask |= Uint128{1ull<<63,0};
+//    }
+//    std::unordered_map<uint64_t, int> rank_index;
+//    Uint128 bit_mask;
     int n_bits;
 };
 
 
+//template < typename idx_t>
+//void SparseMPIContext< idx_t>::estimate_optimal_mask(int64_t n_basis_states, 
+//        const std::function<state_t(uint64_t)>& read_state, int oversample)
+//{
+//
+//    if (this->my_rank == 0){
+//
+//    // Downsample a random subset of the states
+//    std::mt19937_64 rng(100);
+//    auto dist = std::uniform_int_distribution<int64_t>(0,n_basis_states-1);
+//
+//    const size_t sample_size = std::min(int64_t(1 << 16), n_basis_states);
+//    const size_t target_size = this->world_size*oversample;
+//
+//    std::vector<Uint128> basis_sample(sample_size);
+//
+//    for (size_t i=0; i<sample_size; i++){
+//        basis_sample[i] = read_state(dist(rng));
+//    }
+//
+//    std::unordered_set<Uint128> seen;
+//
+//    this->bit_mask = 0;
+//    n_bits = 0;
+//
+//    while(n_bits < 128 && seen.size() < target_size ){
+//        make_bitmask_finer();
+//        seen.clear();
+//
+//        for (const auto& b : basis_sample) {
+//            seen.insert(b & bit_mask);
+//        }
+//    }
+//
+//    if (n_bits >= 128){
+//        throw std::logic_error("Impossible mask state: indexing is broken"); 
+//        // early exit MUST have been triggered, or else all states are identical
+//    } 
+//
+//    } // end master node work
+//
+//    MPI_Bcast(&n_bits, 1, get_mpi_type<int>(), 0, MPI_COMM_WORLD);
+//    MPI_Bcast(&bit_mask, 1, get_mpi_type<Uint128>(), 0, MPI_COMM_WORLD);
+//
+//    this->log<<"Bit mask: " << bit_mask << " (top "<< n_bits <<" bits\n";
+//}
+
+
+/*
+/**
+ * Snaps the basis to nearest bitmask boundary
+ * i.e. such that state & bitmask is a good hash function
+ */
 template < typename idx_t>
-void SparseMPIContext< idx_t>::estimate_optimal_mask(int64_t n_basis_states, 
-        const std::function<state_t(uint64_t)>& read_state)
-{
-
-
-    // Downsample a random subset of the states
-    std::mt19937_64 rng(100);
-    auto dist = std::uniform_int_distribution<int64_t>(0,n_basis_states-1);
-
-    const size_t sample_size = std::min(int64_t(1 << 16), n_basis_states);
-    const size_t target_size = this->world_size*2;
-
-    std::vector<Uint128> basis_sample(sample_size);
-
-    for (size_t i=0; i<sample_size; i++){
-        basis_sample[i] = read_state(dist(rng));
-    }
-
-    std::unordered_set<Uint128> seen;
-
-    this->bit_mask = 0;
-    n_bits = 0;
-
-    while(n_bits < 128 && seen.size() < target_size ){
-        bit_mask >>= 1;
-        n_bits++;
-        bit_mask |= Uint128{1ull<<63,0};
-        seen.clear();
-
-        for (const auto& b : basis_sample) {
-            seen.insert(b & bit_mask);
-        }
-    }
-
-    if (n_bits >= 128){
-        throw std::logic_error("Impossible mask state: indexing is broken"); 
-        // early exit MUST have been triggered, or else all states are identical
-    } 
-
-
-    this->log<<"Bit mask: " << bit_mask << " (top "<< n_bits <<" bits\n";
-}
-
-
-template < typename idx_t>
-void SparseMPIContext< idx_t>::partition_basis(int64_t n_basis_states, 
+void SparseMPIContext< idx_t>::populate_state_terminals(int64_t n_basis_states, 
         const std::function<state_t(uint64_t)>& read_state)
 {
     assert(n_basis_states > this->world_size);
+    state_partition.resize(this->world_size+1);
 
     if (this->my_rank == 0){
+        for (int i=0; i<this->world_size; i++){
+            state_partition[i] = read_state(this->idx_partition[i]);
+        }
+        state_partition[this->world_size] = ~Uint128(0);
+    }
 
-    estimate_optimal_mask(n_basis_states, read_state);
+    // sync state
+    MPI_Bcast(state_partition.data(), state_partition.size(), get_mpi_type<Uint128>(), 0, MPI_COMM_WORLD);
+    MPI_Bcast(this->idx_partition.data(), this->idx_partition.size(), get_mpi_type<idx_t>(),
+            0, MPI_COMM_WORLD);
+}
+
+/*
+    if (this->my_rank == 0){
+
     // the job: find terminals that correspond to these 
     // rank 'n' handles states in interval [ state_partition[n], state_partition[n+1])
     //
     // idx_partition must be populated such that 
     // read_state(idx_partition[n]-1) & mask != read_state(idx_partition[n])
 
-    // populate idx_partition with a guess
-    this->partition_indices_equal(n_basis_states);
   // Binary search for mask boundaries
     for (int r = 1; r < this->world_size; r++) {
         this->log << " Finding boundaries: rank "<<r<<"\n";
@@ -305,22 +335,53 @@ void SparseMPIContext< idx_t>::partition_basis(int64_t n_basis_states,
 
     // share state_partition, idx_partition
 
-    MPI_Bcast(&n_bits, 1, get_mpi_type<int>(), 0, MPI_COMM_WORLD);
-    MPI_Bcast(&bit_mask, 1, get_mpi_type<Uint128>(), 0, MPI_COMM_WORLD);
     MPI_Bcast(state_partition.data(), state_partition.size(), get_mpi_type<Uint128>(), 0, MPI_COMM_WORLD);
     MPI_Bcast(this->idx_partition.data(), this->idx_partition.size(), get_mpi_type<idx_t>(),
             0, MPI_COMM_WORLD);
 
 
-
-
 }
+*/
 
 
 template <typename idx_t>
-size_t SparseMPIContext<idx_t>::rank_of_state(state_t psi) const {
-    return rank_index.at(hash_state(psi));
+size_t SparseMPIContext<idx_t>::rank_of_state(const state_t& psi) const {
+    // Binary search to find which rank owns this state
+    // We're looking for the largest n where state_partition[n] <= psi
+    // Equivalently: the smallest n where psi < state_partition[n+1]
+    
+    int left = 0;
+    int right = this->world_size - 1;
+    
+    while (left < right) {
+        int mid = left + (right - left) / 2;
+        
+        // Check if psi belongs to partition mid
+        if (psi < state_partition[mid + 1]) {
+            // psi might be in partition mid or earlier
+            right = mid;
+        } else {
+            // psi is definitely after partition mid
+            left = mid + 1;
+        }
+    }
+    
+    // At this point, left == right, and this is our answer
+    // Verify it's valid (optional defensive check)
+    if (left < this->world_size && psi < state_partition[left + 1]) {
+        return static_cast<size_t>(left);
+    }
+    
+    // Fallback (should be unreachable for valid states)
+    return static_cast<size_t>(this->world_size - 1);
 }
+
+
+//template <typename idx_t>
+//size_t SparseMPIContext<idx_t>::rank_of_state(const state_t& psi) const {
+////    return rank_index.at(hash_state(psi));
+//    // binary search
+//}
 
 /*
     // naively divides into index sectors
@@ -347,6 +408,7 @@ auto& operator<<(std::ostream& os, const SparseMPIContext< idx_t>& ctx){
         os<<ctx.idx_partition[i]<<"\t";
         printHex(os, ctx.state_partition[i])<<"\n";
     }
+//    os<<"Rank lookup hashmap: "<<ctx.n_hashes()<<" entries";
     return os;
 }
         
@@ -354,7 +416,7 @@ auto& operator<<(std::ostream& os, const SparseMPIContext< idx_t>& ctx){
 
 
 template < typename idx_t>
-size_t SparseMPIContext< idx_t>::rank_of_state_slow(state_t psi) const {
+size_t SparseMPIContext< idx_t>::rank_of_state_slow(const state_t& psi) const {
     // linear search, all states should fit in cache unless # nodes is very large
     // IMPORTANT: never checks state_partition[world_size] itself, which may
     // overflow in the 128 site cache
