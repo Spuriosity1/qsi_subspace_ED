@@ -128,11 +128,7 @@ struct MPIContext {
     // returns the node on which a specified global index can be found
     size_t rank_of_idx(idx_t J) const;
 
-
 };
-
-
-
 
 
 
@@ -169,101 +165,14 @@ struct SparseMPIContext : public MPIContext<idx_t> {
     void populate_state_terminals(int64_t n_basis_states, 
             const std::function<state_t(uint64_t)>& read_state);
 
-
-//    uint64_t hash_state(const state_t& psi) const{
-//        [[ likely ]] if (n_bits < 64) {
-//            // can deduce partitioning from top half alone
-//            return psi.uint64[1] & bit_mask.uint64[1];
-//        } else {
-//            return ((psi & bit_mask) >> (128-n_bits)).uint64[0];
-//        }
-//    }
-//
-//    void insert_hashes(const std::vector<uint64_t>&hash_buffer, 
-//            int64_t displ, int64_t count, int rank){
-//        for (int i=0; i<count; i++){
-//            rank_index[hash_buffer[displ + i]] = rank;
-//        }
-//    }
-//
-//    size_t n_hashes() const {
-//        return rank_index.size();
-//    }
-
-
     std::vector<state_t> state_partition;
 
-
-    // sets bit_mask and n_bits to be the correct values
-//    void estimate_optimal_mask(int64_t n_basis_states, 
-//        const std::function<state_t(uint64_t)>& read_state,
-//        int oversample=4);
-
 private:
-//    void make_bitmask_finer(){
-//        bit_mask >>= 1;
-//        n_bits++;
-//        bit_mask |= Uint128{1ull<<63,0};
-//    }
-//    std::unordered_map<uint64_t, int> rank_index;
-//    Uint128 bit_mask;
     int n_bits;
 };
 
 
-//template < typename idx_t>
-//void SparseMPIContext< idx_t>::estimate_optimal_mask(int64_t n_basis_states, 
-//        const std::function<state_t(uint64_t)>& read_state, int oversample)
-//{
-//
-//    if (this->my_rank == 0){
-//
-//    // Downsample a random subset of the states
-//    std::mt19937_64 rng(100);
-//    auto dist = std::uniform_int_distribution<int64_t>(0,n_basis_states-1);
-//
-//    const size_t sample_size = std::min(int64_t(1 << 16), n_basis_states);
-//    const size_t target_size = this->world_size*oversample;
-//
-//    std::vector<Uint128> basis_sample(sample_size);
-//
-//    for (size_t i=0; i<sample_size; i++){
-//        basis_sample[i] = read_state(dist(rng));
-//    }
-//
-//    std::unordered_set<Uint128> seen;
-//
-//    this->bit_mask = 0;
-//    n_bits = 0;
-//
-//    while(n_bits < 128 && seen.size() < target_size ){
-//        make_bitmask_finer();
-//        seen.clear();
-//
-//        for (const auto& b : basis_sample) {
-//            seen.insert(b & bit_mask);
-//        }
-//    }
-//
-//    if (n_bits >= 128){
-//        throw std::logic_error("Impossible mask state: indexing is broken"); 
-//        // early exit MUST have been triggered, or else all states are identical
-//    } 
-//
-//    } // end master node work
-//
-//    MPI_Bcast(&n_bits, 1, get_mpi_type<int>(), 0, MPI_COMM_WORLD);
-//    MPI_Bcast(&bit_mask, 1, get_mpi_type<Uint128>(), 0, MPI_COMM_WORLD);
-//
-//    this->log<<"Bit mask: " << bit_mask << " (top "<< n_bits <<" bits\n";
-//}
 
-
-/*
-/**
- * Snaps the basis to nearest bitmask boundary
- * i.e. such that state & bitmask is a good hash function
- */
 template < typename idx_t>
 void SparseMPIContext< idx_t>::populate_state_terminals(int64_t n_basis_states, 
         const std::function<state_t(uint64_t)>& read_state)
@@ -283,65 +192,6 @@ void SparseMPIContext< idx_t>::populate_state_terminals(int64_t n_basis_states,
     MPI_Bcast(this->idx_partition.data(), this->idx_partition.size(), get_mpi_type<idx_t>(),
             0, MPI_COMM_WORLD);
 }
-
-/*
-    if (this->my_rank == 0){
-
-    // the job: find terminals that correspond to these 
-    // rank 'n' handles states in interval [ state_partition[n], state_partition[n+1])
-    //
-    // idx_partition must be populated such that 
-    // read_state(idx_partition[n]-1) & mask != read_state(idx_partition[n])
-
-  // Binary search for mask boundaries
-    for (int r = 1; r < this->world_size; r++) {
-        this->log << " Finding boundaries: rank "<<r<<"\n";
-
-        int64_t initial_guess = this->idx_partition[r];
-        state_t target_mask = read_state(initial_guess) & bit_mask;
-        
-        // Binary search for the first index where (state & mask) == target_mask
-        // Search in range [0, initial_guess]
-        int64_t left = 0;
-        int64_t right = initial_guess;
-        int64_t result = initial_guess;
-        
-        while (left <= right) {
-            int64_t mid = left + (right - left) / 2;
-            state_t mid_state = read_state(mid);
-            state_t mid_mask = mid_state & bit_mask;
-            
-            if (mid_mask == target_mask) {
-                // Found a match, but search left for the first occurrence
-                result = mid;
-                right = mid - 1;
-            } else if (mid_mask < target_mask) {
-                // target_mask is to the right
-                left = mid + 1;
-            } else {
-                // target_mask is to the left
-                right = mid - 1;
-            }
-        }
-        
-        this->idx_partition[r] = result;
-        this->state_partition[r] = read_state(result);
-    }
-    
-    this->state_partition[0] = read_state(0);
-    this->state_partition[this->world_size] = ~Uint128(0);
-
-    } // end if statement: master node work
-
-    // share state_partition, idx_partition
-
-    MPI_Bcast(state_partition.data(), state_partition.size(), get_mpi_type<Uint128>(), 0, MPI_COMM_WORLD);
-    MPI_Bcast(this->idx_partition.data(), this->idx_partition.size(), get_mpi_type<idx_t>(),
-            0, MPI_COMM_WORLD);
-
-
-}
-*/
 
 
 template <typename idx_t>
@@ -376,29 +226,6 @@ size_t SparseMPIContext<idx_t>::rank_of_state(const state_t& psi) const {
     return static_cast<size_t>(this->world_size - 1);
 }
 
-
-//template <typename idx_t>
-//size_t SparseMPIContext<idx_t>::rank_of_state(const state_t& psi) const {
-////    return rank_index.at(hash_state(psi));
-//    // binary search
-//}
-
-/*
-    // naively divides into index sectors
-    void partition_basis_old(int64_t n_basis_states, 
-            std::function<state_t(uint64_t)> read_state){
-
-        for (int r = 0; r < this->world_size; ++r) {              
-            assert(this->idx_partition[r] < n_basis_states);
-            state_partition[r] = read_state(this->idx_partition[r]);
-        }
-
-        // one past last: last_state + 1
-        Uint128 last = read_state(n_basis_states - 1);
-        ++last.uint128;
-        state_partition[this->world_size] = last;
-    }
-*/
 
 
 template < typename idx_t>

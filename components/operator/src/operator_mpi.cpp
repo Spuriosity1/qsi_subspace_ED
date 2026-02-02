@@ -139,44 +139,6 @@ inline std::vector<Uint128> read_basis_hdf5(
             if (status < 0) throw std::runtime_error("read_basis_hdf5: Failed to read local chunk");
         }
 
-//        {
-//            // populate mpi_context's buffer 
-//            // TODO move this logic inside the operator class
-//            std::unordered_set<uint64_t> hashes_seen_here;
-//            for (hsize_t j=0; j<local_count; j++){
-//                hashes_seen_here.insert(ctx.hash_state(result[j]));
-//            }
-//
-//            std::vector<uint64_t> hashes_seen_here_v(hashes_seen_here.begin(),
-//                    hashes_seen_here.end());
-//
-//            // MPI exchange number of unique hashes
-//            std::vector<int> hash_counts(ctx.world_size);
-//            int my_hash_count = hashes_seen_here.size();
-//
-//            MPI_Allgather(&my_hash_count, 1, get_mpi_type<int>(),
-//                    hash_counts.data(), 1, get_mpi_type<int>(), MPI_COMM_WORLD);
-//
-//            auto g_total_unique_hashes = std::accumulate(
-//                    hash_counts.begin(), hash_counts.end(),0);
-//
-//            std::vector<int> hash_displs(ctx.world_size);
-//            hash_displs[0] = 0;
-//            for (int i=1; i<ctx.world_size; i++){
-//                hash_displs[i] = hash_displs[i-1] + hash_counts[i-1];
-//            }
-//
-//            std::vector<uint64_t> g_hashes(g_total_unique_hashes);
-//            
-//            MPI_Allgatherv(
-//                    hashes_seen_here_v.data(), hashes_seen_here.size(), get_mpi_type<uint64_t>(),
-//                    g_hashes.data(), hash_counts.data(), hash_displs.data(), get_mpi_type<uint64_t>(), MPI_COMM_WORLD);
-//
-////            for (int r=0; r<ctx.world_size; r++){
-////                ctx.insert_hashes(g_hashes, hash_displs[r], hash_counts[r], r);
-////            }
-//        }
-
         // Print diagnostics
         ctx.log<<"Loaded basis chunk.\n"<<ctx;
         if (ctx.my_rank == 0){
@@ -636,24 +598,6 @@ void MPILazyOpSum<coeff_t, B>::evaluate_add_off_diag_batched(const coeff_t* x, c
         
     }
 
-//    MPI_Request req_state, req_coeff;
-//
-//
-//    MPI_Ialltoallv(
-//        send_state.data(), send_counts_no_self.data(), send_displs.data(),
-//        get_mpi_type<ZBasisBase::state_t>(),
-//        recv_state.data(), recv_counts_no_self.data(), recv_displs.data(),
-//        get_mpi_type<ZBasisBase::state_t>(),
-//        MPI_COMM_WORLD, &req_state
-//    );
-//
-//    MPI_Ialltoallv(
-//        send_dy.data(), send_counts_no_self.data(), send_displs.data(),
-//        get_mpi_type<coeff_t>(),
-//        recv_dy.data(), recv_counts_no_self.data(), recv_displs.data(),
-//        get_mpi_type<coeff_t>(),
-//        MPI_COMM_WORLD, &req_coeff
-//    );
 
     assert(send_counts[ctx.my_rank] == recv_counts[ctx.my_rank]);
     const int loc_send_offset = send_displs[ctx.my_rank];
