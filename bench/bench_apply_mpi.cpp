@@ -67,6 +67,19 @@ int main(int argc, char* argv[]){
             auto H_mpi = MPILazyOpSum(basis, H_sym, ctx);
           )
 
+    TIMEIT("basis optimise",
+            auto wisdom = H_mpi.find_optimal_basis_load();
+        )
+
+    TIMEIT("apply basis optimisation",
+            basis.exchange_local_states(wisdom, ctx);
+          )
+
+    TIMEIT("allocating temporaries",
+            H_mpi.allocate_temporaries();
+          )
+
+
     std::cout<<"[rank "<<ctx.my_rank<<"] op construct finish"<<std::endl;
 
     std::vector<double> v_local, u_local;

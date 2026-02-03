@@ -1,4 +1,5 @@
 #pragma once
+#include <cassert>
 #include <cstdio>
 #include <functional>
 #include <mpi.h>
@@ -46,8 +47,8 @@ struct MPIContext {
         time_t now = time(nullptr);
         struct tm* utc_time = gmtime(&now);
         char timestamp[20];
-        strftime(timestamp, sizeof(timestamp), "%Y-%m-%dT%H%M%SZ", utc_time);
-        snprintf(fname, 100, "log_r%d_%s.log", my_rank, timestamp);
+        strftime(timestamp, sizeof(timestamp), "%Y-%m-%dT%H-%M-%SZ", utc_time);
+        snprintf(fname, 100, "log_%s_r%d.log", timestamp, my_rank);
         log.open(fname);
     }
 
@@ -167,9 +168,111 @@ struct SparseMPIContext : public MPIContext<idx_t> {
 
     std::vector<state_t> state_partition;
 
+    std::vector<std::vector<std::pair<int, size_t>>> get_rebalance_plan(const std::vector<int>& curr_work);
+
 private:
     int n_bits;
 };
+
+
+
+/**
+ * Input: curr_work, a world_size-sized vector of the relative 'hardness' of each rank
+ * note -> does not need to be normalised.
+ *
+ * Output: A vector of transfer specifications such that
+ *
+ * partition[source_rank] = [ (r_d0, n0), (r_d1, n1), (r_d2, n2), ...]
+ * where r_d0, r_d1, r_d2 are ascending sequential and sum(nj) = local_block_size
+ */
+template <typename idx_t>
+std::vector<std::vector<std::pair<int, size_t>>> 
+SparseMPIContext<idx_t>::get_rebalance_plan(const std::vector<int>& rank_hardness_score){
+    // Calculate target distribution based on hardness scores
+    size_t total_hardness = std::accumulate(rank_hardness_score.begin(), rank_hardness_score.end(), 0ull);
+    size_t total_records = this->global_basis_dim();
+    
+    std::vector<size_t> target_distribution(this->world_size);
+    size_t assigned = 0;
+    
+    // Proportionally distribute records based on hardness
+    for (int i = 0; i < this->world_size - 1; i++) {
+        target_distribution[i] = (rank_hardness_score[i] * total_records) / total_hardness;
+        assigned += target_distribution[i];
+    }
+    // Give remainder to last rank to ensure exact total
+    target_distribution[this->world_size - 1] = total_records - assigned;
+    
+    // curr_work now represents the target distribution (how many records each rank should have)
+    // But currently each rank has block_size(rank) records
+    
+    std::vector<std::vector<std::pair<int, size_t>>> partition(this->world_size);
+    
+    // Two-pointer algorithm to redistribute records
+    int source_rank = 0;           // Current source rank we're taking records from
+    int dest_rank = 0;             // Current destination rank we're assigning records to
+    size_t source_remaining = this->block_size(0);      // Records remaining in current source
+    size_t dest_remaining = target_distribution[0];     // Records needed by current destination
+    
+    while (source_rank < this->world_size && dest_rank < this->world_size) {
+        // Transfer the minimum of what's available and what's needed
+        size_t transfer_amount = std::min(source_remaining, dest_remaining);
+        
+        // Add this transfer to the partition
+        partition[source_rank].push_back({dest_rank, transfer_amount});
+        
+        // Update remaining amounts
+        source_remaining -= transfer_amount;
+        dest_remaining -= transfer_amount;
+        
+        // Move to next source if current one is exhausted
+        if (source_remaining == 0) {
+            source_rank++;
+            if (source_rank < this->world_size) {
+                source_remaining = this->block_size(source_rank);
+            }
+        }
+        
+        // Move to next destination if current one is full
+        if (dest_remaining == 0) {
+            dest_rank++;
+            if (dest_rank < this->world_size) {
+                dest_remaining = target_distribution[dest_rank];
+            }
+        }
+    }
+    
+#ifndef NDEBUG
+    // Verify that each rank's partition sums to block_size
+    for (int rank = 0; rank < this->world_size; rank++) {
+        idx_t acc = 0;
+        for (auto& [r, x] : partition[rank]) {
+            acc += x;
+        }
+        assert(acc == this->block_size(rank) && "Partition sum must equal block_size");
+    }
+    
+    // Additional verification: check that destinations are sequential
+    for (int rank = 0; rank < this->world_size; rank++) {
+        for (size_t i = 1; i < partition[rank].size(); i++) {
+            assert(partition[rank][i].first >= partition[rank][i-1].first && 
+                   "Destination ranks must be ascending sequential");
+        }
+    }
+#endif
+
+    if (this->my_rank ==0){
+        std::cout<<"[Main] Global partition plan\n";
+        for (int r=0; r<this->world_size; r++){
+            std::cout<<"[source rank "<<r<<"]\n";
+            for (const auto& [dest_rank, n] : partition[r]){
+                std::cout << "("<<n<<") -> "<<dest_rank<<"\n";
+            }
+        }
+    }
+    
+    return partition;
+}
 
 
 

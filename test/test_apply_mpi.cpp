@@ -87,9 +87,16 @@ int main(int argc, char* argv[]){
         H_sym.add_term(gv[sl_list[idx]], L);
     }
  
-
+    ctx.log<<"[op construct]"<<std::endl;
     auto H_mpi = MPILazyOpSum(basis, H_sym, ctx);
     auto H_st = LazyOpSum(basis_st, H_sym);
+
+    ctx.log<<"[calc basis wisdom]"<<std::endl;
+    auto wisdom = H_mpi.find_optimal_basis_load();
+    ctx.log<<"[basis reshuffle]"<<std::endl;
+    basis.exchange_local_states(wisdom, ctx);
+    ctx.log<<"[allocate temporaries]"<<std::endl;
+    H_mpi.allocate_temporaries();
 
     std::vector<double> v_global, u_global, u1_local;
     v_global.resize(basis_st.dim());

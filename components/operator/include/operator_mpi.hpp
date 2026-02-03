@@ -7,10 +7,94 @@
 
 typedef SparseMPIContext<ZBasisBST::idx_t> MPIctx;
 
+
+struct BasisTransferWisdom {
+    std::vector<int> send_counts, send_ranks, recv_counts, recv_ranks;
+    std::vector<ZBasisBase::idx_t> idx_partition;
+//    std::vector<ZBasisBase::state_t> state_partition;
+};
+
 struct MPI_ZBasisBST : public ZBasisBST 
 {
      MPIctx load_from_file(const fs::path& bfile, const std::string& dataset="basis");
-//     void load_state(std::vector<double>& psi, const fs::path& eig_file);
+
+     void exchange_local_states(
+             const BasisTransferWisdom& btw,
+             MPIctx& ctx
+             ){
+         auto& send_counts = btw.send_counts;
+         auto& recv_counts = btw.recv_counts;
+         auto& send_ranks = btw.send_ranks;
+         auto& recv_ranks = btw.recv_ranks;
+         // sanity checks
+         {
+             assert(send_counts.size() == send_ranks.size());
+             assert(recv_counts.size() == recv_ranks.size());
+             for (size_t i=1; i<send_ranks.size(); i++){assert(send_ranks[i] == send_ranks[i-1]+1);}
+             for (size_t i=1; i<recv_ranks.size(); i++){assert(recv_ranks[i] == recv_ranks[i-1]+1);}
+             auto total_sends = std::accumulate(send_counts.begin(), send_counts.end(),0ull);
+             if(states.size() != total_sends){
+                 ctx.log<<"[Error] state.size() = "<<states.size()<<", total_sends="<<total_sends<<std::endl;
+                 throw std::logic_error("states size is bad");
+             }
+         }
+
+
+
+         std::vector<int> send_displs(send_counts.size(), 0);
+         std::vector<int> recv_displs(recv_counts.size(), 0);
+
+         send_displs[0]=0;
+         recv_displs[0]=0;
+         for (int j=1; j<send_counts.size(); j++){
+             send_displs[j] = send_displs[j-1] + send_counts[j-1];
+         }
+         for (int j=1; j<recv_counts.size(); j++){
+             recv_displs[j] = recv_displs[j-1] + recv_counts[j-1];
+         }
+
+         printvec(ctx.log << "send_displs ", send_displs)<<std::endl;
+         printvec(ctx.log << "send_counts ", send_counts)<<std::endl;
+         printvec(ctx.log << "recv_displs ", recv_displs)<<std::endl;
+         printvec(ctx.log << "recv_counts ", recv_counts)<<std::endl;
+
+         // allocate a temporary buffer for the sent data
+         std::vector<state_t> states_tmp(states);
+         states.resize(std::accumulate(recv_counts.begin(), recv_counts.end(), 0));
+
+         const int BASIS_STATEX=0x50;
+         std::vector<MPI_Request> reqs;
+
+         for (size_t i=0; i<recv_counts.size(); i++){
+             MPI_Request req;
+             MPI_Irecv(states.data() + recv_displs[i], recv_counts[i], get_mpi_type<state_t>(),
+                     recv_ranks[i], BASIS_STATEX, MPI_COMM_WORLD, &req);
+             reqs.push_back(std::move(req));
+         }
+         for (size_t i=0; i<send_counts.size(); i++){
+             MPI_Request req;
+             MPI_Isend(states_tmp.data()+send_displs[i], send_counts[i], get_mpi_type<state_t>(), 
+                     send_ranks[i],BASIS_STATEX, MPI_COMM_WORLD, &req); 
+             reqs.push_back(std::move(req));
+         }
+         MPI_Waitall(reqs.size(), reqs.data(), MPI_STATUSES_IGNORE);
+
+         // states now initialised with (hopefully) correct set of vectors
+         // update the terminals of ctx
+         ctx.idx_partition = btw.idx_partition;
+         ctx.state_partition.resize(ctx.idx_partition.size());
+
+         MPI_Allgather(states.data(), 1, get_mpi_type<state_t>(),
+                 ctx.state_partition.data(), 1, get_mpi_type<state_t>(), MPI_COMM_WORLD);
+
+#ifndef NDEBUG
+        // states strictly inceasing?
+        for (unsigned il=1; il<states.size(); il++){
+            if(states[il] <= states[il-1]) throw std::logic_error("broken state exchange: order not preserved");
+        }
+#endif
+    
+     }
 };
 
 
@@ -22,7 +106,6 @@ struct MPILazyOpSum {
             MPIctx& context_
             ) : basis(local_basis_), ops(ops_), ctx(context_),
     send_dy(ctx.world_size), send_state(ctx.world_size) {
-        allocate_temporaries();
     }
 
     MPILazyOpSum operator=(const MPILazyOpSum& other) = delete;
@@ -34,6 +117,10 @@ struct MPILazyOpSum {
 		std::fill(y, y + basis.dim(), coeff_t(0));
         this->evaluate_add(x, y);
 	}
+
+
+    // Returns a plan to modify the basis such that load is evenly balanced
+    BasisTransferWisdom find_optimal_basis_load();
 
     // allocates send/receive buffers for MPI alltoall
     // based on current matrix structure
@@ -71,7 +158,7 @@ private:
         std::vector<int>& bucket_starts
         ) const;
 
-    void rebalance_work(std::vector<int>& cost_per_rank);
+//    void rebalance_work(std::vector<int>& cost_per_rank);
 
 };
 

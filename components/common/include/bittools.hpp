@@ -327,3 +327,13 @@ inline std::string to_string(const Uint128& x){
     printHex(oss, x);
     return oss.str();
 }
+
+
+template <typename T>
+std::ostream& printvec(std::ostream& os, const std::vector<T>& v){
+    for (const auto& x : v){
+        os << x<<", ";
+    }
+    return os;
+}
+

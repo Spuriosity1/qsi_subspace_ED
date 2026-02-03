@@ -659,54 +659,106 @@ void MPILazyOpSum<coeff_t, B>::evaluate_add_off_diag_batched(const coeff_t* x, c
 }
 
 
+
 template <RealOrCplx coeff_t, Basis basis_t>
-void MPILazyOpSum<coeff_t, basis_t>::rebalance_work(std::vector<int>& curr_work){
+BasisTransferWisdom MPILazyOpSum<coeff_t, basis_t>::find_optimal_basis_load() {
 
-    int target_work = std::accumulate(curr_work.begin(), curr_work.end(),0)
-        /ctx.world_size;
+    std::vector<int> all_hardness(ctx.world_size);
+    int my_hardness=0;
 
-    // Track what each rank steals from others and gives to others
-    // steals_from[r] = vector of (source_rank, amount) pairs
-    // gives_to[r] = vector of (dest_rank, amount) pairs
-    std::vector<std::vector<std::pair<int, int>>> steals_from(ctx.world_size);
-    std::vector<std::vector<std::pair<int, int>>> gives_to(ctx.world_size);
-    
-    int curr_r = 0;
-    while (curr_r < ctx.world_size - 1) {
-        if (curr_work[curr_r] < target_work) {
-            // Current node is too light, steal from rank r+1
-            int stolen = target_work - curr_work[curr_r];
-            steals_from[curr_r].push_back({curr_r + 1, stolen});
-            gives_to[curr_r + 1].push_back({curr_r, stolen});
-            curr_work[curr_r] += stolen;
-            curr_work[curr_r + 1] -= stolen;
-        } else if (curr_work[curr_r] > target_work) {
-            // Current node is too heavy, donate to the next rank
-            int given = curr_work[curr_r] - target_work;
-            gives_to[curr_r].push_back({curr_r + 1, given});
-            steals_from[curr_r + 1].push_back({curr_r, given});
-            curr_work[curr_r] -= given;
-            curr_work[curr_r + 1] += given;
-        } else {
-            curr_r++;
+    // estimate the work of my rank
+    for (ZBasisBase::idx_t il = 0; il < ctx.local_block_size(); ++il) {
+        for (auto& [c, op] : ops.off_diag_terms ) {
+            ZBasisBase::state_t state = basis[il];
+            auto sign = op.applyState(state);
+            if (sign == 0) continue;
+            my_hardness++;
+//            auto target_rank = ctx.rank_of_state(state);
+//            naive_send_counts[target_rank]++;
         }
     }
-    
-    // Execute the redistribution
-    // First, receive data that this rank is stealing from others
-    for (const auto& [source_rank, amount] : steals_from[ctx.my_rank]) {
-        // MPI_Recv or equivalent communication from source_rank
-        // receive 'amount' work items from source_rank
+    MPI_Allgather(&my_hardness, 1, MPI_INT, all_hardness.data(), 1, MPI_INT, MPI_COMM_WORLD);
+
+    if (ctx.my_rank == 0)
+        printvec(std::cout<<"[Main] Global hardness: ", all_hardness)<<std::endl;
+
+
+    // rebalance the load
+    const auto partition = ctx.get_rebalance_plan(all_hardness);
+    const auto& my_send_partition = partition[ctx.my_rank];
+
+    // my_send_partition is a list of pairs [ (r0, n0), (r1, n1), (r2, n2) ]
+    // notes: 
+    // i) the ranks are strictly sequential and increasing
+    // ii) the sum of the n's must add up to the local size
+#ifndef NDEBUG
+    {
+        int r_prev=-1;
+        int acc=0;
+        for (auto& [r, n] : my_send_partition){
+            assert(r > r_prev);
+            r_prev = r;
+            acc += n;
+        }
+        assert(acc == ctx.local_block_size());
     }
-    
-    // Then, send data that this rank is giving to others
-    for (const auto& [dest_rank, amount] : gives_to[ctx.my_rank]) {
-        // MPI_Send or equivalent communication to dest_rank
-        // send 'amount' work items to dest_rank
+#endif
+
+    // each rank knows its local send_counts, must be told the remote send sizes
+    // we know that we need to send the basis states
+    // [0 ... partition_local_idx[0]) -> rank my_send_partition[0].first
+    // [0 ... partition_local_idx[1]) -> rank my_send_partition[1].first
+    BasisTransferWisdom btw;
+
+    // for global exchange
+    std::vector<int> all_b_send_counts(ctx.world_size, 0); // number of elements in send_counts of each rank
+    std::vector<int> all_b_recv_counts(ctx.world_size, 0); // number of elements to be received by each rank        
+
+    ctx.log<<"<basis rebalance>\n";
+
+    for (size_t j=0; j<my_send_partition.size(); j++){
+        auto& [target_r, count] = my_send_partition[j];
+
+        all_b_send_counts[target_r] = count;
+        btw.send_counts.push_back(count); // the number of BASIS indices to send
+        btw.send_ranks.push_back(target_r);
+        ctx.log << "("<<count<<") -> "<<target_r<<"\n";
     }
-    
-    // Update the cost_per_rank with the new distribution
+
+
+    MPI_Alltoall(all_b_send_counts.data(), 1, MPI_INT, all_b_recv_counts.data(), 1, MPI_INT, MPI_COMM_WORLD);
+    for (int r=0; r<ctx.world_size; r++){
+        auto n = all_b_recv_counts[r];
+        if ( n != 0){
+            btw.recv_ranks.push_back(r);
+            btw.recv_counts.push_back(n);
+        }
+    }
+
+    // figure out what the terminal indices ought to be
+    btw.idx_partition.clear();
+    btw.idx_partition.resize(ctx.world_size+1, 0);
+
+    int my_new_dimension = std::accumulate(btw.recv_counts.begin(), btw.recv_counts.end(), 0);
+    std::vector<int> all_dimensions(ctx.world_size);
+    MPI_Allgather(&my_new_dimension, 1, MPI_INT, all_dimensions.data(), 1, MPI_INT, MPI_COMM_WORLD);
+
+    btw.idx_partition[0] = 0;
+    for(int r=0; r<ctx.world_size; r++){
+        btw.idx_partition[r+1] = btw.idx_partition[r] + all_dimensions[r];
+    }
+
+    ctx.log<<"Sugested basis rebalance:";
+    printvec(ctx.log<<"\n[b_send_counts] ", btw.send_counts);
+    printvec(ctx.log<<"\n[b_send_ranks] ", btw.send_ranks);
+    printvec(ctx.log<<"\n[b_recv_counts] ", btw.recv_counts);
+    printvec(ctx.log<<"\n[b_recv_ranks] ", btw.recv_ranks);
+
+    ctx.log<<"\n</basis rebalance>"<<std::endl;
+
+    return btw;
 }
+
 
 
 
@@ -726,6 +778,9 @@ void MPILazyOpSum<coeff_t, basis_t>::allocate_temporaries() {
     std::fill(send_displs.begin(), send_displs.end(), 0);
     std::fill(recv_displs.begin(), recv_displs.end(), 0);
 
+
+    // set up the real send_counts
+    // TODO this should be computable just from known information
     for (ZBasisBase::idx_t il = 0; il < ctx.local_block_size(); ++il) {
         for (auto& [c, op] : ops.off_diag_terms ) {
             ZBasisBase::state_t state = basis[il];
@@ -737,13 +792,12 @@ void MPILazyOpSum<coeff_t, basis_t>::allocate_temporaries() {
         }
     }
 
+    
+
+
+    // allocate auxiliary arrays
+
     MPI_Alltoall(send_counts.data(), 1, MPI_INT, recv_counts.data(), 1, MPI_INT, MPI_COMM_WORLD);
-
-    // rebalance the load
-//    rebalance_work(send_counts);
-
-
-
 
     for (int r=1; r<ctx.world_size; r++){
         send_displs[r] = send_counts[r-1] + send_displs[r-1];
