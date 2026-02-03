@@ -543,9 +543,20 @@ void MPILazyOpSum<coeff_t, B>::evaluate_add_off_diag_batched(const coeff_t* x, c
             if (sign == 0) continue;
             
             auto target_rank = ctx.rank_of_state(state);
+            auto dy = c*x[il]*sign;
+            if (target_rank == ctx.my_rank){
+                // immediately apply
+                ZBasisBase::idx_t local_idx;
+                ASSERT_STATE_FOUND("local",
+                    state,
+                    basis.search(state, local_idx)
+                    );
+                y[local_idx] += dy;
+            }
+    
             int pos = send_cursors[target_rank]++;
             send_state[pos] = state;
-            send_dy[pos] = c*x[il]*sign;
+            send_dy[pos] = dy;
         }
     }
     );
@@ -602,17 +613,17 @@ void MPILazyOpSum<coeff_t, B>::evaluate_add_off_diag_batched(const coeff_t* x, c
     assert(send_counts[ctx.my_rank] == recv_counts[ctx.my_rank]);
     const int loc_send_offset = send_displs[ctx.my_rank];
 
-    BENCH_TIMER_TIMEIT(loc_apply_timer,
-    for (int i=loc_send_offset; 
-            i<loc_send_offset+send_counts[ctx.my_rank]; i++){
-        ZBasisBase::idx_t local_idx;
-        ASSERT_STATE_FOUND("local",
-            send_state[i],
-            basis.search(send_state[i], local_idx)
-            );
-        y[local_idx] += send_dy[i];
-    }
-    );
+//    BENCH_TIMER_TIMEIT(loc_apply_timer,
+//    for (int i=loc_send_offset; 
+//            i<loc_send_offset+send_counts[ctx.my_rank]; i++){
+//        ZBasisBase::idx_t local_idx;
+//        ASSERT_STATE_FOUND("local",
+//            send_state[i],
+//            basis.search(send_state[i], local_idx)
+//            );
+//        y[local_idx] += send_dy[i];
+//    }
+//    );
 
     #ifdef SUBSPACE_ED_BENCHMARK_OPERATIONS
         int num_send_neighbors = 0, num_recv_neighbors = 0;
