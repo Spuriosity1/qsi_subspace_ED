@@ -645,9 +645,9 @@ void MPILazyOpSum<coeff_t, B>::evaluate_add_off_diag_batched(const coeff_t* x, c
     
 
     BENCH_TIMER_TIMEIT(rem_apply_timer,
-    // Applying rank-local updates
+    // Applying rank-local updates we received remotely
     for (int r=0; r<ctx.world_size; r++){
-    const int rem_displs = recv_displs[r];
+        const int rem_displs = recv_displs[r];
         for (int i = rem_displs; 
                 i < rem_displs + recv_counts_no_self[r]; ++i) {
             ZBasisBase::idx_t local_idx;
@@ -668,7 +668,6 @@ void MPILazyOpSum<coeff_t, B>::evaluate_add_off_diag_batched(const coeff_t* x, c
 #endif
 
 }
-
 
 
 template <RealOrCplx coeff_t, Basis basis_t>

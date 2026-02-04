@@ -9,7 +9,6 @@ int ZBasisBST::search(const state_t& state, idx_t& J) const {
     int64_t left = 0, right = states.size() - 1;
 
     static const int64_t CACHE_SIZE=32;
-    
     while (right - left > CACHE_SIZE) {
         size_t mid = (left + right) / 2;
         
@@ -17,9 +16,9 @@ int ZBasisBST::search(const state_t& state, idx_t& J) const {
         else right = mid;
     }
 
-    for (J = left; J <= right; J++) {
-        if (arr[J] == state.uint128) return 1;
-    }
+//    for (J = left; J <= right; J++) {
+//        if (arr[J] == state.uint128) return 1;
+//    }
 
     // manual unroll BS (actually saves noticeable time???)
     for (J = left; J + 3 <= right; J += 4) {
@@ -54,9 +53,9 @@ int ZBasisInterp::search(const state_t& state, idx_t& J) const {
             right = mid;
     }
 
-    for (J = left; J <= right; J++) {
-        if (arr[J] == state.uint128) return 1;
-    }
+//    for (J = left; J <= right; J++) {
+//        if (arr[J] == state.uint128) return 1;
+//    }
 
     for (J = left; J + 3 <= right; J += 4) {
         if (arr[J] == state) {  return 1; }

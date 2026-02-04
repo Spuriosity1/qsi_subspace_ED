@@ -305,28 +305,49 @@ size_t SparseMPIContext<idx_t>::rank_of_state(const state_t& psi) const {
     
     int left = 0;
     int right = this->world_size - 1;
-    
-    while (left < right) {
-        int mid = left + (right - left) / 2;
-        
-        // Check if psi belongs to partition mid
-        if (psi < state_partition[mid + 1]) {
-            // psi might be in partition mid or earlier
-            right = mid;
-        } else {
-            // psi is definitely after partition mid
-            left = mid + 1;
-        }
+    size_t J;
+
+    const __uint128_t* arr = reinterpret_cast<const __uint128_t*>(state_partition.data());
+
+    static const int64_t CACHE_SIZE=32;
+
+    while (right - left > CACHE_SIZE){
+        size_t mid = (left + right) /2;
+        if (arr[mid] < psi.uint128) left = mid + 1;
+        else right =mid;
     }
-    
-    // At this point, left == right, and this is our answer
-    // Verify it's valid (optional defensive check)
-    if (left < this->world_size && psi < state_partition[left + 1]) {
-        return static_cast<size_t>(left);
+
+    for (J=left; J<right; ++J){
+        // arr is strict-ascending
+        // first arr[J+1] > psi is the winner
+        if (arr[J+1]>psi.uint128) return J;
     }
+
+
+
+    return J;
     
-    // Fallback (should be unreachable for valid states)
-    return static_cast<size_t>(this->world_size - 1);
+//    while (left < right) {
+//        int mid = left + (right - left) / 2;
+//        
+//        // Check if psi belongs to partition mid
+//        if (psi < state_partition[mid + 1]) {
+//            // psi might be in partition mid or earlier
+//            right = mid;
+//        } else {
+//            // psi is definitely after partition mid
+//            left = mid + 1;
+//        }
+//    }
+//    
+//    // At this point, left == right, and this is our answer
+//    // Verify it's valid (optional defensive check)
+//    if (left < this->world_size && psi < state_partition[left + 1]) {
+//        return static_cast<size_t>(left);
+//    }
+    
+//    // Fallback (should be unreachable for valid states)
+//    return static_cast<size_t>(this->world_size - 1);
 }
 
 

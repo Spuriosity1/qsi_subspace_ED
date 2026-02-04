@@ -14,9 +14,31 @@ struct BasisTransferWisdom {
 //    std::vector<ZBasisBase::state_t> state_partition;
 };
 
+// TODO this is a mess, MPIctx should clearly be a member of the MPI basis types
+
 struct MPI_ZBasisBST : public ZBasisBST 
 {
      MPIctx load_from_file(const fs::path& bfile, const std::string& dataset="basis");
+
+     template<typename coeff_t>
+     void remove_null_states(const SymbolicOpSum<coeff_t>& osm, MPIctx& ctx){
+         remove_annihilated_states(osm, states);
+         // state terminals have not changed (still work for binary searhc purposes)
+         // BUT idx terminals have
+         std::vector<size_t> all_state_counts(ctx.world_size);
+         size_t my_size = states.size();
+
+         MPI_Allgather(&my_size, 1, get_mpi_type<size_t>(),
+                 all_state_counts.data(), 1, get_mpi_type<size_t>(), MPI_COMM_WORLD);
+         // rebuild the index partition
+         std::fill(ctx.idx_partition.begin(), ctx.idx_partition.end(), 0);
+         for (int r=0; r<ctx.world_size; r++){
+             ctx.idx_partition[r+1] = all_state_counts[r] + ctx.idx_partition[r];
+         }
+     }
+
+
+
 
      void exchange_local_states(
              const BasisTransferWisdom& btw,
@@ -40,16 +62,15 @@ struct MPI_ZBasisBST : public ZBasisBST
          }
 
 
-
          std::vector<int> send_displs(send_counts.size(), 0);
          std::vector<int> recv_displs(recv_counts.size(), 0);
 
          send_displs[0]=0;
          recv_displs[0]=0;
-         for (int j=1; j<send_counts.size(); j++){
+         for (size_t j=1; j<send_counts.size(); j++){
              send_displs[j] = send_displs[j-1] + send_counts[j-1];
          }
-         for (int j=1; j<recv_counts.size(); j++){
+         for (size_t j=1; j<recv_counts.size(); j++){
              recv_displs[j] = recv_displs[j-1] + recv_counts[j-1];
          }
 

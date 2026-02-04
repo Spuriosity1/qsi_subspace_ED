@@ -72,6 +72,7 @@ int main(int argc, char* argv[]){
 
 	using T=double;
 	SymbolicOpSum<T> H_sym;
+
     
 //    build_hamiltonian(H_sym, jdata, gv);
     
@@ -86,10 +87,18 @@ int main(int argc, char* argv[]){
         H_sym.add_term(gv[sl_list[idx]], R);
         H_sym.add_term(gv[sl_list[idx]], L);
     }
+
+
+    ctx.log<<"[Symbolic ham construction done.]"<<std::endl;
+
+//    ctx.log<<"[remove unneeded elements]"<<std::endl;
+//    basis_st.remove_null_states(H_sym);
+//    basis.remove_null_states(H_sym, ctx);
  
     ctx.log<<"[op construct]"<<std::endl;
     auto H_mpi = MPILazyOpSum(basis, H_sym, ctx);
     auto H_st = LazyOpSum(basis_st, H_sym);
+
 
     ctx.log<<"[calc basis wisdom]"<<std::endl;
     auto wisdom = H_mpi.find_optimal_basis_load();
@@ -131,10 +140,10 @@ int main(int argc, char* argv[]){
 
 
 
-    std::ostringstream filename;
-    filename << "comparison_rank" << ctx.my_rank << ".csv";
-    std::ofstream out(filename.str());
-    out << "local_index,global_index,u_global,u_local\n";
+//    std::ostringstream filename;
+//    filename << "comparison_rank" << ctx.my_rank << ".csv";
+//    std::ofstream out(filename.str());
+//    out << "local_index,global_index,u_global,u_local\n";
 
     for (int i=0;  i<ctx.local_block_size(); i++){
         auto g_idx = start_offset + i;

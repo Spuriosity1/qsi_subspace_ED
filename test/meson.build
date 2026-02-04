@@ -73,6 +73,13 @@ test_apply_mpi = executable('test_apply_mpi',
   )
 
 
+test_rank_of_state = executable('test_rank_of_state',
+  'test_rank_of_state.cpp',
+  include_directories: inc,
+  dependencies: [operator_mpi_dep, common_dep, linalg_routines_dep, operator_dep],
+  install: false
+  )
+
 #test_mpi_alignment = executable('test_mpi_alignment', 
 #  ['test_mpi_alignment.cpp', basis_common_mpi_src],
 #  include_directories: inc + basis_inc,

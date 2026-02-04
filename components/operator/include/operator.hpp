@@ -19,6 +19,7 @@
 #include <basis_io.hpp>
 #include <filesystem> // C++17
 #include <unordered_map>
+#include "operator.hpp"
 #include <algorithm>
 
 					  
@@ -112,6 +113,39 @@ typedef pthash::dense_partitioned_phf<cust_xxhash_128,    // base hasher
     pthash_type;
 */
 
+template<typename coeff_t>
+struct SymbolicOpSum;
+
+template<typename coeff_t, typename state_t>
+void remove_annihilated_states(const SymbolicOpSum<coeff_t>& osm, std::vector<state_t>& states){
+        size_t write_idx = 0;
+        const size_t n_states = states.size();
+        
+        for (size_t read_idx = 0; read_idx < n_states; ++read_idx) {
+            bool keep = false;
+            for (size_t op_idx = 0; op_idx < osm.off_diag_terms.size(); ++op_idx) {
+                if (osm.off_diag_terms[op_idx].second.applyState(states[read_idx]) != 0) {
+                    keep = true;
+                    break;
+                }
+            }
+            for (size_t op_idx = 0; op_idx < osm.diagonal_terms.size(); ++op_idx) {
+                if (osm.diagonal_terms[op_idx].second.applyState(states[read_idx]) != 0) {
+                    keep = true;
+                    break;
+                }
+            }
+            
+            if (keep) {
+                if (write_idx != read_idx) {
+                    states[write_idx] = std::move(states[read_idx]);
+                }
+                ++write_idx;
+            }
+        }
+        states.resize(write_idx);
+}
+
 struct ZBasisBase {
     using state_t = Uint128; // type which stores the computational basis state
     using idx_t = int64_t;  // the type to use for the indices themselves
@@ -129,6 +163,11 @@ struct ZBasisBase {
 	}
 
 	void load_from_file(const fs::path& bfile, const std::string& dataset="basis");
+
+    template<typename coeff_t>
+    void remove_null_states(const SymbolicOpSum<coeff_t>& osm) {
+        remove_annihilated_states(osm, this->states);
+    }
 
     protected:
         std::vector<state_t> states;
