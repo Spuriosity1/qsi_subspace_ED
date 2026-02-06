@@ -63,21 +63,31 @@ int main(int argc, char* argv[]){
     std::vector<double> gv {1.0, -0.2, -0.2, -0.2};
     build_hamiltonian(H_sym, jdata, gv);
 
+
+    if (prog.get<bool>("--trim")){
+        TIMEIT("remove unneeded elements",
+            basis.remove_null_states(H_sym, ctx);
+        )
+    }
+
     TIMEIT("operator construct",
             auto H_mpi = MPILazyOpSum(basis, H_sym, ctx);
           )
 
-    TIMEIT("basis optimise",
+    if (prog.get<bool>("--rebalance")){
+        TIMEIT("basis optimise",
             auto wisdom = H_mpi.find_optimal_basis_load();
         )
 
-    TIMEIT("apply basis optimisation",
+        TIMEIT("apply basis optimisation",
             basis.exchange_local_states(wisdom, ctx);
           )
+    }
 
     TIMEIT("allocating temporaries",
             H_mpi.allocate_temporaries();
           )
+
 
 
     std::cout<<"[rank "<<ctx.my_rank<<"] op construct finish"<<std::endl;
