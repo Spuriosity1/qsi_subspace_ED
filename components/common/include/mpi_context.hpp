@@ -48,7 +48,7 @@ struct MPIContext {
         struct tm* utc_time = gmtime(&now);
         char timestamp[20];
         strftime(timestamp, sizeof(timestamp), "%Y-%m-%dT%H-%M-%SZ", utc_time);
-        snprintf(fname, 100, "log_%s_r%d.log", timestamp, my_rank);
+        snprintf(fname, 100, "log_%s_n%d_r%d.log", timestamp, world_size, my_rank);
         log.open(fname);
     }
 
