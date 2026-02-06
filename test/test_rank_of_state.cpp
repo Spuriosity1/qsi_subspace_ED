@@ -32,6 +32,9 @@ int main(int argc, char* argv[]){
         .scan<'i', unsigned int>()
         .default_value(0u);
 
+    prog.add_argument("--trim")
+        .default_value(false)
+        .implicit_value(true);
 
     try {
         prog.parse_args(argc, argv);
@@ -64,9 +67,38 @@ int main(int argc, char* argv[]){
     SparseMPIContext ctx = load_basis(basis, prog);
     std::cout<<"[MPI_BST]  Done! Basis dim="<<basis.dim()<<std::endl;
 
+
+	using T=double;
+	SymbolicOpSum<T> H_sym;
+    
+    auto [ringL, ringR, sl_list]  = get_ring_ops(jdata);
+    std::vector<double> gv {1.0, -0.2, -0.2, -0.2};
+    for (size_t idx=0; idx<sl_list.size(); idx++){
+        auto R = ringR[idx];
+        auto L = ringL[idx];
+
+        H_sym.add_term(gv[sl_list[idx]], R);
+        H_sym.add_term(gv[sl_list[idx]], L);
+    }
+
+
+    if (prog.get<bool>("--trim")){
+        ctx.log<<"[remove unneeded elements]"<<std::endl;
+        basis.remove_null_states(H_sym, ctx);
+    }
+
     assert(ctx.local_block_size() == basis.size());
 
+    const auto lower_bound = ctx.state_partition[ctx.my_rank];
+    const auto upper_bound = ctx.state_partition[ctx.my_rank+1];
     for (size_t il=0; il<basis.size(); il++){
+        if(basis[il] < lower_bound){
+            std::cerr <<"[rank "<<ctx.my_rank<<"] State "<<il<<" = "<<basis[il] << " too small | should be >= "<<lower_bound<<std::endl;
+            throw std::logic_error("bad partition!");
+        } else if(basis[il] >= upper_bound){
+            std::cerr <<"[rank "<<ctx.my_rank<<"] State "<<il<<" = "<<basis[il] << " too big | should be < "<<upper_bound<<std::endl;
+            throw std::logic_error("bad partition!");
+        }
         assert(ctx.rank_of_state(basis[il]) == ctx.my_rank);
     }
 

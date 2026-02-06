@@ -32,6 +32,13 @@ int main(int argc, char* argv[]){
         .scan<'i', unsigned int>()
         .default_value(0u);
 
+    prog.add_argument("--trim")
+        .default_value(false)
+        .implicit_value(true);
+    prog.add_argument("--rebalance")
+        .default_value(false)
+        .implicit_value(true);
+
 
     try {
         prog.parse_args(argc, argv);
@@ -74,13 +81,10 @@ int main(int argc, char* argv[]){
 	SymbolicOpSum<T> H_sym;
 
     
-//    build_hamiltonian(H_sym, jdata, gv);
     
     auto [ringL, ringR, sl_list]  = get_ring_ops(jdata);
     std::vector<double> gv {1.0, -0.2, -0.2, -0.2};
-//    std::vector<int> indices{8,8};
     for (size_t idx=0; idx<sl_list.size(); idx++){
-//    for (auto idx : indices){
         auto R = ringR[idx];
         auto L = ringL[idx];
 
@@ -91,19 +95,23 @@ int main(int argc, char* argv[]){
 
     ctx.log<<"[Symbolic ham construction done.]"<<std::endl;
 
-//    ctx.log<<"[remove unneeded elements]"<<std::endl;
-//    basis_st.remove_null_states(H_sym);
-//    basis.remove_null_states(H_sym, ctx);
+    if (prog.get<bool>("--trim")){
+        ctx.log<<"[remove unneeded elements]"<<std::endl;
+        basis_st.remove_null_states(H_sym);
+        basis.remove_null_states(H_sym, ctx);
+    }
  
     ctx.log<<"[op construct]"<<std::endl;
     auto H_mpi = MPILazyOpSum(basis, H_sym, ctx);
     auto H_st = LazyOpSum(basis_st, H_sym);
 
 
-    ctx.log<<"[calc basis wisdom]"<<std::endl;
-    auto wisdom = H_mpi.find_optimal_basis_load();
-    ctx.log<<"[basis reshuffle]"<<std::endl;
-    basis.exchange_local_states(wisdom, ctx);
+    if (prog.get<bool>("--rebalance")){
+        ctx.log<<"[calc basis wisdom]"<<std::endl;
+        auto wisdom = H_mpi.find_optimal_basis_load();
+        ctx.log<<"[basis reshuffle]"<<std::endl;
+        basis.exchange_local_states(wisdom, ctx);
+    }
     ctx.log<<"[allocate temporaries]"<<std::endl;
     H_mpi.allocate_temporaries();
 

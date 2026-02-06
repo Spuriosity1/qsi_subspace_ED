@@ -123,14 +123,18 @@ void remove_annihilated_states(const SymbolicOpSum<coeff_t>& osm, std::vector<st
         
         for (size_t read_idx = 0; read_idx < n_states; ++read_idx) {
             bool keep = false;
+            const auto& this_state = states[read_idx];
+
             for (size_t op_idx = 0; op_idx < osm.off_diag_terms.size(); ++op_idx) {
-                if (osm.off_diag_terms[op_idx].second.applyState(states[read_idx]) != 0) {
+                auto psi = this_state;
+                if (osm.off_diag_terms[op_idx].second.applyState(psi) != 0) {
                     keep = true;
                     break;
                 }
             }
             for (size_t op_idx = 0; op_idx < osm.diagonal_terms.size(); ++op_idx) {
-                if (osm.diagonal_terms[op_idx].second.applyState(states[read_idx]) != 0) {
+                auto psi = this_state;
+                if (osm.diagonal_terms[op_idx].second.applyState(psi) != 0) {
                     keep = true;
                     break;
                 }

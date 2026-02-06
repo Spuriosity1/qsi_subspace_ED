@@ -732,7 +732,7 @@ BasisTransferWisdom MPILazyOpSum<coeff_t, basis_t>::find_optimal_basis_load() {
         all_b_send_counts[target_r] = count;
         btw.send_counts.push_back(count); // the number of BASIS indices to send
         btw.send_ranks.push_back(target_r);
-        ctx.log << "("<<count<<") -> "<<target_r<<"\n";
+        ctx.log << "("<<count<<"records ) -> "<<target_r<<"\n";
     }
 
 

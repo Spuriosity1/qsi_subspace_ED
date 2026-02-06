@@ -23,7 +23,7 @@ struct MPI_ZBasisBST : public ZBasisBST
      template<typename coeff_t>
      void remove_null_states(const SymbolicOpSum<coeff_t>& osm, MPIctx& ctx){
          remove_annihilated_states(osm, states);
-         // state terminals have not changed (still work for binary searhc purposes)
+         // state terminals have not changed (still work for binary search purposes)
          // BUT idx terminals have
          std::vector<size_t> all_state_counts(ctx.world_size);
          size_t my_size = states.size();
@@ -110,8 +110,16 @@ struct MPI_ZBasisBST : public ZBasisBST
 
 #ifndef NDEBUG
         // states strictly inceasing?
-        for (unsigned il=1; il<states.size(); il++){
-            if(states[il] <= states[il-1]) throw std::logic_error("broken state exchange: order not preserved");
+        for (int64_t il=1; il<static_cast<int64_t>(states.size()); il++){
+            if(states[il] <= states[il-1]){
+
+                ctx.log<<"[rank "<<ctx.my_rank<<"]\n";
+                for (int64_t il2 = std::max(il - 4, 0ll); il2<=il; il2++) 
+                    ctx.log<<"states["<<il2<<"]="<< states[il2]<<"\n";
+
+                ctx.log<<std::endl;
+                throw std::logic_error("broken state exchange: order not preserved");
+            }
         }
 #endif
     
