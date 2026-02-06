@@ -114,7 +114,7 @@ struct MPI_ZBasisBST : public ZBasisBST
             if(states[il] <= states[il-1]){
 
                 ctx.log<<"[rank "<<ctx.my_rank<<"]\n";
-                for (int64_t il2 = std::max(il - 4, 0ll); il2<=il; il2++) 
+                for (int64_t il2 = std::max(il - 4, static_cast<int64_t>(0)); il2<=il; il2++) 
                     ctx.log<<"states["<<il2<<"]="<< states[il2]<<"\n";
 
                 ctx.log<<std::endl;

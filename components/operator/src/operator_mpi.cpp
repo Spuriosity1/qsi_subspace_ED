@@ -533,6 +533,9 @@ void MPILazyOpSum<coeff_t, B>::evaluate_add_off_diag_batched(const coeff_t* x, c
     std::vector<int> recv_counts_no_self = recv_counts;
     send_counts_no_self[ctx.my_rank] = 0; // handle this separately
     recv_counts_no_self[ctx.my_rank] = 0; // handle this separately
+                                          //
+
+    std::vector<std::unordered_map<size_t, coeff_t>> cache;
 
     // apply to all local basis vectors, il = local state index
     BENCH_TIMER_TIMEIT(initial_apply_timer,
