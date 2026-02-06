@@ -28,6 +28,16 @@ int main(int argc, char* argv[]){
         .default_value(0u);
 
 
+    prog.add_argument("--trim")
+        .default_value(false)
+        .implicit_value(true);
+
+
+    prog.add_argument("--rebalance")
+        .default_value(false)
+        .implicit_value(true);
+
+
     try {
         prog.parse_args(argc, argv);
     } catch (const std::runtime_error& err) {
