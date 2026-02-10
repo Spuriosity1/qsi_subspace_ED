@@ -541,8 +541,9 @@ void MPILazyOpSum<coeff_t, B>::evaluate_add_off_diag_batched(const coeff_t* x, c
     // apply to all local basis vectors, il = local state index
     BENCH_TIMER_TIMEIT(initial_apply_timer,
     for (ZBasisBase::idx_t il = 0; il < ctx.local_block_size(); ++il) {
+        ZBasisBase::state_t og_state = basis[il];
         for ( const auto& [c, op] : ops.off_diag_terms ){
-            ZBasisBase::state_t state = basis[il];
+            auto state = og_state;
             auto sign = op.applyState(state);
             if (sign == 0) continue;
             
