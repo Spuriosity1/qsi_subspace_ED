@@ -23,7 +23,7 @@ operator_mpi_lib = static_library('operator_mpi', operator_mpi_src,
 # special bench versions
 if get_option('build_benchmarks')
   bench_operator_mpi_lib = static_library('expectation_eval_mpi', operator_mpi_src,
-    dependencies: [g_deps, eigen_dep, omp_dep, spectra_dep, mpi_dep], #todo purge spectra
+    dependencies: [g_deps, eigen_dep, omp_dep, spectra_dep, mpi_dep, absl_dep], #todo purge spectra
     include_directories: operator_inc,
     link_with: operator_lib,
     cpp_args: [target_args, '-DSUBSPACE_ED_BENCHMARK_OPERATIONS']
