@@ -234,8 +234,10 @@ struct SymbolicPMROperator {
         const auto d = down_mask.uint128;
         const auto u = up_mask.uint128;
 
-        if ( (s & d) != 0 ) return 0;
-        if ( (s & u) != u ) return 0;
+        // if ( (s & d) != 0 ) return 0;
+        // if ( (s & u) != u ) return 0;
+
+	const bool non_vanishing = ((s&d) == 0) & ((s & u) == u );
         // X mask makes sense: 
         state ^= X_mask;
 
@@ -246,7 +248,8 @@ struct SymbolicPMROperator {
         //
         //   popcnt_u128((~state) & Z_mask) - spin dn in Z mask 
         //
-        return sign * (1 - 2 * (popcnt_u128((~state) & Z_mask) % 2) );
+        return sign * (1 - 2 * (popcnt_u128((~state) & Z_mask) % 2) ) * non_vanishing;
+	// STICKY POINT -- mutates state even if it annihilates it
 	}
 
     bool is_diagonal() const {
@@ -338,10 +341,13 @@ private:
 
             char op = token[i];
             const std::string valid_ops = "xyz+-pqXYZPQ";
-            for (auto s : valid_ops){
-                if (op != s)
-                throw std::invalid_argument("Invalid op '" + std::string(1, op) + "' in token: " + token);
-            }
+	    bool valid = false;
+	    for (auto s : valid_ops){
+		    if (op == s) valid = true;
+	    }
+	    if (!valid){
+		    throw std::invalid_argument("Invalid op '" + std::string(1, op) + "' in token: " + token);
+	    }
 
             ops.push_back(op);
             ids.push_back(idx);
