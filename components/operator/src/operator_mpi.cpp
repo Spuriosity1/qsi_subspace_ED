@@ -545,7 +545,7 @@ void MPILazyOpSum<coeff_t, B>::evaluate_add_off_diag_batched(const coeff_t* x, c
         for ( const auto& [c, op] : ops.off_diag_terms ){
             auto state = og_state;
             auto sign = op.applyState(state);
-            if (sign == 0) continue;
+           // if (sign == 0) continue;
             
             auto target_rank = ctx.rank_of_state(state);
             auto dy = c*x[il]*sign;
@@ -789,7 +789,7 @@ void MPILazyOpSum<coeff_t, basis_t>::allocate_temporaries() {
     recv_counts.resize(ctx.world_size);
     recv_displs.resize(ctx.world_size);
 
-    std::fill(send_counts.begin(), send_counts.end(), 0); // extra one-past-end needed for branchless algo
+    std::fill(send_counts.begin(), send_counts.end(), 0);
     std::fill(recv_counts.begin(), recv_counts.end(), 0);
     std::fill(send_displs.begin(), send_displs.end(), 0);
     std::fill(recv_displs.begin(), recv_displs.end(), 0);
@@ -815,19 +815,20 @@ void MPILazyOpSum<coeff_t, basis_t>::allocate_temporaries() {
 
     MPI_Alltoall(send_counts.data(), 1, MPI_INT, recv_counts.data(), 1, MPI_INT, MPI_COMM_WORLD);
 
-    for (int r=1; r<ctx.world_size; r++){
-        send_displs[r] = send_counts[r-1] + send_displs[r-1];
-        recv_displs[r] = recv_counts[r-1] + recv_displs[r-1];
-    }
-
     const int total_send =
         std::accumulate(send_counts.begin(), send_counts.end(), 0);
 
     const int total_recv =
         std::accumulate(recv_counts.begin(), recv_counts.end(), 0);
 
-    send_state.resize(total_send);
-    send_dy.resize(total_send);
+
+    // one past the end for all (spacer needed)
+    for (int r=1; r<ctx.world_size; r++){
+        send_displs[r] = send_counts[r-1] + send_displs[r-1] + 1;
+        recv_displs[r] = recv_counts[r-1] + recv_displs[r-1];
+    }
+    send_state.resize(total_send + ctx.world_size);
+    send_dy.resize(total_send + ctx.world_size);
 
     recv_state.resize(total_recv);
     recv_dy.resize(total_recv);
