@@ -620,12 +620,13 @@ void MPILazyOpSum<coeff_t, B>::evaluate_add_off_diag_batched(const coeff_t* x, c
                                           //
 
     std::vector<PendingWrite> to_do;
+    to_do.reserve(ops.off_diag_terms.size());
 //    std::vector<std::unordered_map<size_t, coeff_t>> cache;
 
     // apply to all local basis vectors, il = local state index
     BENCH_TIMER_TIMEIT(initial_apply_timer,
-    for (ZBasisBase::idx_t il = 0; il < ctx.local_block_size(); ++il) {
-        for ( const auto& [c, op] : ops.off_diag_terms ){
+    for ( const auto& [c, op] : ops.off_diag_terms ){
+        for (ZBasisBase::idx_t il = 0; il < ctx.local_block_size(); ++il) {
             ZBasisBase::state_t state = basis[il];
             auto sign = op.applyState(state);
             if (sign == 0) continue;
