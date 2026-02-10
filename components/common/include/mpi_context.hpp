@@ -160,7 +160,9 @@ struct SparseMPIContext : public MPIContext<idx_t> {
         for (int i=0; i<64; i++){
             if (1<<i == this->world_size) is_power_of_2 = true;
         }
-        assert(is_power_of_2);
+        if (!is_power_of_2){
+            throw std::logic_error("Basis scheme only works for powers of 2");
+        }
     }
 
     // returns the node on which a specified psi can be found
