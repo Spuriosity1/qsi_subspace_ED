@@ -237,7 +237,7 @@ struct SymbolicPMROperator {
         if ( (s & d) != 0 ) return 0;
         if ( (s & u) != u ) return 0;
 
-	    // const int non_vanishing = static_cast<int>(((s&d) == 0) && ((s & u) == u ));
+	    const int non_vanishing = static_cast<int>(((s&d) == 0) && ((s & u) == u ));
         // X mask makes sense: 
         state ^= X_mask;
 
@@ -248,8 +248,7 @@ struct SymbolicPMROperator {
         //
         //   popcnt_u128((~state) & Z_mask) - spin dn in Z mask 
         //
-        return sign * (1 - 2 * (popcnt_u128((~state) & Z_mask) % 2) );
-// * non_vanishing;
+        return sign * (1 - 2 * (popcnt_u128((~state) & Z_mask) % 2) ) * non_vanishing;
 	// STICKY POINT -- mutates state even if it annihilates it
 	}
 
