@@ -259,6 +259,15 @@ inline int highest_set_bit(const Uint128& x) {
     }
 }
 
+inline int lowest_set_bit(const Uint128& x) {
+    if (x == 0) return 128;
+    if (x.uint64[0] != 0) {
+        return __builtin_ctzll(x.uint64[0]);
+    } else {
+        return 64 + __builtin_ctzll(x.uint64[1]);
+    }
+}
+
 
 template <typename T>
 inline Uint128 make_mask(T idx){

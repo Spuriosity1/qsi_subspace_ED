@@ -1,6 +1,7 @@
 #include "operator_mpi.hpp"
 #include <mpi.h>
 #include <cassert>
+#include "bittools.hpp"
 #include "timeit.hpp"
 #include <numeric>
 
@@ -74,8 +75,7 @@ inline std::vector<Uint128> read_basis_hdf5(
         }
 
 
-        // calculate the index partition in an efficient manner
-        {     
+        {
             // Each rank reads its boundary states directly from file
             auto read_state = [&](uint64_t idx) {
                 Uint128 val{};
@@ -94,11 +94,24 @@ inline std::vector<Uint128> read_basis_hdf5(
                 return val;
             };
 
-//            ctx.estimate_optimal_mask(total_rows, read_state, 4);
-            ctx.partition_indices_equal(total_rows);
-            ctx.populate_state_terminals(total_rows, read_state);
+            // infer # spins from the bit layout (assume tight packing)
+//            auto min_state = read_state(0);
+            auto max_state = read_state(total_rows-1);
+            int num_spins = highest_set_bit(max_state) + 1; 
+
+            // 0b1010010
+            // 0b0000011
+            // 0b1000000
+            // bit 5 is set
+            
+            ctx.set_mask(num_spins);
+
         }
     
+        // Rebalance later once they are already in ram
+        //
+        // kludge: naive guess of how to perturb these guys
+        ctx.partition_indices_equal(total_rows);
         
         // Local chunk indices (by global index)
         const uint64_t local_start = static_cast<uint64_t>(ctx.idx_partition[ctx.my_rank]);
@@ -162,6 +175,64 @@ inline std::vector<Uint128> read_basis_hdf5(
 }
 
 
+std::ostream& print_btw(std::ostream& os, const BasisTransferWisdom& btw){
+    os<<"Suggested basis rebalance:";
+    printvec(os<<"\n[b_send_counts] ", btw.send_counts);
+    printvec(os<<"\n[b_send_ranks] ", btw.send_ranks);
+    printvec(os<<"\n[b_recv_counts] ", btw.recv_counts);
+    printvec(os<<"\n[b_recv_ranks] ", btw.recv_ranks);
+
+    os<<"\n</basis rebalance>"<<std::endl;
+    return os;
+}
+
+
+BasisTransferWisdom ensure_states_match_mask(const MPIctx& ctx, const std::vector<Uint128>& states){
+
+    std::cerr<<"[alloc] Repartitioning basis. Mask = "<<ctx.get_mask();
+
+    BasisTransferWisdom btw;
+    std::vector<int> all_counts(ctx.world_size, 0);
+    std::vector<int> all_recv_counts(ctx.world_size, 0);
+
+    // n.b. strictly ascending in rank
+    for (size_t i=0; i<states.size(); i++){
+        int r=ctx.rank_of_state(states[i]);
+        if(r < 0 || r >= ctx.world_size){
+            std::cerr<<"Rank of state "<<states[i] <<" = "<<r<<std::endl;
+        }
+        all_counts[r]++;
+    }
+    MPI_Alltoall(all_counts.data(), 1, get_mpi_type<int>(),
+            all_recv_counts.data(), 1, get_mpi_type<int>(), MPI_COMM_WORLD);
+
+
+    for (int r=0; r<ctx.world_size; r++) {
+        if (all_counts[r]!=0) {
+            btw.send_counts.push_back(all_counts[r]);
+            btw.send_ranks.push_back(r);
+        }
+        if (all_recv_counts[r] != 0){
+            btw.recv_counts.push_back(all_recv_counts[r]);
+            btw.recv_ranks.push_back(r);
+        }
+    }
+    print_btw(std::cerr, btw);
+
+    btw.idx_partition.resize(ctx.world_size+1);
+
+    int my_new_dimension = std::accumulate(btw.recv_counts.begin(), btw.recv_counts.end(), 0);
+    std::vector<int> all_dimensions(ctx.world_size);
+    MPI_Allgather(&my_new_dimension, 1, MPI_INT, all_dimensions.data(), 1, MPI_INT, MPI_COMM_WORLD);
+
+    btw.idx_partition[0] = 0;
+    for(int r=0; r<ctx.world_size; r++){
+        btw.idx_partition[r+1] = btw.idx_partition[r] + all_dimensions[r];
+    }
+
+    return btw;
+}
+
 
 MPIctx MPI_ZBasisBST::load_from_file(const fs::path& bfile, const std::string& dataset){
      // MPI setup
@@ -181,13 +252,22 @@ MPIctx MPI_ZBasisBST::load_from_file(const fs::path& bfile, const std::string& d
                 "Bad basis format: file must end with .csv or .h5");
     }
 
+    // read_basis has also set "ctx" state 
+
+    std::cerr << "Transferring..."<<std::endl;
+    // set the new partition scheme
+    BasisTransferWisdom btw = ensure_states_match_mask(ctx, states);
+    print_btw(ctx.log, btw);
+
+
+    this->exchange_local_states(btw, ctx);
+
+    
+    // make sure each state is on the correct rank  
+
     std::cerr << "Done!" <<"\n";
     return ctx;
 }
-
-//void MPI_ZBasisBST::load_state(std::vector<double>& psi, const fs::path& eig_file){
-//    
-//}
 
 
 template<RealOrCplx coeff_t, Basis B >
@@ -535,7 +615,7 @@ void MPILazyOpSum<coeff_t, B>::evaluate_add_off_diag_batched(const coeff_t* x, c
     recv_counts_no_self[ctx.my_rank] = 0; // handle this separately
                                           //
 
-    std::vector<std::unordered_map<size_t, coeff_t>> cache;
+//    std::vector<std::unordered_map<size_t, coeff_t>> cache;
 
     // apply to all local basis vectors, il = local state index
     BENCH_TIMER_TIMEIT(initial_apply_timer,
@@ -673,6 +753,9 @@ void MPILazyOpSum<coeff_t, B>::evaluate_add_off_diag_batched(const coeff_t* x, c
 }
 
 
+
+
+
 template <RealOrCplx coeff_t, Basis basis_t>
 BasisTransferWisdom MPILazyOpSum<coeff_t, basis_t>::find_optimal_basis_load() {
 
@@ -761,13 +844,8 @@ BasisTransferWisdom MPILazyOpSum<coeff_t, basis_t>::find_optimal_basis_load() {
         btw.idx_partition[r+1] = btw.idx_partition[r] + all_dimensions[r];
     }
 
-    ctx.log<<"Sugested basis rebalance:";
-    printvec(ctx.log<<"\n[b_send_counts] ", btw.send_counts);
-    printvec(ctx.log<<"\n[b_send_ranks] ", btw.send_ranks);
-    printvec(ctx.log<<"\n[b_recv_counts] ", btw.recv_counts);
-    printvec(ctx.log<<"\n[b_recv_ranks] ", btw.recv_ranks);
+    print_btw(std::cerr, btw);
 
-    ctx.log<<"\n</basis rebalance>"<<std::endl;
 
     return btw;
 }
@@ -804,8 +882,6 @@ void MPILazyOpSum<coeff_t, basis_t>::allocate_temporaries() {
             send_counts[target_rank]++;
         }
     }
-
-    
 
 
     // allocate auxiliary arrays

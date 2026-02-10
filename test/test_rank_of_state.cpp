@@ -89,16 +89,17 @@ int main(int argc, char* argv[]){
 
     assert(ctx.local_block_size() == basis.size());
 
-    const auto lower_bound = ctx.state_partition[ctx.my_rank];
-    const auto upper_bound = ctx.state_partition[ctx.my_rank+1];
-    for (size_t il=0; il<basis.size(); il++){
-        if(basis[il] < lower_bound){
-            std::cerr <<"[rank "<<ctx.my_rank<<"] State "<<il<<" = "<<basis[il] << " too small | should be >= "<<lower_bound<<std::endl;
-            throw std::logic_error("bad partition!");
-        } else if(basis[il] >= upper_bound){
-            std::cerr <<"[rank "<<ctx.my_rank<<"] State "<<il<<" = "<<basis[il] << " too big | should be < "<<upper_bound<<std::endl;
-            throw std::logic_error("bad partition!");
-        }
+    
+//    const auto lower_bound = ctx.state_partition[ctx.my_rank];
+//    const auto upper_bound = ctx.state_partition[ctx.my_rank+1];
+    for (int il=0; il<basis.size(); il++){
+//        if(basis[il] < lower_bound){
+//            std::cerr <<"[rank "<<ctx.my_rank<<"] State "<<il<<" = "<<basis[il] << " too small | should be >= "<<lower_bound<<std::endl;
+//            throw std::logic_error("bad partition!");
+//        } else if(basis[il] >= upper_bound){
+//            std::cerr <<"[rank "<<ctx.my_rank<<"] State "<<il<<" = "<<basis[il] << " too big | should be < "<<upper_bound<<std::endl;
+//            throw std::logic_error("bad partition!");
+//        }
         assert(ctx.rank_of_state(basis[il]) == ctx.my_rank);
     }
 

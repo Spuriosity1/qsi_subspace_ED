@@ -9,9 +9,11 @@ typedef SparseMPIContext<ZBasisBST::idx_t> MPIctx;
 
 
 struct BasisTransferWisdom {
-    std::vector<int> send_counts, send_ranks, recv_counts, recv_ranks;
-    std::vector<ZBasisBase::idx_t> idx_partition;
-//    std::vector<ZBasisBase::state_t> state_partition;
+    std::vector<int> send_counts, // number of states to send
+        send_ranks, // accpetor ranks
+        recv_counts, // number of states received
+        recv_ranks;  // donor ranks
+    std::vector<ZBasisBase::idx_t> idx_partition; // the new index partition
 };
 
 // TODO this is a mess, MPIctx should clearly be a member of the MPI basis types
@@ -103,7 +105,6 @@ struct MPI_ZBasisBST : public ZBasisBST
          // states now initialised with (hopefully) correct set of vectors
          // update the terminals of ctx
          ctx.idx_partition = btw.idx_partition;
-         ctx.state_partition.resize(ctx.idx_partition.size());
 
          MPI_Allgather(states.data(), 1, get_mpi_type<state_t>(),
                  ctx.state_partition.data(), 1, get_mpi_type<state_t>(), MPI_COMM_WORLD);

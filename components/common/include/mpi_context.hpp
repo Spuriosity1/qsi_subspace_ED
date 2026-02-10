@@ -156,22 +156,43 @@ struct SparseMPIContext : public MPIContext<idx_t> {
     SparseMPIContext() : MPIContext<idx_t>() {
         state_partition.resize(this->world_size+1);
         assert(state_partition.size() == this->idx_partition.size());
+        bool is_power_of_2 =false;
+        for (int i=0; i<64; i++){
+            if (1<<i == this->world_size) is_power_of_2 = true;
+        }
+        assert(is_power_of_2);
     }
 
     // returns the node on which a specified psi can be found
-    size_t rank_of_state_slow(const state_t& psi) const;
+    size_t rank_of_state_lin(const state_t& psi) const;
+    size_t rank_of_state_bst(const state_t& psi) const;
     size_t rank_of_state(const state_t& psi) const;
+
+    void set_mask(int n_spins){
+        int n_bits_used_for_indexing = std::round(log2(this->world_size)); 
+        // equivalently: number of spins whose states determine the rank
+        n_mask_bits = 128 - n_spins + n_bits_used_for_indexing;
+        mask = {0xffffffffffffffff, 0xffffffffffffffff};
+        rshift = n_spins - n_bits_used_for_indexing;
+        mask <<= rshift;
+        
+    }
+
+    Uint128 get_mask() const {
+        return mask;
+    }
+
+//    void populate_state_terminals(int64_t n_basis_states, 
+//            const std::function<state_t(uint64_t)>& read_state);
     
-
-    void populate_state_terminals(int64_t n_basis_states, 
-            const std::function<state_t(uint64_t)>& read_state);
-
     std::vector<state_t> state_partition;
 
     std::vector<std::vector<std::pair<int, size_t>>> get_rebalance_plan(const std::vector<int>& curr_work);
 
 private:
-    int n_bits;
+    int n_mask_bits;
+    int rshift;
+    Uint128 mask=0;
 };
 
 
@@ -276,17 +297,20 @@ SparseMPIContext<idx_t>::get_rebalance_plan(const std::vector<int>& rank_hardnes
 
 
 
+/*
 template < typename idx_t>
 void SparseMPIContext< idx_t>::populate_state_terminals(int64_t n_basis_states, 
         const std::function<state_t(uint64_t)>& read_state)
 {
     assert(n_basis_states > this->world_size);
     state_partition.resize(this->world_size+1);
+    Uint128 max_state;
 
     if (this->my_rank == 0){
         for (int i=0; i<this->world_size; i++){
             state_partition[i] = read_state(this->idx_partition[i]);
         }
+        max_state = read_state(n_basis_states-1);
         state_partition[this->world_size] = ~Uint128(0);
     }
 
@@ -294,7 +318,19 @@ void SparseMPIContext< idx_t>::populate_state_terminals(int64_t n_basis_states,
     MPI_Bcast(state_partition.data(), state_partition.size(), get_mpi_type<Uint128>(), 0, MPI_COMM_WORLD);
     MPI_Bcast(this->idx_partition.data(), this->idx_partition.size(), get_mpi_type<idx_t>(),
             0, MPI_COMM_WORLD);
+    MPI_Bcast(&max_state, 1, get_mpi_type<Uint128>(), 0, MPI_COMM_WORLD);
+    // populate mask
+    int n_spins = highest_set_bit(max_state)+1;
+    int n_bits_used_for_indexing = std::round(log2(this->world_size)); 
+    // equivalently: number of spins whose states determine the rank
+    this->n_mask_bits = 128 - n_spins + n_bits_used_for_indexing;
+    this->mask = {0xffffffffffffffff, 0xffffffffffffffff};
+    mask <<= n_spins - n_bits_used_for_indexing;
+
+
 }
+
+*/
 
 
 //template <typename idx_t>
@@ -330,7 +366,7 @@ void SparseMPIContext< idx_t>::populate_state_terminals(int64_t n_basis_states,
 
 
 template <typename idx_t>
-size_t SparseMPIContext<idx_t>::rank_of_state(const state_t& psi) const {
+size_t SparseMPIContext<idx_t>::rank_of_state_bst(const state_t& psi) const {
     int left = 0;
     int right = this->world_size;
     const __uint128_t* arr = reinterpret_cast<const __uint128_t*>(state_partition.data());
@@ -343,6 +379,18 @@ size_t SparseMPIContext<idx_t>::rank_of_state(const state_t& psi) const {
             right = mid;
     }
     return left - 1;
+}
+
+
+template <typename idx_t>
+size_t SparseMPIContext<idx_t>::rank_of_state(const state_t& psi) const {
+    assert(mask != 0);
+//    if (n_mask_bits < 64) {
+//        [[likely]]
+//        return (psi.uint64[1] & mask.uint64[1]) >> rshift;
+//    } else {
+        return ((psi & mask) >> rshift).uint64[0];
+//    }
 }
 
 
@@ -363,7 +411,7 @@ auto& operator<<(std::ostream& os, const SparseMPIContext< idx_t>& ctx){
 
 
 template < typename idx_t>
-size_t SparseMPIContext< idx_t>::rank_of_state_slow(const state_t& psi) const {
+size_t SparseMPIContext< idx_t>::rank_of_state_lin(const state_t& psi) const {
     // linear search, all states should fit in cache unless # nodes is very large
     // IMPORTANT: never checks state_partition[world_size] itself, which may
     // overflow in the 128 site cache

@@ -114,7 +114,7 @@ void load_state(std::vector<double>& psi, const MPI_ZBasisBST& basis, const std:
             assert(ctx.idx_partition.size() == ctx.state_partition.size());
             std::cout<<"Loaded basis chunk. Partition scheme:\n index\t state\n";
             for (size_t i=0; i<ctx.idx_partition.size(); i++){
-                std::cout<<ctx.idx_partition[i]<<"\t";
+                std::cout<<ctx.idx_partition[i]<<"\n";
                 printHex(std::cout, ctx.state_partition[i])<<"\n";
             }
         }
