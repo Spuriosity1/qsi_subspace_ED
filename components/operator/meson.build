@@ -15,7 +15,7 @@ operator_lib = static_library('operator', operator_src,
 operator_mpi_src = ['src/operator.cpp', 'src/operator_mpi.cpp']
 
 operator_mpi_lib = static_library('operator_mpi', operator_mpi_src,
-  dependencies: [g_deps, eigen_dep, mpi_dep ],
+  dependencies: [g_deps, eigen_dep, mpi_dep, absl_dep ],
   include_directories: operator_inc,
   cpp_args: target_args
   )
