@@ -5,6 +5,7 @@
 #include "bittools.hpp"
 #include "timeit.hpp"
 #include <numeric>
+#include <absl/container/flat_hash_map.h>
 
 #ifndef NDEBUG
 #define ASSERT_STATE_FOUND(error_msg, state, result) \
@@ -619,9 +620,7 @@ void MPILazyOpSum<coeff_t, B>::evaluate_add_off_diag_batched(const coeff_t* x, c
     recv_counts_no_self[ctx.my_rank] = 0; // handle this separately
                                           //
 
-    std::vector<PendingWrite> to_do;
-    to_do.reserve(ops.off_diag_terms.size());
-//    std::vector<std::unordered_map<size_t, coeff_t>> cache;
+    absl::flat_hash_map<ZBasisBase::state_t, coeff_t> cache;
 
     // apply to all local basis vectors, il = local state index
     BENCH_TIMER_TIMEIT(initial_apply_timer,
@@ -643,7 +642,7 @@ void MPILazyOpSum<coeff_t, B>::evaluate_add_off_diag_batched(const coeff_t* x, c
 //                    );
 //                y[local_idx] += dy;
 //            }
-            to_do.push_back({state, dy});
+            cache[state]+= dy;
 //            int pos = send_cursors[target_rank]++;
 //            send_state[pos] = state;
 //            send_dy[pos] = dy;
@@ -651,19 +650,14 @@ void MPILazyOpSum<coeff_t, B>::evaluate_add_off_diag_batched(const coeff_t* x, c
     }
     );
 
-    BENCH_TIMER_TIMEIT(sort_timer,
-            std::sort(to_do.begin(), to_do.end(), [](auto& a, auto& b){return a.psi < b.psi;});
-            )
 
     BENCH_TIMER_TIMEIT(write_timer,
-            for (auto& [psi, dy] : to_do){
-            int target_rank = ctx.rank_of_state(psi);
+            for (auto& [psi, dy] : cache){
+                int target_rank = ctx.rank_of_state(psi);
 
-            int pos = send_cursors[target_rank]++;
-            send_state[pos] = psi;
-            send_dy[pos] = dy;
-
-
+                int pos = send_cursors[target_rank]++;
+                send_state[pos] = psi;
+                send_dy[pos] = dy;
             }
             )
 

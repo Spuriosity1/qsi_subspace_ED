@@ -232,6 +232,8 @@ cmake_opts.add_cmake_defines({
   'ENABLE_WERROR': 'OFF'
 })
 
+absl_dep = dependency('absl_flat_hash_map', required: true)
+
 
 # Local include dir for headers like bittools.hpp, admin.hpp, basis_io
 

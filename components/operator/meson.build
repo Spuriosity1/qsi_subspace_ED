@@ -4,7 +4,7 @@ operator_src = ['src/operator.cpp',
 #  'src/group_theory.cpp', 
   'src/operator_matrix.cpp']
 
-operator_dep_set = [g_deps, eigen_dep, omp_dep ]
+operator_dep_set = [g_deps, eigen_dep, omp_dep, absl_dep ]
 
 operator_lib = static_library('operator', operator_src,
   dependencies: operator_dep_set,
