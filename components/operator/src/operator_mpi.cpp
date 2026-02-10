@@ -1,4 +1,5 @@
 #include "operator_mpi.hpp"
+#include <algorithm>
 #include <mpi.h>
 #include <cassert>
 #include "bittools.hpp"
@@ -589,6 +590,7 @@ void MPILazyOpSum<coeff_t, B>::evaluate_add_off_diag_pipeline(const coeff_t* x, 
 }
 
 
+struct PendingWrite{ZBasisBase::state_t psi; double dy;};
 
 template <RealOrCplx coeff_t, Basis B>
 void MPILazyOpSum<coeff_t, B>::evaluate_add_off_diag_batched(const coeff_t* x, coeff_t* y) {
@@ -597,12 +599,14 @@ void MPILazyOpSum<coeff_t, B>::evaluate_add_off_diag_batched(const coeff_t* x, c
     assert(send_state.size() == send_dy.size());
 
     Timer initial_apply_timer("[initial apply]", ctx.my_rank);
-//    Timer sort_vectors_timer("[sort]", ctx.my_rank);
+    Timer sort_timer("[sort]", ctx.my_rank);
+    Timer write_timer("[write sorted]", ctx.my_rank);
     Timer loc_apply_timer("[local apply]", ctx.my_rank);
     Timer remx_wait_timer("[waiting for data]", ctx.my_rank);
     Timer rem_apply_timer("[remote apply]", ctx.my_rank);
 
     std::vector<const Timer*> timers{&initial_apply_timer,
+        &sort_timer,
         &loc_apply_timer, &remx_wait_timer, &rem_apply_timer};
 
     
@@ -615,6 +619,7 @@ void MPILazyOpSum<coeff_t, B>::evaluate_add_off_diag_batched(const coeff_t* x, c
     recv_counts_no_self[ctx.my_rank] = 0; // handle this separately
                                           //
 
+    std::vector<PendingWrite> to_do;
 //    std::vector<std::unordered_map<size_t, coeff_t>> cache;
 
     // apply to all local basis vectors, il = local state index
@@ -625,7 +630,7 @@ void MPILazyOpSum<coeff_t, B>::evaluate_add_off_diag_batched(const coeff_t* x, c
             auto sign = op.applyState(state);
             if (sign == 0) continue;
             
-            auto target_rank = ctx.rank_of_state(state);
+//            auto target_rank = ctx.rank_of_state(state);
             auto dy = c*x[il]*sign;
 
 //            if (target_rank == ctx.my_rank){
@@ -637,13 +642,31 @@ void MPILazyOpSum<coeff_t, B>::evaluate_add_off_diag_batched(const coeff_t* x, c
 //                    );
 //                y[local_idx] += dy;
 //            }
-    
-            int pos = send_cursors[target_rank]++;
-            send_state[pos] = state;
-            send_dy[pos] = dy;
+            to_do.push_back({state, dy});
+//            int pos = send_cursors[target_rank]++;
+//            send_state[pos] = state;
+//            send_dy[pos] = dy;
         }
     }
     );
+
+    BENCH_TIMER_TIMEIT(sort_timer,
+            std::sort(to_do.begin(), to_do.end(), [](auto& a, auto& b){return a.psi < b.psi;});
+            )
+
+    BENCH_TIMER_TIMEIT(write_timer,
+            for (auto& [psi, dy] : to_do){
+            int target_rank = ctx.rank_of_state(psi);
+
+            int pos = send_cursors[target_rank]++;
+            send_state[pos] = psi;
+            send_dy[pos] = dy;
+
+
+            }
+            )
+
+
 
 
 
