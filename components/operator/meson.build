@@ -40,5 +40,5 @@ operator_dep = declare_dependency(
 operator_mpi_dep = declare_dependency(
   link_with: operator_mpi_lib,
   include_directories: operator_inc,
-  dependencies: [hdf5_dep, mpi_dep]
+  dependencies: [hdf5_dep, mpi_dep, omp_dep]
   )

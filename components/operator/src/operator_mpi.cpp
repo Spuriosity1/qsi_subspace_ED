@@ -526,7 +526,6 @@ void MPILazyOpSum<coeff_t, B>::evaluate_add_off_diag_batched(const coeff_t* x, c
     std::vector<const Timer*> timers{&initial_apply_timer,
         &loc_apply_timer, &remx_wait_timer, &rem_apply_timer};
 
-    
 
     // current positions in the send arrays
     std::vector<int> send_cursors = send_displs;                 
@@ -534,16 +533,22 @@ void MPILazyOpSum<coeff_t, B>::evaluate_add_off_diag_batched(const coeff_t* x, c
     std::vector<int> recv_counts_no_self = recv_counts;
     send_counts_no_self[ctx.my_rank] = 0; // handle this separately
     recv_counts_no_self[ctx.my_rank] = 0; // handle this separately
-                                          //
+ 
+
+//    // thread local storage
+//    const int nthreads = omp_get_max_threads();
+//    std::vector<std::vector<ZBasisBase::state_t>> tls_send_state(nthreads);
+//    std::vector<std::vector<coeff_t>> tls_send_dy(nthreads);
 
     auto N = send_state.size();
     send_state.resize(N+1); // need space for one past the end
     send_dy.resize(N+1);
     // apply to all local basis vectors, il = local state index
     BENCH_TIMER_TIMEIT(initial_apply_timer,
+
+        for ( const auto& [c, op] : ops.off_diag_terms ){
     for (ZBasisBase::idx_t il = 0; il < ctx.local_block_size(); ++il) {
         ZBasisBase::state_t og_state = basis[il];
-        for ( const auto& [c, op] : ops.off_diag_terms ){
             auto state = og_state;
             auto sign = op.applyState(state);
 
