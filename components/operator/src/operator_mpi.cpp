@@ -252,6 +252,7 @@ void MPILazyOpSum<coeff_t, B>::evaluate_add_diagonal(const coeff_t* x, coeff_t* 
         for (ZBasisBase::idx_t i = 0; i<ctx.local_block_size(); ++i){
             ZBasisBase::state_t psi = basis[i];
             coeff_t dy = c * x[i] * static_cast<double>(op.applyState(psi));
+            assert(psi == basis[i]);
             // completely in place, no i collisions
             y[i] += dy;
         }       
@@ -545,6 +546,8 @@ void MPILazyOpSum<coeff_t, B>::evaluate_add_off_diag_batched(const coeff_t* x, c
         for ( const auto& [c, op] : ops.off_diag_terms ){
             auto state = og_state;
             auto sign = op.applyState(state);
+
+            assert(sign == 0 || sign == 1 || sign == -1);
            // if (sign == 0) continue;
             
             auto target_rank = ctx.rank_of_state(state);
@@ -565,6 +568,8 @@ void MPILazyOpSum<coeff_t, B>::evaluate_add_off_diag_batched(const coeff_t* x, c
             send_dy[pos] = dy;
 
             pos += (sign !=0); // overwrite if not needed
+            assert(pos < send_state.size());
+            assert(pos < send_dy.size());
          }
     }
     );
