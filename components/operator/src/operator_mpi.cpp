@@ -546,9 +546,9 @@ void MPILazyOpSum<coeff_t, B>::evaluate_add_off_diag_batched(const coeff_t* x, c
     // apply to all local basis vectors, il = local state index
     BENCH_TIMER_TIMEIT(initial_apply_timer,
 
-        for ( const auto& [c, op] : ops.off_diag_terms ){
-    for (ZBasisBase::idx_t il = 0; il < ctx.local_block_size(); ++il) {
-        ZBasisBase::state_t og_state = basis[il];
+    for ( const auto& [c, op] : ops.off_diag_terms ){
+        for (ZBasisBase::idx_t il = 0; il < ctx.local_block_size(); ++il) {
+            ZBasisBase::state_t og_state = basis[il];
             auto state = og_state;
             auto sign = op.applyState(state);
 
@@ -594,9 +594,8 @@ void MPILazyOpSum<coeff_t, B>::evaluate_add_off_diag_batched(const coeff_t* x, c
         // make sure we did this correctly -- negligible cost
         assert(send_cursors[r] == send_displs[r] + send_counts[r]);
 
-    // these don't need sending or receiving
+        // these don't need sending or receiving
         if (r==ctx.my_rank) continue; 
-        
 
         if (recv_counts[r] > 0){
             MPI_Request req_state, req_dy;
