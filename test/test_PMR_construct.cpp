@@ -140,12 +140,16 @@ void test_apply() {
     check_equiv_str("0+ 0X 0+", "0+", +1, down);
     check_equiv_str("0+ 0X 0+", "0+ 0- 0+", +1, down);
 
+    check_equiv_str("0+ 0X 0+", "0+", +1, up);
+    check_equiv_str("0+ 0X 0+", "0+ 0- 0+", +1, up);
+
     // - X - = -+- = -
     check_equiv_str("0- 0X 0-", "0-", +1, up);
     check_equiv_str("0- 0X 0-", "0- 0+ 0-", +1, up);
 
     // +Z == -Z+
-    check_equiv_str("0+ 0Z", "0- 0Z 0+", +1, up);
+    check_equiv_str("0+ 0Z", "0Z 0+", -1, up);
+    check_equiv_str("64+ 64Z", "64Z 64+", -1, up64);
 
     // X+ == -+
     check_equiv_str("0X 0+", "0- 0+", +1, up);

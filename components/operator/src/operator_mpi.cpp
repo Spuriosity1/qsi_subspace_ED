@@ -252,6 +252,7 @@ void MPILazyOpSum<coeff_t, B>::evaluate_add_diagonal(const coeff_t* x, coeff_t* 
         for (ZBasisBase::idx_t i = 0; i<ctx.local_block_size(); ++i){
             ZBasisBase::state_t psi = basis[i];
             coeff_t dy = c * x[i] * static_cast<double>(op.applyState(psi));
+            assert(psi == basis[i]);
             // completely in place, no i collisions
             y[i] += dy;
         }       
@@ -525,7 +526,6 @@ void MPILazyOpSum<coeff_t, B>::evaluate_add_off_diag_batched(const coeff_t* x, c
     std::vector<const Timer*> timers{&initial_apply_timer,
         &loc_apply_timer, &remx_wait_timer, &rem_apply_timer};
 
-    
 
     // current positions in the send arrays
     std::vector<int> send_cursors = send_displs;                 
@@ -533,43 +533,59 @@ void MPILazyOpSum<coeff_t, B>::evaluate_add_off_diag_batched(const coeff_t* x, c
     std::vector<int> recv_counts_no_self = recv_counts;
     send_counts_no_self[ctx.my_rank] = 0; // handle this separately
     recv_counts_no_self[ctx.my_rank] = 0; // handle this separately
-                                          //
+ 
 
-    std::vector<std::unordered_map<size_t, coeff_t>> cache;
+//    // thread local storage
+//    const int nthreads = omp_get_max_threads();
+//    std::vector<std::vector<ZBasisBase::state_t>> tls_send_state(nthreads);
+//    std::vector<std::vector<coeff_t>> tls_send_dy(nthreads);
 
+    auto N = send_state.size();
+    send_state.resize(N+1); // need space for one past the end
+    send_dy.resize(N+1);
     // apply to all local basis vectors, il = local state index
     BENCH_TIMER_TIMEIT(initial_apply_timer,
-    for (ZBasisBase::idx_t il = 0; il < ctx.local_block_size(); ++il) {
-        for ( const auto& [c, op] : ops.off_diag_terms ){
-            ZBasisBase::state_t state = basis[il];
+
+    for ( const auto& [c, op] : ops.off_diag_terms ){
+        for (ZBasisBase::idx_t il = 0; il < ctx.local_block_size(); ++il) {
+            ZBasisBase::state_t og_state = basis[il];
+            auto state = og_state;
             auto sign = op.applyState(state);
-            if (sign == 0) continue;
+
+            assert(sign == 0 || sign == 1 || sign == -1);
+           // if (sign == 0) continue;
             
             auto target_rank = ctx.rank_of_state(state);
             auto dy = c*x[il]*sign;
-            if (target_rank == ctx.my_rank){
-                // immediately apply
-                ZBasisBase::idx_t local_idx;
-                ASSERT_STATE_FOUND("local",
-                    state,
-                    basis.search(state, local_idx)
-                    );
-                y[local_idx] += dy;
-            }
+
+//            if (target_rank == ctx.my_rank){
+//                // immediately apply
+//                ZBasisBase::idx_t local_idx;
+//                ASSERT_STATE_FOUND("local",
+//                    state,
+//                    basis.search(state, local_idx)
+//                    );
+//                y[local_idx] += dy;
+//            }
     
-            int pos = send_cursors[target_rank]++;
+            int& pos = send_cursors[target_rank];
             send_state[pos] = state;
             send_dy[pos] = dy;
-        }
+
+            pos += (sign !=0); // overwrite if not needed
+            assert(pos < send_state.size());
+            assert(pos < send_dy.size());
+         }
     }
     );
 
+    send_state.resize(N); // need space for one past the end
+    send_dy.resize(N);
 
 
     std::vector<MPI_Request> send_reqs;
     std::vector<MPI_Request> recv_reqs;
 
-    std::vector<int> request_ranks;
 
     const int STATE_REQ = 0x10000;
     const int COEFF_REQ = 0x20000;
@@ -578,12 +594,8 @@ void MPILazyOpSum<coeff_t, B>::evaluate_add_off_diag_batched(const coeff_t* x, c
         // make sure we did this correctly -- negligible cost
         assert(send_cursors[r] == send_displs[r] + send_counts[r]);
 
-    // these don't need sending or receiving
+        // these don't need sending or receiving
         if (r==ctx.my_rank) continue; 
-        
-        if (send_counts[r] > 0){
-            request_ranks.push_back(r);
-        }
 
         if (recv_counts[r] > 0){
             MPI_Request req_state, req_dy;
@@ -616,17 +628,17 @@ void MPILazyOpSum<coeff_t, B>::evaluate_add_off_diag_batched(const coeff_t* x, c
     assert(send_counts[ctx.my_rank] == recv_counts[ctx.my_rank]);
     const int loc_send_offset = send_displs[ctx.my_rank];
 
-//    BENCH_TIMER_TIMEIT(loc_apply_timer,
-//    for (int i=loc_send_offset; 
-//            i<loc_send_offset+send_counts[ctx.my_rank]; i++){
-//        ZBasisBase::idx_t local_idx;
-//        ASSERT_STATE_FOUND("local",
-//            send_state[i],
-//            basis.search(send_state[i], local_idx)
-//            );
-//        y[local_idx] += send_dy[i];
-//    }
-//    );
+    BENCH_TIMER_TIMEIT(loc_apply_timer,
+    for (int i=loc_send_offset; 
+            i<loc_send_offset+send_counts[ctx.my_rank]; i++){
+        ZBasisBase::idx_t local_idx;
+        ASSERT_STATE_FOUND("local",
+            send_state[i],
+            basis.search(send_state[i], local_idx)
+            );
+        y[local_idx] += send_dy[i];
+    }
+    );
 
     #ifdef SUBSPACE_ED_BENCHMARK_OPERATIONS
         int num_send_neighbors = 0, num_recv_neighbors = 0;
@@ -812,19 +824,20 @@ void MPILazyOpSum<coeff_t, basis_t>::allocate_temporaries() {
 
     MPI_Alltoall(send_counts.data(), 1, MPI_INT, recv_counts.data(), 1, MPI_INT, MPI_COMM_WORLD);
 
-    for (int r=1; r<ctx.world_size; r++){
-        send_displs[r] = send_counts[r-1] + send_displs[r-1];
-        recv_displs[r] = recv_counts[r-1] + recv_displs[r-1];
-    }
-
     const int total_send =
         std::accumulate(send_counts.begin(), send_counts.end(), 0);
 
     const int total_recv =
         std::accumulate(recv_counts.begin(), recv_counts.end(), 0);
 
-    send_state.resize(total_send);
-    send_dy.resize(total_send);
+
+    // one past the end for all (spacer needed)
+    for (int r=1; r<ctx.world_size; r++){
+        send_displs[r] = send_counts[r-1] + send_displs[r-1] + 1;
+        recv_displs[r] = recv_counts[r-1] + recv_displs[r-1];
+    }
+    send_state.resize(total_send + ctx.world_size);
+    send_dy.resize(total_send + ctx.world_size);
 
     recv_state.resize(total_recv);
     recv_dy.resize(total_recv);

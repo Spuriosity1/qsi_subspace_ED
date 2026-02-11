@@ -6,3 +6,4 @@ module load eigen/latest
 
 export LD_LIBRARY_PATH=/home/als217/install/HDF_Group/HDF5/1.14.6/lib:${LD_LIBRARY_PATH}
 
+alias gpmc="git pull && meson compile -C build"

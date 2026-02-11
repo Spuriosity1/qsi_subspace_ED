@@ -85,6 +85,13 @@ union Uint128 {
         return *this;
     }
 
+
+    template<typename T>
+    constexpr Uint128& operator*=(T other){
+        uint128 *= other;
+        return *this;
+    }
+
     constexpr Uint128& operator&=(const Uint128& other){
         uint128 &= other.uint128;
         return *this;

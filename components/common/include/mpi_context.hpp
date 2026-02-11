@@ -342,6 +342,7 @@ size_t SparseMPIContext<idx_t>::rank_of_state(const state_t& psi) const {
         else 
             right = mid;
     }
+    assert(left - 1 < this->world_size && left -1 >= 0);
     return left - 1;
 }
 

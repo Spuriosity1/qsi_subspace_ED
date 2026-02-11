@@ -234,8 +234,35 @@ struct SymbolicPMROperator {
         const auto d = down_mask.uint128;
         const auto u = up_mask.uint128;
 
+	    const uint64_t ok = static_cast<int>(((s&d) == 0) && ((s & u) == u ));
+        // 0 or 1, guaranteed
+
+        // Expand to full mask: 0x0 or 0xFFFF...FFFF
+        const __uint128_t m = (__uint128_t)0 - ok;
+
+        // Conditionally flip
+        state = s ^ (X_mask & m);
+
+        // Explanation: There is a factor of -1 for every spin DOWN (i.e. 0) 
+        // in state & Z_mask, i.e. every 1 in (~state) & Z_mask. 
+        // if there are an even number, we have overall +1. 
+        // If odd, there is overall -1.
+        //
+        //   popcnt_u128((~state) & Z_mask) - spin dn in Z mask 
+        //
+        return sign * (1 - 2 * (popcnt_u128((~state) & Z_mask) % 2) ) * ok;
+	}
+
+
+	inline int applyState_branch(ZBasisBase::state_t& state) const {
+        const auto s = state.uint128;
+        const auto d = down_mask.uint128;
+        const auto u = up_mask.uint128;
+
         if ( (s & d) != 0 ) return 0;
         if ( (s & u) != u ) return 0;
+
+	    const int non_vanishing = static_cast<int>(((s&d) == 0) && ((s & u) == u ));
         // X mask makes sense: 
         state ^= X_mask;
 
@@ -246,7 +273,7 @@ struct SymbolicPMROperator {
         //
         //   popcnt_u128((~state) & Z_mask) - spin dn in Z mask 
         //
-        return sign * (1 - 2 * (popcnt_u128((~state) & Z_mask) % 2) );
+        return sign * (1 - 2 * (popcnt_u128((~state) & Z_mask) % 2) ) * non_vanishing;
 	}
 
     bool is_diagonal() const {
@@ -338,10 +365,13 @@ private:
 
             char op = token[i];
             const std::string valid_ops = "xyz+-pqXYZPQ";
-            for (auto s : valid_ops){
-                if (op != s)
-                throw std::invalid_argument("Invalid op '" + std::string(1, op) + "' in token: " + token);
-            }
+	    bool valid = false;
+	    for (auto s : valid_ops){
+		    if (op == s) valid = true;
+	    }
+	    if (!valid){
+		    throw std::invalid_argument("Invalid op '" + std::string(1, op) + "' in token: " + token);
+	    }
 
             ops.push_back(op);
             ids.push_back(idx);

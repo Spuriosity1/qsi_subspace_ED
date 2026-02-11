@@ -16,6 +16,23 @@
 using json = nlohmann::json;
 
 
+template<typename T>
+void check_basis_partition(const T& basis, const MPIctx& ctx){
+
+    std::cout<<"[MPI_BST] Checking basis partition..."<<std::endl;
+        Uint128 state_prev=0;
+        for (int il=0;  il<ctx.local_block_size(); il++){
+            assert(basis[il] > state_prev);
+            state_prev = basis[il];
+            assert(basis[il] >= ctx.state_partition[ctx.my_rank]);
+            assert(basis[il] < ctx.state_partition[ctx.my_rank+1]);
+        }
+    std::cout<<"Done"<<std::endl;
+}
+
+
+
+
 int main(int argc, char* argv[]){
     
 	argparse::ArgumentParser prog(argv[0]);
@@ -93,6 +110,25 @@ int main(int argc, char* argv[]){
     }
 
 
+    std::cout<<"[MPI_BST] Checking applyState consistency..."<<std::endl;
+
+    for (auto& [c, O] : H_sym.off_diag_terms){
+        for (int il=0;  il<ctx.local_block_size(); il++){
+            auto p1 = basis[il];
+            auto p2 = basis[il];
+
+            int s1 = O.applyState(p1);
+            int s2 = O.applyState_branch(p2);
+            assert(s1 == s2);
+            if (s1 != 0){
+                assert(p1 == p2);
+            }
+        }
+    }
+
+
+    std::cout<<"Done"<<std::endl;
+
     ctx.log<<"[Symbolic ham construction done.]"<<std::endl;
 
     if (prog.get<bool>("--trim")){
@@ -130,6 +166,9 @@ int main(int argc, char* argv[]){
     std::fill(u1_local.begin(), u1_local.end(), 0);
 //    std::fill(u2_local.begin(), u2_local.end(), 0);
 
+
+    check_basis_partition(basis, ctx);
+
     std::cout<<"[BST "<<ctx.my_rank<<"]  Apply..."<<std::endl;
     TIMEIT("[BST] u += Av", H_st.evaluate_add(v_global.data(), u_global.data());)
 
@@ -147,6 +186,8 @@ int main(int argc, char* argv[]){
 //    double max_error_2 = 0;
 
 
+
+    
 
 //    std::ostringstream filename;
 //    filename << "comparison_rank" << ctx.my_rank << ".csv";
