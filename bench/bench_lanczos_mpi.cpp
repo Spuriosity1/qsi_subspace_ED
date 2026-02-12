@@ -72,7 +72,7 @@ int main(int argc, char* argv[]){
 
     unsigned int seed = prog.get<unsigned int>("--seed");
 
-    MPI_ZBasisBST basis;
+    ZBasisBST_MPI basis;
    
 	// Step 1: Load ring data from JSON
     auto lattice_file = prog.get<std::string>("lattice_file");

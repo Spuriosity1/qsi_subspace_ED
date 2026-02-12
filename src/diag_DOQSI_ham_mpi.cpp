@@ -90,7 +90,7 @@ int main(int argc, char* argv[]) {
 	// Step 2: Load basis from H5
     std::cout<<"Loading basis..."<<std::endl;
 
-    MPI_ZBasisBST basis;
+    ZBasisBST_MPI basis;
     std::cout<<"[MPI_BST]  Loading basis..."<<std::endl;
     SparseMPIContext ctx = load_basis(basis, prog);
     std::cout<<"[MPI_BST]  Done! local basis dim="<<basis.dim()<<std::endl;

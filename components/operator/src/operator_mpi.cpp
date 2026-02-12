@@ -163,7 +163,7 @@ inline std::vector<Uint128> read_basis_hdf5(
 
 
 
-MPIctx MPI_ZBasisBST::load_from_file(const fs::path& bfile, const std::string& dataset){
+MPIctx ZBasisBST_MPI::load_from_file(const fs::path& bfile, const std::string& dataset){
      // MPI setup
     MPIctx ctx;
 //    int rank = ctx.world_rank;
@@ -185,13 +185,13 @@ MPIctx MPI_ZBasisBST::load_from_file(const fs::path& bfile, const std::string& d
     return ctx;
 }
 
-//void MPI_ZBasisBST::load_state(std::vector<double>& psi, const fs::path& eig_file){
+//void ZBasisBST_MPI::load_state(std::vector<double>& psi, const fs::path& eig_file){
 //    
 //}
 
 
 template<RealOrCplx coeff_t, Basis B >
-void MPILazyOpSum<coeff_t, B>::inplace_bucket_sort(std::vector<ZBasisBase::state_t>& states,
+void MPILazyOpSumBase<coeff_t, B>::inplace_bucket_sort(std::vector<ZBasisBase::state_t>& states,
         std::vector<coeff_t>& c,
         std::vector<int>& bucket_sizes,
         std::vector<int>& bucket_starts
@@ -240,7 +240,7 @@ void MPILazyOpSum<coeff_t, B>::inplace_bucket_sort(std::vector<ZBasisBase::state
 
 
 template <RealOrCplx coeff_t, Basis B>
-void MPILazyOpSum<coeff_t, B>::evaluate_add_diagonal(const coeff_t* x, coeff_t* y) const {
+void MPILazyOpSumBase<coeff_t, B>::evaluate_add_diagonal(const coeff_t* x, coeff_t* y) const {
     for (const auto& term : ops.diagonal_terms) {
         const auto& c = term.first;   
         const auto& op = term.second;
@@ -261,7 +261,7 @@ void MPILazyOpSum<coeff_t, B>::evaluate_add_diagonal(const coeff_t* x, coeff_t* 
 
 
 template <RealOrCplx coeff_t, Basis B>
-void MPILazyOpSum<coeff_t, B>::evaluate_add_off_diag_pipeline(const coeff_t* x, coeff_t* y) const {
+void MPILazyOpSumPipe<coeff_t, B>::evaluate_add_off_diag_pipeline(const coeff_t* x, coeff_t* y) const {
     // State for pipelined communication
     struct OperatorCommState {
         std::vector<MPI_Request> requests;
@@ -276,6 +276,8 @@ void MPILazyOpSum<coeff_t, B>::evaluate_add_off_diag_pipeline(const coeff_t* x, 
         std::vector<int> recvcounts;
         bool count_exchange_done = false;
     };
+
+    auto& ctx = this->ctx;
 
     Timer loc_apply_timer("[local apply]", ctx.my_rank);
     Timer loc_up_timer("[local update]", ctx.my_rank);
@@ -292,7 +294,7 @@ void MPILazyOpSum<coeff_t, B>::evaluate_add_off_diag_pipeline(const coeff_t* x, 
     bool has_prev_op = false;
 
     int op_index = 0;
-    for ( const auto& [c, op] : ops.off_diag_terms ){
+    for ( const auto& [c, op] : this->ops.off_diag_terms ){
 
         OperatorCommState curr_op_comm;
         curr_op_comm.send_states.resize(ctx.world_size);
@@ -302,7 +304,7 @@ void MPILazyOpSum<coeff_t, B>::evaluate_add_off_diag_pipeline(const coeff_t* x, 
         BENCH_TIMER_TIMEIT(loc_apply_timer,
 
         for (ZBasisBase::idx_t il = 0; il < ctx.local_block_size(); ++il) {
-            ZBasisBase::state_t state = basis[il];
+            ZBasisBase::state_t state = this->basis[il];
             auto sign = op.applyState(state);
             if (sign == 0) continue;
             
@@ -336,7 +338,7 @@ void MPILazyOpSum<coeff_t, B>::evaluate_add_off_diag_pipeline(const coeff_t* x, 
             for (size_t i = 0; i < curr_op_comm.send_states[ctx.my_rank].size(); ++i) {
                 ZBasisBase::idx_t local_idx;
                 ASSERT_STATE_FOUND("self", curr_op_comm.send_states[ctx.my_rank][i],
-                        basis.search(curr_op_comm.send_states[ctx.my_rank][i], local_idx)
+                        this->basis.search(curr_op_comm.send_states[ctx.my_rank][i], local_idx)
                         );
                 y[local_idx] += curr_op_comm.send_dy[ctx.my_rank][i];
             }
@@ -394,7 +396,7 @@ void MPILazyOpSum<coeff_t, B>::evaluate_add_off_diag_pipeline(const coeff_t* x, 
                 for (size_t j = 0; j < prev_op_comm.recv_states_bufs[i].size(); ++j) {
                     ZBasisBase::idx_t local_idx;
                     ASSERT_STATE_FOUND("remote", prev_op_comm.recv_states_bufs[i][j], 
-                            basis.search( prev_op_comm.recv_states_bufs[i][j], local_idx)
+                            this->basis.search( prev_op_comm.recv_states_bufs[i][j], local_idx)
                     );
 
                     y[local_idx] += prev_op_comm.recv_dy_bufs[i][j];
@@ -489,7 +491,7 @@ void MPILazyOpSum<coeff_t, B>::evaluate_add_off_diag_pipeline(const coeff_t* x, 
             for (size_t j = 0; j < prev_op_comm.recv_states_bufs[i].size(); ++j) {
                 ZBasisBase::idx_t local_idx;
                 ASSERT_STATE_FOUND("remote", prev_op_comm.recv_states_bufs[i][j], 
-                        basis.search( prev_op_comm.recv_states_bufs[i][j], local_idx)
+                        this->basis.search( prev_op_comm.recv_states_bufs[i][j], local_idx)
                 );
 
                 y[local_idx] += prev_op_comm.recv_dy_bufs[i][j];
@@ -511,11 +513,14 @@ void MPILazyOpSum<coeff_t, B>::evaluate_add_off_diag_pipeline(const coeff_t* x, 
 
 
 
+
 template <RealOrCplx coeff_t, Basis B>
-void MPILazyOpSum<coeff_t, B>::evaluate_add_off_diag_batched(const coeff_t* x, coeff_t* y) {
+void MPILazyOpSumBatched<coeff_t, B>::evaluate_add_off_diag_batched(const coeff_t* x, coeff_t* y) {
 
     assert(send_dy.size() != 0);
     assert(send_state.size() == send_dy.size());
+
+    auto& ctx = this->ctx;
 
     Timer initial_apply_timer("[initial apply]", ctx.my_rank);
 //    Timer sort_vectors_timer("[sort]", ctx.my_rank);
@@ -528,9 +533,9 @@ void MPILazyOpSum<coeff_t, B>::evaluate_add_off_diag_batched(const coeff_t* x, c
 
 
     // current positions in the send arrays
-    std::vector<int> send_cursors = send_displs;                 
-    std::vector<int> send_counts_no_self = send_counts;
-    std::vector<int> recv_counts_no_self = recv_counts;
+    std::vector<MPI_Count> send_cursors = send_displs;                 
+    std::vector<MPI_Count> send_counts_no_self = send_counts;
+    std::vector<MPI_Count> recv_counts_no_self = recv_counts;
     send_counts_no_self[ctx.my_rank] = 0; // handle this separately
     recv_counts_no_self[ctx.my_rank] = 0; // handle this separately
  
@@ -546,9 +551,9 @@ void MPILazyOpSum<coeff_t, B>::evaluate_add_off_diag_batched(const coeff_t* x, c
     // apply to all local basis vectors, il = local state index
     BENCH_TIMER_TIMEIT(initial_apply_timer,
 
-    for ( const auto& [c, op] : ops.off_diag_terms ){
+    for ( const auto& [c, op] : this->ops.off_diag_terms ){
         for (ZBasisBase::idx_t il = 0; il < ctx.local_block_size(); ++il) {
-            ZBasisBase::state_t og_state = basis[il];
+            ZBasisBase::state_t og_state = this->basis[il];
             auto state = og_state;
             auto sign = op.applyState(state);
 
@@ -568,13 +573,13 @@ void MPILazyOpSum<coeff_t, B>::evaluate_add_off_diag_batched(const coeff_t* x, c
 //                y[local_idx] += dy;
 //            }
     
-            int& pos = send_cursors[target_rank];
+            auto& pos = send_cursors[target_rank];
             send_state[pos] = state;
             send_dy[pos] = dy;
 
             pos += (sign !=0); // overwrite if not needed
-            assert(pos < send_state.size());
-            assert(pos < send_dy.size());
+            assert(pos < static_cast<MPI_Count>(send_state.size()));
+            assert(pos < static_cast<MPI_Count>(send_dy.size()));
          }
     }
     );
@@ -634,7 +639,7 @@ void MPILazyOpSum<coeff_t, B>::evaluate_add_off_diag_batched(const coeff_t* x, c
         ZBasisBase::idx_t local_idx;
         ASSERT_STATE_FOUND("local",
             send_state[i],
-            basis.search(send_state[i], local_idx)
+            this->basis.search(send_state[i], local_idx)
             );
         y[local_idx] += send_dy[i];
     }
@@ -668,7 +673,7 @@ void MPILazyOpSum<coeff_t, B>::evaluate_add_off_diag_batched(const coeff_t* x, c
             ZBasisBase::idx_t local_idx;
             ASSERT_STATE_FOUND("remote",
                 recv_state[i],
-                basis.search(recv_state[i], local_idx)
+                this->basis.search(recv_state[i], local_idx)
             );
             y[local_idx] += recv_dy[i];
         }
@@ -686,7 +691,7 @@ void MPILazyOpSum<coeff_t, B>::evaluate_add_off_diag_batched(const coeff_t* x, c
 
 
 template <RealOrCplx coeff_t, Basis basis_t>
-BasisTransferWisdom MPILazyOpSum<coeff_t, basis_t>::find_optimal_basis_load() {
+BasisTransferWisdom MPILazyOpSumBase<coeff_t, basis_t>::find_optimal_basis_load() {
 
     std::vector<int> all_hardness(ctx.world_size);
     int my_hardness=0;
@@ -788,15 +793,15 @@ BasisTransferWisdom MPILazyOpSum<coeff_t, basis_t>::find_optimal_basis_load() {
 
 
 template <RealOrCplx coeff_t, Basis basis_t>
-void MPILazyOpSum<coeff_t, basis_t>::allocate_temporaries() {
+void MPILazyOpSumBatched<coeff_t, basis_t>::allocate_temporaries() {
     // runs through the current local basis applying op to everything.
     // We cound how many we want to send to each rank, then exchange synchronously.
     // We can then resize recv_states_bufs appropriately.
-    send_counts.resize(ctx.world_size);
-    send_displs.resize(ctx.world_size);
+    send_counts.resize(this->ctx.world_size);
+    send_displs.resize(this->ctx.world_size);
 
-    recv_counts.resize(ctx.world_size);
-    recv_displs.resize(ctx.world_size);
+    recv_counts.resize(this->ctx.world_size);
+    recv_displs.resize(this->ctx.world_size);
 
     std::fill(send_counts.begin(), send_counts.end(), 0);
     std::fill(recv_counts.begin(), recv_counts.end(), 0);
@@ -806,13 +811,13 @@ void MPILazyOpSum<coeff_t, basis_t>::allocate_temporaries() {
 
     // set up the real send_counts
     // TODO this should be computable just from known information
-    for (ZBasisBase::idx_t il = 0; il < ctx.local_block_size(); ++il) {
-        for (auto& [c, op] : ops.off_diag_terms ) {
-            ZBasisBase::state_t state = basis[il];
+    for (ZBasisBase::idx_t il = 0; il < this->ctx.local_block_size(); ++il) {
+        for (auto& [c, op] : this->ops.off_diag_terms ) {
+            ZBasisBase::state_t state = this->basis[il];
             auto sign = op.applyState(state);
             if (sign == 0) continue;
             
-            auto target_rank = ctx.rank_of_state(state);
+            auto target_rank = this->ctx.rank_of_state(state);
             send_counts[target_rank]++;
         }
     }
@@ -822,7 +827,8 @@ void MPILazyOpSum<coeff_t, basis_t>::allocate_temporaries() {
 
     // allocate auxiliary arrays
 
-    MPI_Alltoall(send_counts.data(), 1, MPI_INT, recv_counts.data(), 1, MPI_INT, MPI_COMM_WORLD);
+    MPI_Alltoall(send_counts.data(), 1, get_mpi_type<MPI_Count>(),
+            recv_counts.data(), 1, get_mpi_type<MPI_Count>(), MPI_COMM_WORLD);
 
     const int total_send =
         std::accumulate(send_counts.begin(), send_counts.end(), 0);
@@ -832,32 +838,37 @@ void MPILazyOpSum<coeff_t, basis_t>::allocate_temporaries() {
 
 
     // one past the end for all (spacer needed)
-    for (int r=1; r<ctx.world_size; r++){
+    for (int r=1; r<this->ctx.world_size; r++){
         send_displs[r] = send_counts[r-1] + send_displs[r-1] + 1;
         recv_displs[r] = recv_counts[r-1] + recv_displs[r-1];
     }
-    send_state.resize(total_send + ctx.world_size);
-    send_dy.resize(total_send + ctx.world_size);
+    send_state.resize(total_send + this->ctx.world_size);
+    send_dy.resize(total_send + this->ctx.world_size);
 
     recv_state.resize(total_recv);
     recv_dy.resize(total_recv);
 
-
-
     // logging
-    ctx.log <<"[alloc] Send Sizes: ";
-    for (auto d : send_counts) ctx.log << d <<", ";
-    ctx.log<<"\n\ttotal:"<<total_send<<std::endl;
+    this->ctx.log <<"[alloc] Send Sizes: ";
+    for (auto d : send_counts) this->ctx.log << d <<", ";
+    this->ctx.log<<"\n\ttotal:"<<total_send<<std::endl;
 
-    ctx.log <<"[alloc] Send Displacements: ";
-    for (auto d : send_displs) ctx.log << d <<", ";
-    ctx.log<<std::endl;
+    this->ctx.log <<"[alloc] Send Displacements: ";
+    for (auto d : send_displs) this->ctx.log << d <<", ";
+    this->ctx.log<<std::endl;
 
+    // check that things fit into int
+    for (int r = 0; r < this->ctx.world_size; r++) {
+        if (send_counts[r] > INT_MAX || recv_counts[r] > INT_MAX) {
+            throw std::runtime_error("MPI count overflow: message size exceeds INT_MAX");
+        }
+    }
 
 }
 
 
 
 // explicit template instantiations: generate symbols to link with
-template struct MPILazyOpSum<double, MPI_ZBasisBST>;
-//template struct MPILazyOpSum<double, ZBasisInterp>;
+template struct MPILazyOpSumBase<double, ZBasisBST_MPI>;
+template struct MPILazyOpSumBatched<double, ZBasisBST_MPI>;
+template struct MPILazyOpSumPipe<double, ZBasisBST_MPI>;

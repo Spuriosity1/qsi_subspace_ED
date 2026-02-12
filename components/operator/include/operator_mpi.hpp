@@ -16,7 +16,7 @@ struct BasisTransferWisdom {
 
 // TODO this is a mess, MPIctx should clearly be a member of the MPI basis types
 
-struct MPI_ZBasisBST : public ZBasisBST 
+struct ZBasisBST_MPI : public ZBasisBST 
 {
      MPIctx load_from_file(const fs::path& bfile, const std::string& dataset="basis");
 
@@ -128,16 +128,16 @@ struct MPI_ZBasisBST : public ZBasisBST
 
 
 template<RealOrCplx coeff_t, Basis B>
-struct MPILazyOpSum {
+struct MPILazyOpSumBase {
     using Scalar = coeff_t;
-    explicit MPILazyOpSum(
+    explicit MPILazyOpSumBase(
             const B& local_basis_, const SymbolicOpSum<coeff_t>& ops_,
             MPIctx& context_
-            ) : basis(local_basis_), ops(ops_), ctx(context_),
-    send_dy(ctx.world_size), send_state(ctx.world_size) {
+            ) : basis(local_basis_), ops(ops_), ctx(context_)
+     {
     }
 
-    MPILazyOpSum operator=(const MPILazyOpSum& other) = delete;
+    MPILazyOpSumBase operator=(const MPILazyOpSumBase& other) = delete;
 
 	// Core evaluator 
     // Applies y = A x (sets y=0 first)
@@ -153,31 +153,19 @@ struct MPILazyOpSum {
 
     // allocates send/receive buffers for MPI alltoall
     // based on current matrix structure
-    void allocate_temporaries();
+    // By defualt allocate nothing
+    virtual void allocate_temporaries() =0;
 
     // Does y += A*x, where y[i] and x[i] are both indexed from the start of the local block
-	void evaluate_add(const coeff_t* x, coeff_t* y); 
+	virtual void evaluate_add(const coeff_t* x, coeff_t* y) =0; 
 
 protected:
     void evaluate_add_diagonal(const coeff_t* x, coeff_t* y) const;
-//    void evaluate_add_off_diag_sync(const coeff_t* x, coeff_t* y) const;
-    void evaluate_add_off_diag_pipeline(const coeff_t* x, coeff_t* y) const;
-    void evaluate_add_off_diag_batched(const coeff_t* x, coeff_t* y);
 
 	const B& basis;
 	const SymbolicOpSum<coeff_t> ops;
     MPIctx& ctx;
 
-    // metadata
-    std::vector<coeff_t> send_dy; // contiguous buffer
-    std::vector<ZBasisBST::state_t> send_state; 
-    std::vector<int> send_displs;
-    std::vector<int> send_counts;
-
-    std::vector<coeff_t> recv_dy;
-    std::vector<ZBasisBST::state_t> recv_state;
-    std::vector<int> recv_displs;
-    std::vector<int> recv_counts;
 private:
     static constexpr double APPLY_TOL=1e-15;
 
@@ -187,19 +175,66 @@ private:
         std::vector<int>& bucket_starts
         ) const;
 
-//    void rebalance_work(std::vector<int>& cost_per_rank);
 
 };
 
 
-template <RealOrCplx coeff_t, Basis basis_t>
-void MPILazyOpSum<coeff_t, basis_t>::evaluate_add(const coeff_t* x, coeff_t* y) {
-    evaluate_add_diagonal(x, y);
-//    evaluate_add_off_diag_pipeline(x, y);
-    evaluate_add_off_diag_batched(x, y);
-}
+template<RealOrCplx coeff_t, Basis B>
+struct MPILazyOpSumBatched : public MPILazyOpSumBase<coeff_t, B> {
+
+    explicit MPILazyOpSumBatched(
+            const B& local_basis_, const SymbolicOpSum<coeff_t>& ops_,
+            MPIctx& context_
+      ) : MPILazyOpSumBase<coeff_t, B>(local_basis_, ops_, context_)
+     {
+    }
+
+    void evaluate_add(const coeff_t* x, coeff_t* y) override {
+        this->evaluate_add_diagonal(x, y);
+        evaluate_add_off_diag_batched(x, y);
+    }
+
+    void allocate_temporaries() override;
+
+protected:
+    void evaluate_add_off_diag_batched(const coeff_t* x, coeff_t* y);
+    // metadata
+    std::vector<coeff_t> send_dy; // contiguous buffer
+    std::vector<ZBasisBST::state_t> send_state; 
+    std::vector<MPI_Count> send_displs;
+    std::vector<MPI_Count> send_counts;
+
+    std::vector<coeff_t> recv_dy;
+    std::vector<ZBasisBST::state_t> recv_state;
+    std::vector<MPI_Count> recv_displs;
+    std::vector<MPI_Count> recv_counts;
+};
 
 
+template<RealOrCplx coeff_t, Basis B>
+struct MPILazyOpSumPipe : public MPILazyOpSumBase<coeff_t, B> {
+
+    explicit MPILazyOpSumPipe(
+            const B& local_basis_, const SymbolicOpSum<coeff_t>& ops_,
+            MPIctx& context_
+      ) : MPILazyOpSumBase<coeff_t, B>(local_basis_, ops_, context_)
+     {
+    }
 
 
+    void allocate_temporaries() override {};
+
+    void evaluate_add(const coeff_t* x, coeff_t* y) override {
+        this->evaluate_add_diagonal(x, y);
+        evaluate_add_off_diag_pipeline(x, y);
+    }
+
+protected:
+    void evaluate_add_off_diag_pipeline(const coeff_t* x, coeff_t* y) const;
+
+};
+
+
+template<RealOrCplx coeff_t, Basis B>
+using MPILazyOpSum = MPILazyOpSumPipe<coeff_t, B>;
 

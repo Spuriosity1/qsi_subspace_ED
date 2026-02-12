@@ -24,7 +24,7 @@ using namespace std;
 //typedef ZBasisBST_MPI basis_t;
 //
 
-void load_state(std::vector<double>& psi, const MPI_ZBasisBST& basis, const std::filesystem::path& infile, const MPIctx& ctx, int col=0){
+void load_state(std::vector<double>& psi, const ZBasisBST_MPI& basis, const std::filesystem::path& infile, const MPIctx& ctx, int col=0){
     
 	hid_t file_id = -1, dataset_id = -1, dataspace_id = -1;
 	hid_t plist_id = -1, dxpl_id = -1;
@@ -138,7 +138,7 @@ void load_state(std::vector<double>& psi, const MPI_ZBasisBST& basis, const std:
 
 
 
-typedef MPI_ZBasisBST basis_t;
+typedef ZBasisBST_MPI basis_t;
     
 int main(int argc, char* argv[]) {
 	argparse::ArgumentParser prog("eval_observables");
