@@ -15,6 +15,7 @@
 
 using json = nlohmann::json;
 
+using MPILazyOpSum = MPILazyOpSumPipe<double, ZBasisBST_MPI>;
 
 template<typename T>
 void check_basis_partition(const T& basis, const MPIctx& ctx){

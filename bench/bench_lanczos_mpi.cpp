@@ -13,6 +13,7 @@ using json = nlohmann::json;
 
 using namespace projED;
 
+using MPILazyOpSum = MPILazyOpSumPipe<double, ZBasisBST_MPI>;
 
 int main(int argc, char* argv[]){
     

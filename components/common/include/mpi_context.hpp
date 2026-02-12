@@ -160,7 +160,7 @@ struct SparseMPIContext : public MPIContext<idx_t> {
 
     // returns the node on which a specified psi can be found
     size_t rank_of_state_slow(const state_t& psi) const;
-    size_t rank_of_state(const state_t& psi) const;
+    int rank_of_state(const state_t& psi) const;
     
 
     void populate_state_terminals(int64_t n_basis_states, 
@@ -330,7 +330,7 @@ void SparseMPIContext< idx_t>::populate_state_terminals(int64_t n_basis_states,
 
 
 template <typename idx_t>
-size_t SparseMPIContext<idx_t>::rank_of_state(const state_t& psi) const {
+int SparseMPIContext<idx_t>::rank_of_state(const state_t& psi) const {
     int left = 0;
     int right = this->world_size;
     const __uint128_t* arr = reinterpret_cast<const __uint128_t*>(state_partition.data());

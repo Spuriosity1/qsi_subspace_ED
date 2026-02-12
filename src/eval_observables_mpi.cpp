@@ -138,8 +138,9 @@ void load_state(std::vector<double>& psi, const ZBasisBST_MPI& basis, const std:
 
 
 
-typedef ZBasisBST_MPI basis_t;
-    
+typedef ZBasisBST_MPI basis_t;   
+using MPILazyOpSum = MPILazyOpSumPipe<double, basis_t>;
+
 int main(int argc, char* argv[]) {
 	argparse::ArgumentParser prog("eval_observables");
 	prog.add_argument("eigenvalue_datafile")
@@ -215,12 +216,12 @@ int main(int argc, char* argv[]) {
 
     // Step 4: the rings
     auto [ringL, ringR, sl] = get_ring_ops(jdata);
-    std::vector<MPILazyOpSum<double, basis_t>> lazy_ring_operators;
+    std::vector<MPILazyOpSum> lazy_ring_operators;
     for (auto& O : ringL){
         lazy_ring_operators.emplace_back(basis, O, ctx);
     }
 
-    auto lazy_ringR_0 = MPILazyOpSum<double, basis_t>(basis, ringR[0], ctx);
+    auto lazy_ringR_0 = MPILazyOpSum(basis, ringR[0], ctx);
 
     std::vector<double> chi, u;
     chi.resize(ctx.local_block_size());
