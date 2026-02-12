@@ -573,7 +573,7 @@ void MPILazyOpSumBatched<coeff_t, B>::evaluate_add_off_diag_batched(const coeff_
 //                y[local_idx] += dy;
 //            }
     
-            auto& pos = send_cursors[target_rank];
+            MPI_Count& pos = send_cursors[target_rank];
             send_state[pos] = state;
             send_dy[pos] = dy;
 
@@ -631,7 +631,7 @@ void MPILazyOpSumBatched<coeff_t, B>::evaluate_add_off_diag_batched(const coeff_
 
 
     assert(send_counts[ctx.my_rank] == recv_counts[ctx.my_rank]);
-    const int loc_send_offset = send_displs[ctx.my_rank];
+    const auto loc_send_offset = send_displs[ctx.my_rank];
 
     BENCH_TIMER_TIMEIT(loc_apply_timer,
     for (int i=loc_send_offset; 
@@ -667,7 +667,7 @@ void MPILazyOpSumBatched<coeff_t, B>::evaluate_add_off_diag_batched(const coeff_
     BENCH_TIMER_TIMEIT(rem_apply_timer,
     // Applying rank-local updates we received remotely
     for (int r=0; r<ctx.world_size; r++){
-        const int rem_displs = recv_displs[r];
+        const auto rem_displs = recv_displs[r];
         for (int i = rem_displs; 
                 i < rem_displs + recv_counts_no_self[r]; ++i) {
             ZBasisBase::idx_t local_idx;
@@ -741,8 +741,8 @@ BasisTransferWisdom MPILazyOpSumBase<coeff_t, basis_t>::find_optimal_basis_load(
     BasisTransferWisdom btw;
 
     // for global exchange
-    std::vector<int> all_b_send_counts(ctx.world_size, 0); // number of elements in send_counts of each rank
-    std::vector<int> all_b_recv_counts(ctx.world_size, 0); // number of elements to be received by each rank        
+    std::vector<MPI_Count> all_b_send_counts(ctx.world_size, 0); // number of elements in send_counts of each rank
+    std::vector<MPI_Count> all_b_recv_counts(ctx.world_size, 0); // number of elements to be received by each rank        
 
     ctx.log<<"<basis rebalance>\n";
 
@@ -756,7 +756,7 @@ BasisTransferWisdom MPILazyOpSumBase<coeff_t, basis_t>::find_optimal_basis_load(
     }
 
 
-    MPI_Alltoall(all_b_send_counts.data(), 1, MPI_INT, all_b_recv_counts.data(), 1, MPI_INT, MPI_COMM_WORLD);
+    MPI_Alltoall(all_b_send_counts.data(), 1, get_mpi_type<MPI_Count>(), all_b_recv_counts.data(), 1, get_mpi_type<MPI_Count>(), MPI_COMM_WORLD);
     for (int r=0; r<ctx.world_size; r++){
         auto n = all_b_recv_counts[r];
         if ( n != 0){
@@ -769,9 +769,9 @@ BasisTransferWisdom MPILazyOpSumBase<coeff_t, basis_t>::find_optimal_basis_load(
     btw.idx_partition.clear();
     btw.idx_partition.resize(ctx.world_size+1, 0);
 
-    int my_new_dimension = std::accumulate(btw.recv_counts.begin(), btw.recv_counts.end(), 0);
-    std::vector<int> all_dimensions(ctx.world_size);
-    MPI_Allgather(&my_new_dimension, 1, MPI_INT, all_dimensions.data(), 1, MPI_INT, MPI_COMM_WORLD);
+    MPI_Count my_new_dimension = std::accumulate(btw.recv_counts.begin(), btw.recv_counts.end(), 0);
+    std::vector<MPI_Count> all_dimensions(ctx.world_size);
+    MPI_Allgather(&my_new_dimension, 1, get_mpi_type<MPI_Count>(), all_dimensions.data(), 1, get_mpi_type<MPI_Count>(), MPI_COMM_WORLD);
 
     btw.idx_partition[0] = 0;
     for(int r=0; r<ctx.world_size; r++){
@@ -821,8 +821,6 @@ void MPILazyOpSumBatched<coeff_t, basis_t>::allocate_temporaries() {
             send_counts[target_rank]++;
         }
     }
-
-    
 
 
     // allocate auxiliary arrays

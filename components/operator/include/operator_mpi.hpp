@@ -62,8 +62,8 @@ struct ZBasisBST_MPI : public ZBasisBST
          }
 
 
-         std::vector<int> send_displs(send_counts.size(), 0);
-         std::vector<int> recv_displs(recv_counts.size(), 0);
+         std::vector<MPI_Count> send_displs(send_counts.size(), 0);
+         std::vector<MPI_Count> recv_displs(recv_counts.size(), 0);
 
          send_displs[0]=0;
          recv_displs[0]=0;
