@@ -5,12 +5,13 @@
 #SBATCH -A CASTELNOVO-SL2-CPU
 #SBATCH -p icelake-himem
 #! How many whole nodes should be allocated?
-#SBATCH --nodes=4
+#SBATCH --nodes=6
 #! How many (MPI) tasks will there be in total? (<= nodes*76)
 #! The Ice Lake (icelake) nodes have 76 CPUs (cores) each and
 #! 3380 MiB of memory per CPU.
-#SBATCH --ntasks=300
-#SBATCH --cpus-per-task=1
+#SBATCH --ntasks=24
+#SBATCH --ntasks-per-socket=2
+#SBATCH --cpus-per-task=12
 #SBATCH --mem-per-cpu=6760
 #! How much wallclock time will be required?
 #SBATCH --time=4:00:00
@@ -29,8 +30,12 @@ export LD_LIBRARY_PATH=/home/als217/install/HDF_Group/HDF5/1.14.6/lib:${LD_LIBRA
 
 export OPENBLAS_NUM_THREADS=$SLURM_CPUS_PER_TASK
 export MKL_NUM_THREADS=$SLURM_CPUS_PER_TASK
+export OMP_NUM_THREADS=$SLURM_CPUS_PER_TASK
+export OMP_NUM_THREADS=12
+export OMP_PROC_BIND=spread
+export OMP_PLACES=cores
 
-workdir="/home/als217/rds/hpc-work/QSI/qsi_subspace_ED/hpc_driver"
+workdir="/home/als217/rds/hpc-work/QSI/test_qsi_subspace_ED/hpc_driver"
 
 cd $workdir
 echo -e "Changed directory to `pwd`.\n"
@@ -42,6 +47,6 @@ echo "Time: `date`"
 echo "Running on master node: `hostname`"
 echo "Current directory: `pwd`"
 
-srun ../build/bench/bench_apply_mpi ../../lattice_files/pyro_-2,2,2_2,-2,2_2,2,-2.json
+srun --cpu-bind=cores ../build/bench/bench_apply_mpi ../../lattice_files/pyro_-2,2,2_2,-2,2_2,2,-2.json --trim
 
 
