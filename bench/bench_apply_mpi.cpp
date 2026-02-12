@@ -50,7 +50,7 @@ int main(int argc, char* argv[]){
     
     MPI_Init(NULL, NULL);
 
-	MPI_ZBasisBST basis;
+	ZBasisBST_MPI basis;
    
 	// Step 1: Load ring data from JSON
     auto lattice_file = prog.get<std::string>("lattice_file");

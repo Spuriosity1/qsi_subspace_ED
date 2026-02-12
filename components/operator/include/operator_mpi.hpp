@@ -16,7 +16,7 @@ struct BasisTransferWisdom {
 
 // TODO this is a mess, MPIctx should clearly be a member of the MPI basis types
 
-struct MPI_ZBasisBST : public ZBasisBST 
+struct ZBasisBST_MPI : public ZBasisBST 
 {
      MPIctx load_from_file(const fs::path& bfile, const std::string& dataset="basis");
 
@@ -62,8 +62,8 @@ struct MPI_ZBasisBST : public ZBasisBST
          }
 
 
-         std::vector<int> send_displs(send_counts.size(), 0);
-         std::vector<int> recv_displs(recv_counts.size(), 0);
+         std::vector<MPI_Count> send_displs(send_counts.size(), 0);
+         std::vector<MPI_Count> recv_displs(recv_counts.size(), 0);
 
          send_displs[0]=0;
          recv_displs[0]=0;
@@ -171,13 +171,13 @@ protected:
     // metadata
     std::vector<coeff_t> send_dy; // contiguous buffer
     std::vector<ZBasisBST::state_t> send_state; 
-    std::vector<int> send_displs;
-    std::vector<int> send_counts;
+    std::vector<MPI_Count> send_displs;
+    std::vector<MPI_Count> send_counts;
 
     std::vector<coeff_t> recv_dy;
     std::vector<ZBasisBST::state_t> recv_state;
-    std::vector<int> recv_displs;
-    std::vector<int> recv_counts;
+    std::vector<MPI_Count> recv_displs;
+    std::vector<MPI_Count> recv_counts;
 private:
     static constexpr double APPLY_TOL=1e-15;
 

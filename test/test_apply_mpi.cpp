@@ -71,7 +71,7 @@ int main(int argc, char* argv[]){
     MPI_Init(NULL, NULL);
 
 
-	MPI_ZBasisBST basis;
+	ZBasisBST_MPI basis;
     ZBasisBST basis_st;
 //    ZBasisInterp basis_i;
    
