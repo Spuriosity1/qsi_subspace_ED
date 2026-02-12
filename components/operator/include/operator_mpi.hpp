@@ -137,7 +137,7 @@ struct MPILazyOpSumBase {
      {
     }
 
-    MPILazyOpSumBase operator=(const MPILazyOpSumBase& other) = delete;
+    // MPILazyOpSumBase operator=(const MPILazyOpSumBase& other) = delete;
 
 	// Core evaluator 
     // Applies y = A x (sets y=0 first)
