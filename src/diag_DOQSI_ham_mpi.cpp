@@ -16,6 +16,8 @@ using json = nlohmann::json;
 using namespace projED;
 
 
+using MPILazyOpSum = MPILazyOpSumPipe<double, ZBasisBST_MPI>;
+
 int main(int argc, char* argv[]) {
 	argparse::ArgumentParser prog(argv[0]);
 	prog.add_argument("lattice_file");

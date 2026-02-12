@@ -235,6 +235,3 @@ protected:
 };
 
 
-template<RealOrCplx coeff_t, Basis B>
-using MPILazyOpSum = MPILazyOpSumPipe<coeff_t, B>;
-

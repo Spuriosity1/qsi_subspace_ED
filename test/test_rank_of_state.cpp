@@ -91,7 +91,7 @@ int main(int argc, char* argv[]){
 
     const auto lower_bound = ctx.state_partition[ctx.my_rank];
     const auto upper_bound = ctx.state_partition[ctx.my_rank+1];
-    for (size_t il=0; il<basis.size(); il++){
+    for (ZBasisBST_MPI::idx_t il=0; il<basis.size(); il++){
         if(basis[il] < lower_bound){
             std::cerr <<"[rank "<<ctx.my_rank<<"] State "<<il<<" = "<<basis[il] << " too small | should be >= "<<lower_bound<<std::endl;
             throw std::logic_error("bad partition!");
