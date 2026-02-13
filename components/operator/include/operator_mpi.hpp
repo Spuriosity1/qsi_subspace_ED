@@ -235,3 +235,57 @@ protected:
 };
 
 
+
+
+template<RealOrCplx coeff_t, Basis B>
+struct MPILazyOpSumPipePrealloc : public MPILazyOpSumBase<coeff_t, B> {
+
+    explicit MPILazyOpSumPipePrealloc(
+            const B& local_basis_, const SymbolicOpSum<coeff_t>& ops_,
+            MPIctx& context_
+      ) : MPILazyOpSumBase<coeff_t, B>(local_basis_, ops_, context_)
+     {
+    }
+
+
+    void allocate_temporaries() override ;
+
+    void evaluate_add(const coeff_t* x, coeff_t* y) override {
+        this->evaluate_add_diagonal(x, y);
+        evaluate_add_off_diag_pipeline(x, y);
+    }
+
+protected:
+
+    // Communication pattern cache
+    struct CommMetadataCache {
+        std::vector<std::vector<int>> sendcounts_per_op;  // [op_idx][rank]
+        std::vector<std::vector<int>> recvcounts_per_op;  // [op_idx][rank]
+        bool is_initialized = false;
+    } comm_cache;
+    
+    // Double-buffered communication state
+    struct OperatorCommState {
+        std::vector<MPI_Request> requests;
+        std::vector<std::vector<coeff_t>> send_dy;
+        std::vector<std::vector<ZBasisBase::state_t>> send_states;
+        std::vector<std::vector<ZBasisBase::state_t>> recv_states_bufs;
+        std::vector<std::vector<coeff_t>> recv_dy_bufs;
+        std::vector<int> recv_sources;
+        
+        void clear_for_reuse() {
+            for (auto& v : send_states) v.clear();
+            for (auto& v : send_dy) v.clear();
+            recv_states_bufs.clear();
+            recv_dy_bufs.clear();
+            recv_sources.clear();
+            requests.clear();
+        }
+    };
+    
+    OperatorCommState comm_buffers[2];
+
+    void evaluate_add_off_diag_pipeline(const coeff_t* x, coeff_t* y);
+
+};
+

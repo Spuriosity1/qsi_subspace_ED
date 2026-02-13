@@ -15,7 +15,6 @@
 
 using json = nlohmann::json;
 
-using MPILazyOpSum = MPILazyOpSumPipe<double, ZBasisBST_MPI>;
 
 template<typename T>
 void check_basis_partition(const T& basis, const MPIctx& ctx){
@@ -73,6 +72,7 @@ int main(int argc, char* argv[]){
 
 
 	ZBasisBST_MPI basis;
+
     ZBasisBST basis_st;
 //    ZBasisInterp basis_i;
    
@@ -111,26 +111,30 @@ int main(int argc, char* argv[]){
     }
 
 
-    std::cout<<"[MPI_BST] Checking applyState consistency..."<<std::endl;
+    ctx.log<<"[Symbolic ham construction done.]"<<std::endl;
 
-    for (auto& [c, O] : H_sym.off_diag_terms){
-        for (int il=0;  il<ctx.local_block_size(); il++){
-            auto p1 = basis[il];
-            auto p2 = basis[il];
 
-            int s1 = O.applyState(p1);
-            int s2 = O.applyState_branch(p2);
-            assert(s1 == s2);
-            if (s1 != 0){
-                assert(p1 == p2);
+    {
+        std::cout<<"[MPI_BST] Checking applyState consistency..."<<std::endl;
+
+        for (auto& [c, O] : H_sym.off_diag_terms){
+            for (int il=0;  il<ctx.local_block_size(); il++){
+                auto p1 = basis[il];
+                auto p2 = basis[il];
+
+                int s1 = O.applyState(p1);
+                int s2 = O.applyState_branch(p2);
+                assert(s1 == s2);
+                if (s1 != 0){
+                    assert(p1 == p2);
+                }
             }
         }
+
+        std::cout<<"Done"<<std::endl;
     }
 
 
-    std::cout<<"Done"<<std::endl;
-
-    ctx.log<<"[Symbolic ham construction done.]"<<std::endl;
 
     if (prog.get<bool>("--trim")){
         ctx.log<<"[remove unneeded elements]"<<std::endl;
@@ -139,32 +143,46 @@ int main(int argc, char* argv[]){
     }
  
     ctx.log<<"[op construct]"<<std::endl;
-    auto H_mpi = MPILazyOpSum(basis, H_sym, ctx);
+
+
+
+    auto H_mpi_batch = MPILazyOpSumBatched<double, ZBasisBST_MPI>(basis, H_sym, ctx);
+    auto H_mpi_pipe = MPILazyOpSumPipe<double, ZBasisBST_MPI>(basis, H_sym, ctx);
+    auto H_mpi_pipeP = MPILazyOpSumPipePrealloc<double, ZBasisBST_MPI>(basis, H_sym, ctx);
+
     auto H_st = LazyOpSum(basis_st, H_sym);
 
 
     if (prog.get<bool>("--rebalance")){
         ctx.log<<"[calc basis wisdom]"<<std::endl;
-        auto wisdom = H_mpi.find_optimal_basis_load();
+        auto wisdom = H_mpi_pipe.find_optimal_basis_load();
         ctx.log<<"[basis reshuffle]"<<std::endl;
         basis.exchange_local_states(wisdom, ctx);
     }
-    ctx.log<<"[allocate temporaries]"<<std::endl;
-    H_mpi.allocate_temporaries();
 
-    std::vector<double> v_global, u_global, u1_local;
+    ctx.log<<"[allocate temporaries]"<<std::endl;
+    H_mpi_pipe.allocate_temporaries();
+    H_mpi_pipeP.allocate_temporaries();
+    H_mpi_batch.allocate_temporaries();
+
+    std::vector<double> v_global, u_global;
+    std::array<std::vector<double>, 3> u_local;
+
     v_global.resize(basis_st.dim());
     u_global.resize(basis_st.dim());
-
     assert(ctx.local_block_size() == basis.dim());
-    u1_local.resize(ctx.local_block_size());
+    for (auto& ul : u_local){
+        ul.resize(ctx.local_block_size());
+    }
 //    u2_local.resize(ctx.local_block_size());
 
     std::mt19937 rng(seed);
     projED::set_random_unit(v_global, rng);
 
     std::fill(u_global.begin(), u_global.end(), 0);
-    std::fill(u1_local.begin(), u1_local.end(), 0);
+    for (auto& ul : u_local){
+        std::fill(ul.begin(), ul.end(), 0);
+    }
 //    std::fill(u2_local.begin(), u2_local.end(), 0);
 
 
@@ -175,65 +193,46 @@ int main(int argc, char* argv[]){
 
     std::cout<<"[BST_MPI "<<ctx.my_rank<<"]  Apply..."<<std::endl;
     // NOTE: add the local block offset to stay correct
-    TIMEIT("[MPI] u += Av", H_mpi.evaluate_add(v_global.data() + ctx.local_start_index(), u1_local.data());)
+    TIMEIT("[MPI batch] u += Av", H_mpi_batch.evaluate_add(v_global.data() + ctx.local_start_index(), u_local[0].data());)
+    TIMEIT("[MPI pipe] u += Av", H_mpi_pipe.evaluate_add(v_global.data() + ctx.local_start_index(), u_local[1].data());)
+    TIMEIT("[MPI pipe prealloc] u += Av", H_mpi_pipeP.evaluate_add(v_global.data() + ctx.local_start_index(), u_local[2].data());)
+
+
+    std::vector<std::string> names = {"MPI batch", "MPI pipe", "MPI pipe prealloc"};
 
     // we need to carefully check the offsets
     double tol =1e-9;
     auto start_offset = ctx.local_start_index();
     
-    size_t error_1_count = 0;
-    double max_error_1 = 0;
-//    size_t error_2_count = 0;
-//    double max_error_2 = 0;
+
+    std::array<double, 3> error;
+    std::array<double, 3> max_error;
+    std::array<int, 3> error_count;
 
 
+    for (int mu=0; mu<3; mu++){
+        for (int i=0;  i<ctx.local_block_size(); i++){
+            auto g_idx = start_offset + i;
+                error[mu] = std::abs(u_global[g_idx] - u_local[mu][i]);
 
-    
-
-//    std::ostringstream filename;
-//    filename << "comparison_rank" << ctx.my_rank << ".csv";
-//    std::ofstream out(filename.str());
-//    out << "local_index,global_index,u_global,u_local\n";
-
-    for (int i=0;  i<ctx.local_block_size(); i++){
-        auto g_idx = start_offset + i;
-        auto error_1 = std::abs(u_global[g_idx] - u1_local[i]);
-//        auto error_2 = std::abs(u_global[g_idx] - u2_local[i]);
-
-        if( error_1 > tol ){
-            if (error_1_count == 0){
-                std::cout<<"BST != MPI sync on global index "<< g_idx
-                    <<"= ("<<ctx.my_rank<<") + "<<i<<": +"<<error_1<<"\n";
+            if( error[mu] > tol ){
+                if (error_count[mu] == 0){
+                    std::cout<<"BST != "<<names[mu]<<" on global index "<< g_idx
+                        <<"= ("<<ctx.my_rank<<") + "<<i<<": +"<<error[mu]<<"\n";
+                }
+                error_count[mu]++;
+                max_error[mu] = std::max(max_error[mu], error[mu]);
             }
-            error_1_count++;
-            max_error_1 = std::max(max_error_1, error_1);
         }
 
-
-//        if( error_2 > tol ){
-//            if (error_2_count == 0){
-//                std::cout<<"BST != MPI pipe on global index "<< g_idx
-//                    <<"= ("<<ctx.my_rank<<") + "<<i<<": +"<<error_2<<"\n";
-//            }
-//            error_2_count++;
-//            max_error_2 = std::max(max_error_2, error_2);
-//        }
+        if (error_count[mu] > 0) {
+            std::cout << "["<<names[mu]<<"] Rank " << ctx.my_rank << ": " << error_count[mu] 
+                  << " errors found, max error = " << max_error[mu] << "\n";
+        } else {
+            std::cout << "["<<names[mu]<<"] Rank " << ctx.my_rank <<": agrees with global BST."<<std::endl;
+        }
     }
 
-    if (error_1_count > 0) {
-        std::cout << "[MPI] Rank " << ctx.my_rank << ": " << error_1_count 
-              << " errors found, max error = " << max_error_1 << "\n";
-    } else {
-        std::cout << "[MPI] Rank " << ctx.my_rank <<": agrees with global BST."<<std::endl;
-    }
-
-
-//    if (error_2_count > 0) {
-//        std::cout << "[pipe] Rank " << ctx.my_rank << ": " << error_2_count 
-//              << " errors found, max error = " << max_error_2 << "\n";
-//    } else {
-//        std::cout << "[pipe] Rank " << ctx.my_rank <<": agrees with global BST."<<std::endl;
-//    }
     MPI_Finalize();
     return 0;
 }

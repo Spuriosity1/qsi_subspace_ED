@@ -512,10 +512,248 @@ void MPILazyOpSumPipe<coeff_t, B>::evaluate_add_off_diag_pipeline(const coeff_t*
 }
 
 
+template <RealOrCplx coeff_t, Basis B>
+void MPILazyOpSumPipePrealloc<coeff_t, B>::allocate_temporaries(){
+    auto& ctx = this->ctx;
+
+    // Pre-allocate double buffers for worst-case communication
+    for (int buf_idx = 0; buf_idx < 2; ++buf_idx) {
+        auto& buf = comm_buffers[buf_idx];
+        
+        buf.send_states.resize(ctx.world_size);
+        buf.send_dy.resize(ctx.world_size);
+        
+        // Reserve capacity for worst case: all local states go to each rank
+        for (int r = 0; r < ctx.world_size; ++r) {
+            buf.send_states[r].reserve(ctx.local_block_size());
+            buf.send_dy[r].reserve(ctx.local_block_size());
+        }
+        
+        // Reserve for worst case receives
+        buf.recv_states_bufs.reserve(ctx.world_size);
+        buf.recv_dy_bufs.reserve(ctx.world_size);
+        buf.recv_sources.reserve(ctx.world_size);
+        buf.requests.reserve(2 * ctx.world_size);
+    }
+
+     // Build communication pattern cache
+    comm_cache.sendcounts_per_op.resize(this->ops.off_diag_terms.size());
+    comm_cache.recvcounts_per_op.resize(this->ops.off_diag_terms.size());
+
+    for (size_t op_idx=0; op_idx<this->ops.off_diag_terms.size(); op_idx++ ){
+        const auto& [c, op] = this->ops.off_diag_terms[op_idx];
+
+        comm_cache.sendcounts_per_op[op_idx].resize(ctx.world_size, 0);
+        comm_cache.recvcounts_per_op[op_idx].resize(ctx.world_size, 0);
+        
+        // Count how many states each rank will receive from us
+        for (ZBasisBase::idx_t il = 0; il < ctx.local_block_size(); ++il) {
+            ZBasisBase::state_t state = this->basis[il];
+            auto sign = op.applyState(state);
+            if (sign == 0) continue;
+            
+            auto target_rank = ctx.rank_of_state(state);
+            comm_cache.sendcounts_per_op[op_idx][target_rank]++;
+        }
+        
+        DEBUG_PRINT_VEC("<< send pattern ", op_idx, comm_cache.sendcounts_per_op[op_idx], ctx)
+        
+        // Exchange counts to learn recvcounts
+        MPI_Alltoall(comm_cache.sendcounts_per_op[op_idx].data(), 1, MPI_INT,
+                    comm_cache.recvcounts_per_op[op_idx].data(), 1, MPI_INT,
+                    MPI_COMM_WORLD);
+        
+        DEBUG_PRINT_VEC(">> recv pattern ", op_idx, comm_cache.recvcounts_per_op[op_idx], ctx)
+        
+    }
+
+    comm_cache.is_initialized = true;
+
+}
+
+
 
 
 template <RealOrCplx coeff_t, Basis B>
-void MPILazyOpSumBatched<coeff_t, B>::evaluate_add_off_diag_batched(const coeff_t* x, coeff_t* y) {
+void MPILazyOpSumPipePrealloc<coeff_t, B>::evaluate_add_off_diag_pipeline(const coeff_t* x, coeff_t* y) {
+    // guard against invalid calls
+    // cheap check
+    if (!comm_cache.is_initialized){
+        throw std::runtime_error("Must call allocate_temporaries() first!");
+    }
+
+    auto& ctx = this->ctx;
+
+    Timer loc_apply_timer("[local apply]", ctx.my_rank);
+    Timer loc_up_timer("[local update]", ctx.my_rank);
+    Timer rem_up_timer("[remote update]", ctx.my_rank);
+    Timer remx_wait_timer("[remote exchange wait]", ctx.my_rank);
+
+    std::vector<const Timer *> timers{&loc_apply_timer, &loc_up_timer,
+                                      &rem_up_timer,
+                                      &remx_wait_timer};
+
+    int prev_opbuf_id=0;
+    int curr_opbuf_id=1;
+
+    bool has_prev_op = false;
+
+    for ( size_t op_index=0; op_index<this->ops.off_diag_terms.size(); op_index++ ){
+        const auto& [c, op] = this->ops.off_diag_terms[op_index];
+
+
+        auto& prev_op_buf = comm_buffers[prev_opbuf_id];
+        auto& curr_op_buf = comm_buffers[curr_opbuf_id];
+
+        // Clear current buffer for reuse (but keep allocated capacity)
+        curr_op_buf.clear_for_reuse();
+
+        // Organize sends by destination rank
+        BENCH_TIMER_TIMEIT(loc_apply_timer,
+            for (ZBasisBase::idx_t il = 0; il < ctx.local_block_size(); ++il) {
+                ZBasisBase::state_t state = this->basis[il];
+                auto sign = op.applyState(state);
+                if (sign == 0) continue;
+                
+                auto target_rank = ctx.rank_of_state(state);
+                curr_op_buf.send_dy[target_rank].push_back(c * x[il] * sign);
+                curr_op_buf.send_states[target_rank].push_back(state);
+            }
+        )
+
+        // Use cached recvcounts
+        const auto& recvcounts = comm_cache.recvcounts_per_op[op_index];
+
+        // Immediately post receives for the current operator
+        for (int source = 0; source < ctx.world_size; ++source) {
+            if (source == ctx.my_rank || recvcounts[source] == 0) continue;
+            
+            curr_op_buf.recv_sources.push_back(source);
+            curr_op_buf.recv_states_bufs.emplace_back(recvcounts[source]);
+            curr_op_buf.recv_dy_bufs.emplace_back(recvcounts[source]);
+            
+            size_t idx = curr_op_buf.recv_states_bufs.size() - 1;
+            
+            curr_op_buf.requests.push_back(MPI_Request{});
+            MPI_Irecv(curr_op_buf.recv_states_bufs[idx].data(), 
+                     recvcounts[source], get_mpi_type<ZBasisBase::state_t>(),
+                     source, 10*op_index + 1, MPI_COMM_WORLD, &curr_op_buf.requests.back());
+            
+            curr_op_buf.requests.push_back(MPI_Request{});
+            MPI_Irecv(curr_op_buf.recv_dy_bufs[idx].data(),
+                     recvcounts[source], get_mpi_type<coeff_t>(),
+                     source, 10*op_index + 2, MPI_COMM_WORLD, &curr_op_buf.requests.back());
+        }
+
+        // Process local updates while receives are cooking
+        BENCH_TIMER_TIMEIT(loc_up_timer,
+            for (size_t i = 0; i < curr_op_buf.send_states[ctx.my_rank].size(); ++i) {
+                ZBasisBase::idx_t local_idx;
+                ASSERT_STATE_FOUND("self", curr_op_buf.send_states[ctx.my_rank][i],
+                        this->basis.search(curr_op_buf.send_states[ctx.my_rank][i], local_idx)
+                        );
+                y[local_idx] += curr_op_buf.send_dy[ctx.my_rank][i];
+            }
+        )
+
+
+        // === PROCESS PREVIOUS OPERATOR'S RECEIVES ===
+        if (has_prev_op) {
+            BENCH_TIMER_TIMEIT(remx_wait_timer,
+            // Wait for prev communications to arrive
+            if (!prev_op_buf.requests.empty()) {
+                MPI_Waitall(prev_op_buf.requests.size(),
+                        prev_op_buf.requests.data(),
+                        MPI_STATUSES_IGNORE);
+                )
+            }
+
+            // Apply the states received from remote to the PREV operator
+            BENCH_TIMER_TIMEIT(rem_up_timer, 
+            for(size_t i=0; i<prev_op_buf.recv_sources.size(); i++){
+                for (size_t j=0; j<prev_op_buf.recv_states_bufs[i].size(); ++j){
+                    ZBasisBase::idx_t local_idx;
+                    ASSERT_STATE_FOUND("remote", 
+                            prev_op_buf.recv_states_bufs[i][j], 
+                            this->basis.search( prev_op_buf.recv_states_bufs[i][j], local_idx)
+                            );
+
+                    y[local_idx] += prev_op_buf.recv_dy_bufs[i][j];
+
+                }
+            })
+
+        }
+        // === DATA SENDS FOR CURRENT OPERATOR ===
+
+        // Begin sending to all non-empty, non-self targets
+        for (int target_rank=0; target_rank<ctx.world_size; target_rank++){
+            if (target_rank == ctx.my_rank || 
+                    curr_op_buf.send_dy[target_rank].size() == 0) continue;
+
+            curr_op_buf.requests.push_back(MPI_Request{});
+            MPI_Isend(
+                    curr_op_buf.send_states[target_rank].data(), curr_op_buf.send_states[target_rank].size(), get_mpi_type<ZBasisBase::state_t>(),
+                    target_rank, 10*op_index + 1, MPI_COMM_WORLD,
+                    &curr_op_buf.requests.back());
+
+            curr_op_buf.requests.push_back(MPI_Request{});
+            MPI_Isend(
+                    curr_op_buf.send_dy[target_rank].data(), curr_op_buf.send_dy[target_rank].size(), get_mpi_type<coeff_t>(),
+                    target_rank, 10*op_index + 2, MPI_COMM_WORLD,
+                    &curr_op_buf.requests.back());
+
+        }
+        
+        // get ready for next iteration
+        std::swap(prev_opbuf_id, curr_opbuf_id);
+        has_prev_op = true;
+                    
+    } // end operator loop
+
+
+    auto& prev_op_buf = comm_buffers[prev_opbuf_id];
+    // === PROCESS FINAL OPERATOR'S RECEIVES ===
+    if (has_prev_op) {
+        BENCH_TIMER_TIMEIT(remx_wait_timer,
+        // Wait for prev communications to arrive
+        if (!prev_op_buf.requests.empty()) {
+            MPI_Waitall(prev_op_buf.requests.size(),
+                    prev_op_buf.requests.data(),
+                    MPI_STATUSES_IGNORE);
+            )
+        }
+
+        // Apply the states received from remote to the PREV operator
+        BENCH_TIMER_TIMEIT(rem_up_timer, 
+        for(size_t i=0; i<prev_op_buf.recv_sources.size(); i++){
+            for (size_t j=0; j<prev_op_buf.recv_states_bufs[i].size(); ++j){
+                ZBasisBase::idx_t local_idx;
+                ASSERT_STATE_FOUND("remote", 
+                        prev_op_buf.recv_states_bufs[i][j], 
+                        this->basis.search( prev_op_buf.recv_states_bufs[i][j], local_idx)
+                        );
+
+                y[local_idx] += prev_op_buf.recv_dy_bufs[i][j];
+
+            }
+        })
+
+    }
+
+    // print diagnostics
+#ifdef SUBSPACE_ED_BENCHMARK_OPERATIONS
+    for (auto t : timers) {
+        t->print_summary(ctx.log);
+    }
+#endif
+}
+
+
+
+template <RealOrCplx coeff_t, Basis B>
+void MPILazyOpSumBatched<coeff_t, B>::evaluate_add_off_diag_batched(
+        const coeff_t* x, coeff_t* y) {
 
     assert(send_dy.size() != 0);
     assert(send_state.size() == send_dy.size());
@@ -870,3 +1108,4 @@ void MPILazyOpSumBatched<coeff_t, basis_t>::allocate_temporaries() {
 template struct MPILazyOpSumBase<double, ZBasisBST_MPI>;
 template struct MPILazyOpSumBatched<double, ZBasisBST_MPI>;
 template struct MPILazyOpSumPipe<double, ZBasisBST_MPI>;
+template struct MPILazyOpSumPipePrealloc<double, ZBasisBST_MPI>;
