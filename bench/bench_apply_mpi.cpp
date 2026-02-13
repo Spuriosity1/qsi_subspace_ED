@@ -36,6 +36,10 @@ int main(int argc, char* argv[]){
         .default_value(false)
         .implicit_value(true);
 
+    prog.add_argument("--algo", "-a")
+        .choices("0","1","2")
+        .scan<'i', unsigned int>();
+
 
     try {
         prog.parse_args(argc, argv);
@@ -120,6 +124,11 @@ int main(int argc, char* argv[]){
 
 
     for (size_t a=0; a< operators.size(); a++){
+
+        if (prog.is_used("--algo") 
+                && a != prog.get<unsigned int>("--algo"))
+            continue;
+
         std::cout <<"\n\n========================================\n"<<
             "Benchmarking "<<names[a]<<std::endl;
 
