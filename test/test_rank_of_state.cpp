@@ -45,7 +45,7 @@ int main(int argc, char* argv[]){
     }
 
 
-    unsigned int seed = prog.get<unsigned int>("--seed");
+//    unsigned int seed = prog.get<unsigned int>("--seed");
     
     MPI_Init(NULL, NULL);
 
