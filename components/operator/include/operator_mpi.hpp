@@ -236,6 +236,38 @@ protected:
 
 
 
+    // Double-buffered communication state
+template<typename coeff_t>
+struct OperatorCommState {
+    std::vector<MPI_Request> requests;
+    std::vector<std::vector<coeff_t>> send_dy;
+    std::vector<std::vector<ZBasisBase::state_t>> send_states;
+    std::vector<std::vector<ZBasisBase::state_t>> recv_states_bufs;
+    std::vector<std::vector<coeff_t>> recv_dy_bufs;
+    std::vector<int> recv_sources;
+
+    void reserve(const std::vector<int>& sendcounts, 
+            const std::vector<int>& recvcounts){
+        for (int r=0; r<sendcounts.size(); r++){
+            send_states[r].reserve(sendcounts[r]);
+            send_dy[r].reserve(sendcounts[r]);
+
+            recv_dy_bufs[r].reserve(recvcounts[r]);
+            recv_states_bufs[r].reserve(recvcounts[r]);
+        }
+    }
+    
+    void clear_for_reuse() {
+        for (auto& v : send_states) v.clear();
+        for (auto& v : send_dy) v.clear();
+        recv_states_bufs.clear();
+        recv_dy_bufs.clear();
+        recv_sources.clear();
+        requests.clear();
+    }
+};
+
+
 
 template<RealOrCplx coeff_t, Basis B>
 struct MPILazyOpSumPipePrealloc : public MPILazyOpSumBase<coeff_t, B> {
@@ -264,26 +296,7 @@ protected:
         bool is_initialized = false;
     } comm_cache;
     
-    // Double-buffered communication state
-    struct OperatorCommState {
-        std::vector<MPI_Request> requests;
-        std::vector<std::vector<coeff_t>> send_dy;
-        std::vector<std::vector<ZBasisBase::state_t>> send_states;
-        std::vector<std::vector<ZBasisBase::state_t>> recv_states_bufs;
-        std::vector<std::vector<coeff_t>> recv_dy_bufs;
-        std::vector<int> recv_sources;
-        
-        void clear_for_reuse() {
-            for (auto& v : send_states) v.clear();
-            for (auto& v : send_dy) v.clear();
-            recv_states_bufs.clear();
-            recv_dy_bufs.clear();
-            recv_sources.clear();
-            requests.clear();
-        }
-    };
-    
-    OperatorCommState comm_buffers[2];
+    OperatorCommState<coeff_t> comm_buffers[2];
 
     void evaluate_add_off_diag_pipeline(const coeff_t* x, coeff_t* y);
 

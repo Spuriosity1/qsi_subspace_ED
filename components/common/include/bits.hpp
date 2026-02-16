@@ -1,5 +1,6 @@
 #pragma once
 
+#include <string>
 #if __cplusplus >= 202002L
     // C++20
     
@@ -24,3 +25,14 @@ requires (T b, const ZBasisBase::state_t& state, ZBasisBase::idx_t& J) {
 #endif
 
 
+inline std::string format_as_memory(size_t bytes){
+    size_t factor = 1024ull*1024*1024*1024;
+    if (bytes > factor) { return std::to_string(bytes / factor) + "TB"; }
+    factor /= 1024;
+    if (bytes > factor) { return std::to_string(bytes / factor) + "GB"; }
+    factor /= 1024;
+    if (bytes > factor) { return std::to_string(bytes / factor) + "MB"; }
+    factor /= 1024;
+    if (bytes > factor) { return std::to_string(bytes / factor) + "kB"; }
+     return std::to_string(bytes ) + " B"; 
+}

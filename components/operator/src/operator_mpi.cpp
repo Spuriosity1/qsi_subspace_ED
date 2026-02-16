@@ -514,22 +514,16 @@ void MPILazyOpSumPipe<coeff_t, B>::evaluate_add_off_diag_pipeline(const coeff_t*
 
 template <RealOrCplx coeff_t, Basis B>
 void MPILazyOpSumPipePrealloc<coeff_t, B>::allocate_temporaries(){
+    
     auto& ctx = this->ctx;
+    ctx.log<<"Allocating temporaries..."<<std::endl;
 
-    // Pre-allocate double buffers for worst-case communication
+    // Create empty double buffers 
     for (int buf_idx = 0; buf_idx < 2; ++buf_idx) {
         auto& buf = comm_buffers[buf_idx];
         
         buf.send_states.resize(ctx.world_size);
         buf.send_dy.resize(ctx.world_size);
-        
-        // Reserve capacity for worst case: all local states go to each rank
-        for (int r = 0; r < ctx.world_size; ++r) {
-            buf.send_states[r].reserve(ctx.local_block_size());
-            buf.send_dy[r].reserve(ctx.local_block_size());
-        }
-        
-        // Reserve for worst case receives
         buf.recv_states_bufs.reserve(ctx.world_size);
         buf.recv_dy_bufs.reserve(ctx.world_size);
         buf.recv_sources.reserve(ctx.world_size);
@@ -572,8 +566,6 @@ void MPILazyOpSumPipePrealloc<coeff_t, B>::allocate_temporaries(){
 }
 
 
-
-
 template <RealOrCplx coeff_t, Basis B>
 void MPILazyOpSumPipePrealloc<coeff_t, B>::evaluate_add_off_diag_pipeline(const coeff_t* x, coeff_t* y) {
     // guard against invalid calls
@@ -608,6 +600,11 @@ void MPILazyOpSumPipePrealloc<coeff_t, B>::evaluate_add_off_diag_pipeline(const 
         // Clear current buffer for reuse (but keep allocated capacity)
         curr_op_buf.clear_for_reuse();
 
+        const auto& sendcounts = comm_cache.sendcounts_per_op[op_index];
+        const auto& recvcounts = comm_cache.recvcounts_per_op[op_index];
+        // allocate space for the sends and receives
+        curr_op_buf.reserve(sendcounts, recvcounts);
+
         // Organize sends by destination rank
         BENCH_TIMER_TIMEIT(loc_apply_timer,
             for (ZBasisBase::idx_t il = 0; il < ctx.local_block_size(); ++il) {
@@ -621,8 +618,7 @@ void MPILazyOpSumPipePrealloc<coeff_t, B>::evaluate_add_off_diag_pipeline(const 
             }
         )
 
-        // Use cached recvcounts
-        const auto& recvcounts = comm_cache.recvcounts_per_op[op_index];
+
 
         // Immediately post receives for the current operator
         for (int source = 0; source < ctx.world_size; ++source) {
