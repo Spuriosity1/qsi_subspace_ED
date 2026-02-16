@@ -518,18 +518,6 @@ void MPILazyOpSumPipePrealloc<coeff_t, B>::allocate_temporaries(){
     auto& ctx = this->ctx;
     ctx.log<<"Allocating temporaries..."<<std::endl;
 
-    // Create empty double buffers 
-    for (int buf_idx = 0; buf_idx < 2; ++buf_idx) {
-        auto& buf = comm_buffers[buf_idx];
-        
-        buf.send_states.resize(ctx.world_size);
-        buf.send_dy.resize(ctx.world_size);
-        buf.recv_states_bufs.reserve(ctx.world_size);
-        buf.recv_dy_bufs.reserve(ctx.world_size);
-        buf.recv_sources.reserve(ctx.world_size);
-        buf.requests.reserve(2 * ctx.world_size);
-    }
-
      // Build communication pattern cache
     comm_cache.sendcounts_per_op.resize(this->ops.off_diag_terms.size());
     comm_cache.recvcounts_per_op.resize(this->ops.off_diag_terms.size());
@@ -550,14 +538,14 @@ void MPILazyOpSumPipePrealloc<coeff_t, B>::allocate_temporaries(){
             comm_cache.sendcounts_per_op[op_idx][target_rank]++;
         }
         
-        DEBUG_PRINT_VEC("<< send pattern ", op_idx, comm_cache.sendcounts_per_op[op_idx], ctx)
+        printvec(ctx.log << "<< send pattern "<< op_idx, comm_cache.sendcounts_per_op[op_idx]);
         
         // Exchange counts to learn recvcounts
         MPI_Alltoall(comm_cache.sendcounts_per_op[op_idx].data(), 1, MPI_INT,
                     comm_cache.recvcounts_per_op[op_idx].data(), 1, MPI_INT,
                     MPI_COMM_WORLD);
         
-        DEBUG_PRINT_VEC(">> recv pattern ", op_idx, comm_cache.recvcounts_per_op[op_idx], ctx)
+        printvec(ctx.log << ">> recv pattern "<< op_idx, comm_cache.sendcounts_per_op[op_idx]);
         
     }
 
@@ -603,7 +591,7 @@ void MPILazyOpSumPipePrealloc<coeff_t, B>::evaluate_add_off_diag_pipeline(const 
         const auto& sendcounts = comm_cache.sendcounts_per_op[op_index];
         const auto& recvcounts = comm_cache.recvcounts_per_op[op_index];
         // allocate space for the sends and receives
-        curr_op_buf.reserve(sendcounts, recvcounts);
+        curr_op_buf.reserve_send_resize_recv(sendcounts, recvcounts);
 
         // Organize sends by destination rank
         BENCH_TIMER_TIMEIT(loc_apply_timer,
@@ -613,8 +601,10 @@ void MPILazyOpSumPipePrealloc<coeff_t, B>::evaluate_add_off_diag_pipeline(const 
                 if (sign == 0) continue;
                 
                 auto target_rank = ctx.rank_of_state(state);
-                curr_op_buf.send_dy[target_rank].push_back(c * x[il] * sign);
-                curr_op_buf.send_states[target_rank].push_back(state);
+
+                curr_op_buf.sendbuf_push_back(target_rank, c*x[il]*sign, state);
+//                curr_op_buf.send_dy[target_rank].push_back(c * x[il] * sign);
+//                curr_op_buf.send_states[target_rank].push_back(state);
             }
         )
 
@@ -622,33 +612,32 @@ void MPILazyOpSumPipePrealloc<coeff_t, B>::evaluate_add_off_diag_pipeline(const 
 
         // Immediately post receives for the current operator
         for (int source = 0; source < ctx.world_size; ++source) {
-            if (source == ctx.my_rank || recvcounts[source] == 0) continue;
-            
-            curr_op_buf.recv_sources.push_back(source);
-            curr_op_buf.recv_states_bufs.emplace_back(recvcounts[source]);
-            curr_op_buf.recv_dy_bufs.emplace_back(recvcounts[source]);
-            
-            size_t idx = curr_op_buf.recv_states_bufs.size() - 1;
+            if (source == ctx.my_rank || curr_op_buf.get_recv_count(source) == 0) continue;
+
+            const auto& [recv_coeff_buf, recv_state_buf] = curr_op_buf.get_recv_buffers(source);
             
             curr_op_buf.requests.push_back(MPI_Request{});
-            MPI_Irecv(curr_op_buf.recv_states_bufs[idx].data(), 
+            MPI_Irecv(recv_coeff_buf,
+                     recvcounts[source], get_mpi_type<coeff_t>(),
+                     source, 10*op_index + 2, MPI_COMM_WORLD, &curr_op_buf.requests.back());
+            
+            curr_op_buf.requests.push_back(MPI_Request{});
+            MPI_Irecv(recv_state_buf, 
                      recvcounts[source], get_mpi_type<ZBasisBase::state_t>(),
                      source, 10*op_index + 1, MPI_COMM_WORLD, &curr_op_buf.requests.back());
             
-            curr_op_buf.requests.push_back(MPI_Request{});
-            MPI_Irecv(curr_op_buf.recv_dy_bufs[idx].data(),
-                     recvcounts[source], get_mpi_type<coeff_t>(),
-                     source, 10*op_index + 2, MPI_COMM_WORLD, &curr_op_buf.requests.back());
         }
 
         // Process local updates while receives are cooking
         BENCH_TIMER_TIMEIT(loc_up_timer,
-            for (size_t i = 0; i < curr_op_buf.send_states[ctx.my_rank].size(); ++i) {
+
+            const auto& [loc_send_coeff_buf, loc_send_state_buf] = curr_op_buf.get_send_buffers(ctx.my_rank);
+            for (int r = 0; r < sendcounts[ctx.my_rank]; ++r) {
                 ZBasisBase::idx_t local_idx;
-                ASSERT_STATE_FOUND("self", curr_op_buf.send_states[ctx.my_rank][i],
-                        this->basis.search(curr_op_buf.send_states[ctx.my_rank][i], local_idx)
+                ASSERT_STATE_FOUND("self", loc_send_state_buf[r],
+                        this->basis.search(loc_send_state_buf[r], local_idx)
                         );
-                y[local_idx] += curr_op_buf.send_dy[ctx.my_rank][i];
+                y[local_idx] += loc_send_coeff_buf[r];
             }
         )
 
@@ -666,16 +655,18 @@ void MPILazyOpSumPipePrealloc<coeff_t, B>::evaluate_add_off_diag_pipeline(const 
 
             // Apply the states received from remote to the PREV operator
             BENCH_TIMER_TIMEIT(rem_up_timer, 
-            for(size_t i=0; i<prev_op_buf.recv_sources.size(); i++){
-                for (size_t j=0; j<prev_op_buf.recv_states_bufs[i].size(); ++j){
+            for(int r=0; r<ctx.world_size; r++){
+                if (r == ctx.my_rank || prev_op_buf.get_recv_count(r) == 0) continue;
+
+                const auto& [recv_dy_buff, recv_state_buf] = prev_op_buf.get_recv_buffers(r);
+                for (int j=0; j<prev_op_buf.get_recv_count(r); ++j){
                     ZBasisBase::idx_t local_idx;
                     ASSERT_STATE_FOUND("remote", 
-                            prev_op_buf.recv_states_bufs[i][j], 
-                            this->basis.search( prev_op_buf.recv_states_bufs[i][j], local_idx)
+                            recv_state_buf[j], 
+                            this->basis.search(recv_state_buf[j], local_idx)
                             );
 
-                    y[local_idx] += prev_op_buf.recv_dy_bufs[i][j];
-
+                    y[local_idx] += recv_dy_buff[j];
                 }
             })
 
@@ -684,19 +675,21 @@ void MPILazyOpSumPipePrealloc<coeff_t, B>::evaluate_add_off_diag_pipeline(const 
 
         // Begin sending to all non-empty, non-self targets
         for (int target_rank=0; target_rank<ctx.world_size; target_rank++){
-            if (target_rank == ctx.my_rank || 
-                    curr_op_buf.send_dy[target_rank].size() == 0) continue;
+            auto n_send = curr_op_buf.get_send_count(target_rank);
+            if (target_rank == ctx.my_rank || n_send == 0) continue;
+
+            const auto& [send_dy_buf, send_state_buf] = curr_op_buf.get_send_buffers(target_rank);
 
             curr_op_buf.requests.push_back(MPI_Request{});
             MPI_Isend(
-                    curr_op_buf.send_states[target_rank].data(), curr_op_buf.send_states[target_rank].size(), get_mpi_type<ZBasisBase::state_t>(),
-                    target_rank, 10*op_index + 1, MPI_COMM_WORLD,
+                    send_dy_buf, n_send, get_mpi_type<coeff_t>(),
+                    target_rank, 10*op_index + 2, MPI_COMM_WORLD,
                     &curr_op_buf.requests.back());
 
             curr_op_buf.requests.push_back(MPI_Request{});
             MPI_Isend(
-                    curr_op_buf.send_dy[target_rank].data(), curr_op_buf.send_dy[target_rank].size(), get_mpi_type<coeff_t>(),
-                    target_rank, 10*op_index + 2, MPI_COMM_WORLD,
+                    send_state_buf, n_send, get_mpi_type<ZBasisBase::state_t>(),
+                    target_rank, 10*op_index + 1, MPI_COMM_WORLD,
                     &curr_op_buf.requests.back());
 
         }
@@ -706,7 +699,6 @@ void MPILazyOpSumPipePrealloc<coeff_t, B>::evaluate_add_off_diag_pipeline(const 
         has_prev_op = true;
                     
     } // end operator loop
-
 
     auto& prev_op_buf = comm_buffers[prev_opbuf_id];
     // === PROCESS FINAL OPERATOR'S RECEIVES ===
@@ -720,18 +712,20 @@ void MPILazyOpSumPipePrealloc<coeff_t, B>::evaluate_add_off_diag_pipeline(const 
             )
         }
 
-        // Apply the states received from remote to the PREV operator
+        // Apply the states received from remote processing of PREV operator
         BENCH_TIMER_TIMEIT(rem_up_timer, 
-        for(size_t i=0; i<prev_op_buf.recv_sources.size(); i++){
-            for (size_t j=0; j<prev_op_buf.recv_states_bufs[i].size(); ++j){
+        for(int r=0; r<ctx.world_size; r++){
+            if (r == ctx.my_rank || prev_op_buf.get_recv_count(r) == 0) continue;
+
+            const auto& [recv_dy_buff, recv_state_buf] = prev_op_buf.get_recv_buffers(r);
+            for (int j=0; j<prev_op_buf.get_recv_count(r); ++j){
                 ZBasisBase::idx_t local_idx;
                 ASSERT_STATE_FOUND("remote", 
-                        prev_op_buf.recv_states_bufs[i][j], 
-                        this->basis.search( prev_op_buf.recv_states_bufs[i][j], local_idx)
+                        recv_state_buf[j], 
+                        this->basis.search(recv_state_buf[j], local_idx)
                         );
 
-                y[local_idx] += prev_op_buf.recv_dy_bufs[i][j];
-
+                y[local_idx] += recv_dy_buff[j];
             }
         })
 

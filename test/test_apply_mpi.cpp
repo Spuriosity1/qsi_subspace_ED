@@ -206,14 +206,14 @@ int main(int argc, char* argv[]){
     
 
     std::array<double, 3> error;
-    std::array<double, 3> max_error;
-    std::array<int, 3> error_count;
+    std::array<double, 3> max_error = {0,0,0};
+    std::array<int, 3> error_count = {0,0,0};
 
 
     for (int mu=0; mu<3; mu++){
         for (int i=0;  i<ctx.local_block_size(); i++){
             auto g_idx = start_offset + i;
-                error[mu] = std::abs(u_global[g_idx] - u_local[mu][i]);
+            error[mu] = std::abs(u_global[g_idx] - u_local[mu][i]);
 
             if( error[mu] > tol ){
                 if (error_count[mu] == 0){

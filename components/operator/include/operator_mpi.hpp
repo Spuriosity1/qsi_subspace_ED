@@ -237,35 +237,106 @@ protected:
 
 
     // Double-buffered communication state
+//template<typename coeff_t>
+//struct OperatorCommState {
+//    std::vector<MPI_Request> requests;
+//    std::vector<std::vector<coeff_t>> send_dy;
+//    std::vector<std::vector<ZBasisBase::state_t>> send_states;
+//    std::vector<std::vector<ZBasisBase::state_t>> recv_states_bufs;
+//    std::vector<std::vector<coeff_t>> recv_dy_bufs;
+//    std::vector<int> recv_sources;
+//
+//    void reserve(const std::vector<int>& sendcounts, 
+//            const std::vector<int>& recvcounts){
+//        for (int r=0; r<sendcounts.size(); r++){
+//            send_states[r].reserve(sendcounts[r]);
+//            send_dy[r].reserve(sendcounts[r]);
+//
+//            recv_dy_bufs[r].reserve(recvcounts[r]);
+//            recv_states_bufs[r].reserve(recvcounts[r]);
+//        }
+//    }
+//    
+//    void clear_for_reuse() {
+//        for (auto& v : send_states) v.clear();
+//        for (auto& v : send_dy) v.clear();
+//        recv_states_bufs.clear();
+//        recv_dy_bufs.clear();
+//        recv_sources.clear();
+//        requests.clear();
+//    }
+//};
+
+
 template<typename coeff_t>
-struct OperatorCommState {
-    std::vector<MPI_Request> requests;
-    std::vector<std::vector<coeff_t>> send_dy;
-    std::vector<std::vector<ZBasisBase::state_t>> send_states;
-    std::vector<std::vector<ZBasisBase::state_t>> recv_states_bufs;
+class OperatorCommState {
+    using state_t = ZBasisBase::state_t;
+
+    std::vector<std::vector<coeff_t>> send_dy_bufs;
+    std::vector<std::vector<state_t>> send_states_bufs;
+    std::vector<int> sendcounts;
+
+    std::vector<std::vector<state_t>> recv_states_bufs;
     std::vector<std::vector<coeff_t>> recv_dy_bufs;
-    std::vector<int> recv_sources;
+    std::vector<int> recvcounts;
 
-    void reserve(const std::vector<int>& sendcounts, 
-            const std::vector<int>& recvcounts){
-        for (int r=0; r<sendcounts.size(); r++){
-            send_states[r].reserve(sendcounts[r]);
-            send_dy[r].reserve(sendcounts[r]);
+public:
+    OperatorCommState() {
+        int world_size;
+        MPI_Comm_size(MPI_COMM_WORLD, &world_size);
 
-            recv_dy_bufs[r].reserve(recvcounts[r]);
-            recv_states_bufs[r].reserve(recvcounts[r]);
+        send_states_bufs.resize(world_size);
+        send_dy_bufs.resize(world_size);
+        recv_states_bufs.resize(world_size);
+        recv_dy_bufs.resize(world_size);
+        requests.reserve(2 * world_size);
+    }
+
+    std::vector<MPI_Request> requests;
+
+    void reserve_send_resize_recv(const std::vector<int>& sendcounts_, 
+            const std::vector<int>& recvcounts_){
+        sendcounts = sendcounts_;
+        recvcounts = recvcounts_;
+
+        assert(sendcounts.size() == recvcounts.size());
+
+        for (size_t r=0; r<sendcounts_.size(); r++){
+            send_states_bufs[r].reserve(sendcounts_[r]);
+            send_dy_bufs[r].reserve(sendcounts_[r]);
+
+            recv_dy_bufs[r].resize(recvcounts_[r]);
+            recv_states_bufs[r].resize(recvcounts_[r]);
         }
+    }
+
+
+    auto get_send_count(int rank){ return sendcounts[rank]; }
+    auto get_recv_count(int rank){ return recvcounts[rank]; }
+
+    std::pair<coeff_t*, state_t*> get_send_buffers(int rank){
+        return std::make_pair<coeff_t*, state_t*>(send_dy_bufs[rank].data(), send_states_bufs[rank].data());
+    }
+
+    std::pair<coeff_t*, state_t*> get_recv_buffers(int rank){
+        return std::make_pair<coeff_t*, state_t*>(recv_dy_bufs[rank].data(), recv_states_bufs[rank].data());
+    }
+
+    void sendbuf_push_back(int rank, coeff_t c, const state_t& psi){
+        send_states_bufs[rank].push_back(psi);
+        send_dy_bufs[rank].push_back(c);
     }
     
     void clear_for_reuse() {
-        for (auto& v : send_states) v.clear();
-        for (auto& v : send_dy) v.clear();
-        recv_states_bufs.clear();
-        recv_dy_bufs.clear();
-        recv_sources.clear();
+        for (auto& v : send_states_bufs) v.clear();
+        for (auto& v : send_dy_bufs) v.clear();
+        for (auto& v : recv_states_bufs) v.clear();
+        for (auto& v : recv_dy_bufs) v.clear();
         requests.clear();
     }
 };
+
+
 
 
 
