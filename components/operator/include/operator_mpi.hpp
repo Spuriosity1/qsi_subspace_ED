@@ -267,6 +267,124 @@ protected:
 //    }
 //};
 
+/*
+template<typename coeff_t>
+class OperatorCommState {
+    using state_t = ZBasisBase::state_t;
+
+    // big, raw-memory buffers (manuyally allocated)
+    std::vector<coeff_t> send_dy_bufs;
+    std::vector<state_t> send_states_bufs;
+
+    std::vector<state_t> recv_states_bufs;
+    std::vector<coeff_t> recv_dy_bufs;
+
+    std::vector<size_t> send_pos; // write-head position (relative to send_displs)
+    std::vector<size_t> send_counts; // allocated size of each ranks's buffer
+    std::vector<size_t> send_displs; // displacement of each rank's buffer
+
+    std::vector<size_t> recv_counts;
+    std::vector<size_t> recv_displs;
+
+public:
+
+    std::vector<MPI_Request> requests;
+
+    OperatorCommState() {
+        int world_size;
+        MPI_Comm_size(MPI_COMM_WORLD, &world_size);
+
+        send_counts.resize(world_size, 0);
+        send_pos.resize(world_size, 0);
+        recv_counts.resize(world_size, 0);
+        send_displs.resize(world_size, 0);
+        recv_displs.resize(world_size, 0);
+
+        requests.reserve(2 * world_size);
+    }
+
+    void reserve(size_t worst_case_send, size_t worst_case_recv){
+        // reserves for worst case
+        send_dy_bufs.reserve(worst_case_send);
+        send_states_bufs.reserve(worst_case_send);
+
+        recv_dy_bufs.reserve(worst_case_recv);
+        recv_states_bufs.reserve(worst_case_recv);
+    }
+
+
+
+    void reserve_send_resize_recv(const std::vector<size_t>& sendcounts_, 
+            const std::vector<size_t>& recvcounts_){
+        send_counts = sendcounts_;
+        recv_counts = recvcounts_;
+
+        assert(send_counts.size() == recv_counts.size());
+        size_t curr_send_total=0;
+        for (size_t r=0; r<send_counts.size(); r++){
+            send_pos[r] = 0;
+            send_displs[r] = curr_send_total;
+            curr_send_total += send_counts[r];
+        }
+
+        size_t curr_recv_total=0;
+        for (size_t r=0; r<recv_counts.size(); r++){
+            recv_displs[r] = curr_recv_total;
+            curr_recv_total += recv_counts[r];
+        }
+
+        // Use resize but check capacity to avoid reallocation
+        assert(curr_send_total <= send_dy_bufs.capacity() && 
+               "Exceeded reserved send capacity!");
+        assert(curr_recv_total <= recv_dy_bufs.capacity() && 
+               "Exceeded reserved recv capacity!");
+
+
+        send_dy_bufs.resize(curr_send_total);
+        send_states_bufs.resize(curr_send_total);
+
+        recv_dy_bufs.resize(curr_recv_total);
+        recv_states_bufs.resize(curr_recv_total);
+
+    }
+
+
+    auto get_send_count(int rank) const { return send_counts[rank]; }
+    auto get_recv_count(int rank) const { return recv_counts[rank]; }
+
+    std::pair<coeff_t*, state_t*> get_send_buffers(int rank){
+        return {send_dy_bufs.data()+send_displs[rank],
+                send_states_bufs.data()+send_displs[rank]};
+    }
+
+    std::pair<coeff_t*, state_t*> get_recv_buffers(int rank){
+        return {recv_dy_bufs.data()+recv_displs[rank],
+                recv_states_bufs.data()+recv_displs[rank]};
+    }
+
+    void sendbuf_push_back(int rank, coeff_t c, const state_t& psi){
+
+        assert(send_pos[rank] < send_counts[rank]);
+        auto j = send_displs[rank] + send_pos[rank];
+        send_pos[rank]++;
+
+        send_states_bufs[j]=psi;
+        send_dy_bufs[j]=c;
+    }
+    
+    void clear_for_reuse() {
+        send_states_bufs.resize(0);
+        send_dy_bufs.resize(0);
+        recv_states_bufs.resize(0);
+        recv_dy_bufs.resize(0);
+        std::fill(send_pos.begin(), send_pos.end(), 0);
+        std::fill(send_counts.begin(), send_counts.end(), 0);
+        std::fill(recv_counts.begin(), recv_counts.end(), 0);
+        requests.resize(0);
+    }
+};
+
+*/
 
 template<typename coeff_t>
 class OperatorCommState {
@@ -274,11 +392,11 @@ class OperatorCommState {
 
     std::vector<std::vector<coeff_t>> send_dy_bufs;
     std::vector<std::vector<state_t>> send_states_bufs;
-    std::vector<int> sendcounts;
+    std::vector<size_t> sendcounts;
 
     std::vector<std::vector<state_t>> recv_states_bufs;
     std::vector<std::vector<coeff_t>> recv_dy_bufs;
-    std::vector<int> recvcounts;
+    std::vector<size_t> recvcounts;
 
 public:
     OperatorCommState() {
@@ -292,16 +410,26 @@ public:
         requests.reserve(2 * world_size);
     }
 
+    void reserve(size_t worst_case_send, size_t worst_case_recv){
+        // reserves for worst case
+        for (int r=0; r<send_states_bufs.size(); r++){
+            send_dy_bufs[r].reserve(worst_case_send);
+            send_states_bufs[r].reserve(worst_case_send);
+
+            recv_dy_bufs[r].reserve(worst_case_recv);
+            recv_states_bufs[r].reserve(worst_case_recv);
+        }
+    }
+
+
     std::vector<MPI_Request> requests;
 
-    void reserve_send_resize_recv(const std::vector<int>& sendcounts_, 
-            const std::vector<int>& recvcounts_){
+    void reserve_send_resize_recv(const std::vector<size_t>& sendcounts_, 
+            const std::vector<size_t>& recvcounts_){
         sendcounts = sendcounts_;
         recvcounts = recvcounts_;
 
-        assert(sendcounts.size() == recvcounts.size());
-
-        for (size_t r=0; r<sendcounts_.size(); r++){
+        for (int r=0; r<sendcounts_.size(); r++){
             send_states_bufs[r].reserve(sendcounts_[r]);
             send_dy_bufs[r].reserve(sendcounts_[r]);
 
@@ -310,16 +438,16 @@ public:
         }
     }
 
+    std::pair<coeff_t*, state_t*> get_recv_buffers(int rank){
+        return {recv_dy_bufs[rank].data(), recv_states_bufs[rank].data()};
+    }
 
     auto get_send_count(int rank){ return sendcounts[rank]; }
     auto get_recv_count(int rank){ return recvcounts[rank]; }
 
-    std::pair<coeff_t*, state_t*> get_send_buffers(int rank){
-        return std::make_pair<coeff_t*, state_t*>(send_dy_bufs[rank].data(), send_states_bufs[rank].data());
-    }
 
-    std::pair<coeff_t*, state_t*> get_recv_buffers(int rank){
-        return std::make_pair<coeff_t*, state_t*>(recv_dy_bufs[rank].data(), recv_states_bufs[rank].data());
+    std::pair<coeff_t*, state_t*> get_send_buffers(int rank){
+        return {send_dy_bufs[rank].data(), send_states_bufs[rank].data()};
     }
 
     void sendbuf_push_back(int rank, coeff_t c, const state_t& psi){
@@ -335,6 +463,8 @@ public:
         requests.clear();
     }
 };
+
+
 
 
 
@@ -362,8 +492,8 @@ protected:
 
     // Communication pattern cache
     struct CommMetadataCache {
-        std::vector<std::vector<int>> sendcounts_per_op;  // [op_idx][rank]
-        std::vector<std::vector<int>> recvcounts_per_op;  // [op_idx][rank]
+        std::vector<std::vector<size_t>> sendcounts_per_op;  // [op_idx][rank]
+        std::vector<std::vector<size_t>> recvcounts_per_op;  // [op_idx][rank]
         bool is_initialized = false;
     } comm_cache;
     

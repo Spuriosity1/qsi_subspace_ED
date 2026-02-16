@@ -218,7 +218,8 @@ int main(int argc, char* argv[]){
             if( error[mu] > tol ){
                 if (error_count[mu] == 0){
                     std::cout<<"BST != "<<names[mu]<<" on global index "<< g_idx
-                        <<"= ("<<ctx.my_rank<<") + "<<i<<": +"<<error[mu]<<"\n";
+                        <<"= (rank "<<ctx.my_rank<<") + "<<i<<": +"<<error[mu]<<
+                        "\t"<<"Expected "<<u_global[g_idx]<<" got "<<u_local[mu][i]<<"\n";
                 }
                 error_count[mu]++;
                 max_error[mu] = std::max(max_error[mu], error[mu]);

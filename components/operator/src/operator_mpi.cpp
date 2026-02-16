@@ -522,11 +522,17 @@ void MPILazyOpSumPipePrealloc<coeff_t, B>::allocate_temporaries(){
     comm_cache.sendcounts_per_op.resize(this->ops.off_diag_terms.size());
     comm_cache.recvcounts_per_op.resize(this->ops.off_diag_terms.size());
 
+    size_t max_sends=0;
+    size_t max_recvs=0;
+
     for (size_t op_idx=0; op_idx<this->ops.off_diag_terms.size(); op_idx++ ){
         const auto& [c, op] = this->ops.off_diag_terms[op_idx];
 
-        comm_cache.sendcounts_per_op[op_idx].resize(ctx.world_size, 0);
-        comm_cache.recvcounts_per_op[op_idx].resize(ctx.world_size, 0);
+        auto& sendcounts = comm_cache.sendcounts_per_op[op_idx];
+        auto& recvcounts = comm_cache.recvcounts_per_op[op_idx];
+
+        sendcounts.resize(ctx.world_size, 0);
+        recvcounts.resize(ctx.world_size, 0);
         
         // Count how many states each rank will receive from us
         for (ZBasisBase::idx_t il = 0; il < ctx.local_block_size(); ++il) {
@@ -535,18 +541,31 @@ void MPILazyOpSumPipePrealloc<coeff_t, B>::allocate_temporaries(){
             if (sign == 0) continue;
             
             auto target_rank = ctx.rank_of_state(state);
-            comm_cache.sendcounts_per_op[op_idx][target_rank]++;
+            sendcounts[target_rank]++;
         }
         
-        printvec(ctx.log << "<< send pattern "<< op_idx, comm_cache.sendcounts_per_op[op_idx]);
+        printvec(ctx.log << "<< send pattern "<< op_idx, sendcounts);
         
         // Exchange counts to learn recvcounts
-        MPI_Alltoall(comm_cache.sendcounts_per_op[op_idx].data(), 1, MPI_INT,
-                    comm_cache.recvcounts_per_op[op_idx].data(), 1, MPI_INT,
+        MPI_Alltoall(sendcounts.data(), 1, MPI_INT,
+                    recvcounts.data(), 1, MPI_INT,
                     MPI_COMM_WORLD);
         
-        printvec(ctx.log << ">> recv pattern "<< op_idx, comm_cache.sendcounts_per_op[op_idx]);
+        printvec(ctx.log << ">> recv pattern "<< op_idx, recvcounts);
+
+        // short-circuit: we do not receive from ourselves
+        recvcounts[ctx.my_rank] = 0;
+
+        max_sends = std::max(max_sends, std::accumulate(sendcounts.begin(), sendcounts.end(),
+                    static_cast<size_t>(0)));
+
+        max_recvs = std::max(max_recvs, std::accumulate(recvcounts.begin(), recvcounts.end(),
+                    static_cast<size_t>(0)));
         
+    }
+
+    for (int i=0; i<2; i++){
+        comm_buffers[i].reserve(max_sends, max_recvs);
     }
 
     comm_cache.is_initialized = true;
@@ -563,6 +582,7 @@ void MPILazyOpSumPipePrealloc<coeff_t, B>::evaluate_add_off_diag_pipeline(const 
     }
 
     auto& ctx = this->ctx;
+
 
     Timer loc_apply_timer("[local apply]", ctx.my_rank);
     Timer loc_up_timer("[local update]", ctx.my_rank);
@@ -603,8 +623,6 @@ void MPILazyOpSumPipePrealloc<coeff_t, B>::evaluate_add_off_diag_pipeline(const 
                 auto target_rank = ctx.rank_of_state(state);
 
                 curr_op_buf.sendbuf_push_back(target_rank, c*x[il]*sign, state);
-//                curr_op_buf.send_dy[target_rank].push_back(c * x[il] * sign);
-//                curr_op_buf.send_states[target_rank].push_back(state);
             }
         )
 
@@ -632,7 +650,7 @@ void MPILazyOpSumPipePrealloc<coeff_t, B>::evaluate_add_off_diag_pipeline(const 
         BENCH_TIMER_TIMEIT(loc_up_timer,
 
             const auto& [loc_send_coeff_buf, loc_send_state_buf] = curr_op_buf.get_send_buffers(ctx.my_rank);
-            for (int r = 0; r < sendcounts[ctx.my_rank]; ++r) {
+            for (size_t r = 0; r < sendcounts[ctx.my_rank]; ++r) {
                 ZBasisBase::idx_t local_idx;
                 ASSERT_STATE_FOUND("self", loc_send_state_buf[r],
                         this->basis.search(loc_send_state_buf[r], local_idx)
@@ -658,18 +676,17 @@ void MPILazyOpSumPipePrealloc<coeff_t, B>::evaluate_add_off_diag_pipeline(const 
             for(int r=0; r<ctx.world_size; r++){
                 if (r == ctx.my_rank || prev_op_buf.get_recv_count(r) == 0) continue;
 
-                const auto& [recv_dy_buff, recv_state_buf] = prev_op_buf.get_recv_buffers(r);
-                for (int j=0; j<prev_op_buf.get_recv_count(r); ++j){
+                const auto& [recv_dy_buf, recv_state_buf] = prev_op_buf.get_recv_buffers(r);
+                for (size_t j=0; j<prev_op_buf.get_recv_count(r); ++j){
                     ZBasisBase::idx_t local_idx;
                     ASSERT_STATE_FOUND("remote", 
                             recv_state_buf[j], 
                             this->basis.search(recv_state_buf[j], local_idx)
                             );
 
-                    y[local_idx] += recv_dy_buff[j];
+                    y[local_idx] += recv_dy_buf[j];
                 }
             })
-
         }
         // === DATA SENDS FOR CURRENT OPERATOR ===
 
@@ -718,7 +735,7 @@ void MPILazyOpSumPipePrealloc<coeff_t, B>::evaluate_add_off_diag_pipeline(const 
             if (r == ctx.my_rank || prev_op_buf.get_recv_count(r) == 0) continue;
 
             const auto& [recv_dy_buff, recv_state_buf] = prev_op_buf.get_recv_buffers(r);
-            for (int j=0; j<prev_op_buf.get_recv_count(r); ++j){
+            for (size_t j=0; j<prev_op_buf.get_recv_count(r); ++j){
                 ZBasisBase::idx_t local_idx;
                 ASSERT_STATE_FOUND("remote", 
                         recv_state_buf[j], 
