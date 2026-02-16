@@ -547,8 +547,8 @@ void MPILazyOpSumPipePrealloc<coeff_t, B>::allocate_temporaries(){
         printvec(ctx.log << "<< send pattern "<< op_idx, sendcounts);
         
         // Exchange counts to learn recvcounts
-        MPI_Alltoall(sendcounts.data(), 1, MPI_INT,
-                    recvcounts.data(), 1, MPI_INT,
+        MPI_Alltoall(sendcounts.data(), 1, get_mpi_type<size_t>(),
+                    recvcounts.data(), 1, get_mpi_type<size_t>(),
                     MPI_COMM_WORLD);
         
         printvec(ctx.log << ">> recv pattern "<< op_idx, recvcounts);

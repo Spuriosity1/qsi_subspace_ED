@@ -267,7 +267,7 @@ protected:
 //    }
 //};
 
-/*
+
 template<typename coeff_t>
 class OperatorCommState {
     using state_t = ZBasisBase::state_t;
@@ -384,7 +384,7 @@ public:
     }
 };
 
-*/
+/*
 
 template<typename coeff_t>
 class OperatorCommState {
@@ -392,11 +392,11 @@ class OperatorCommState {
 
     std::vector<std::vector<coeff_t>> send_dy_bufs;
     std::vector<std::vector<state_t>> send_states_bufs;
-    std::vector<size_t> sendcounts;
+    std::vector<int> sendcounts;
 
     std::vector<std::vector<state_t>> recv_states_bufs;
     std::vector<std::vector<coeff_t>> recv_dy_bufs;
-    std::vector<size_t> recvcounts;
+    std::vector<int> recvcounts;
 
 public:
     OperatorCommState() {
@@ -424,8 +424,8 @@ public:
 
     std::vector<MPI_Request> requests;
 
-    void reserve_send_resize_recv(const std::vector<size_t>& sendcounts_, 
-            const std::vector<size_t>& recvcounts_){
+    void reserve_send_resize_recv(const std::vector<int>& sendcounts_, 
+            const std::vector<int>& recvcounts_){
         sendcounts = sendcounts_;
         recvcounts = recvcounts_;
 
@@ -464,7 +464,7 @@ public:
     }
 };
 
-
+*/
 
 
 
