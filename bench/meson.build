@@ -31,10 +31,10 @@ bench_apply_mpi = executable('bench_apply_mpi',
   install: false
   )
 
-bench_apply_mpi = executable('bench_apply_mpi_omp',
-  'bench_apply_mpi.cpp',
+bench_apply_mpi_compare = executable('bench_apply_mpi_compare',
+  'bench_apply_mpi_compare.cpp',
   include_directories: [inc, operator_inc],
-  dependencies: [common_dep, eigen_dep, linalg_routines_dep, mpi_dep, omp_dep],
+  dependencies: [common_dep, eigen_dep, linalg_routines_dep, mpi_dep],
   link_with: [bench_operator_mpi_lib],
   install: false
   )

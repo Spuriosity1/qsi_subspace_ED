@@ -32,6 +32,10 @@ int main(int argc, char* argv[]){
         .implicit_value(true);
 
 
+    prog.add_argument("--rebalance")
+        .default_value(false)
+        .implicit_value(true);
+
     prog.add_argument("--algo", "-a")
         .choices("0","1","2")
         .scan<'i', unsigned int>();
@@ -81,12 +85,33 @@ int main(int argc, char* argv[]){
 
     std::vector<MPILazyOpSumBase<double, ZBasisBST_MPI>*> operators;
 
+    TIMEIT("H_mpi_batch construct",
+    auto H_mpi_batch = MPILazyOpSumBatched<double, ZBasisBST_MPI>(basis, H_sym, ctx);
+    )
+    TIMEIT("H_mpi_pipe construct",
+    auto H_mpi_pipe = MPILazyOpSumPipe<double, ZBasisBST_MPI>(basis, H_sym, ctx);
+    )
     TIMEIT("H_mpi_pipeP construct",
     auto H_mpi_pipeP = MPILazyOpSumPipePrealloc<double, ZBasisBST_MPI>(basis, H_sym, ctx);
     )
 
     std::vector<std::string> names = {"MPI batch", "MPI pipe", "MPI pipe prealloc"};
 
+    operators.emplace_back(&H_mpi_batch);
+    operators.emplace_back(&H_mpi_pipe);
+    operators.emplace_back(&H_mpi_pipeP);
+
+
+          
+    if (prog.get<bool>("--rebalance")){
+        TIMEIT("basis optimise",
+            auto wisdom = H_mpi_batch.find_optimal_basis_load();
+        )
+
+        TIMEIT("apply basis optimisation",
+            basis.exchange_local_states(wisdom, ctx);
+          )
+    }
 
     std::vector<double> v_local, u_local;
     v_local.resize(ctx.local_block_size());
@@ -98,18 +123,27 @@ int main(int argc, char* argv[]){
     assert(ctx.local_block_size() == basis.dim());
 
 
-    TIMEIT("allocating temporaries",
-            H_mpi_pipeP.allocate_temporaries();
-          )
+    for (size_t a=0; a< operators.size(); a++){
 
-    std::cout<<"[rank "<<ctx.my_rank<<"] op construct finish"<<std::endl;
+        if (prog.is_used("--algo") 
+                && a != prog.get<unsigned int>("--algo"))
+            continue;
 
-    std::fill(u_local.begin(), u_local.end(), 0);
+        std::cout <<"\n\n========================================\n"<<
+            "Benchmarking "<<names[a]<<std::endl;
 
-    std::cout<<"[BST_MPI "<<ctx.my_rank<<"]  Apply..."<<std::endl;
-    // NOTE: add the local block offset to stay correct
-    TIMEIT("u += Av", H_mpi_pipeP.evaluate_add(v_local.data(), u_local.data());)
-    
+        TIMEIT("allocating temporaries",
+                operators[a]->allocate_temporaries();
+              )
+
+        std::cout<<"[rank "<<ctx.my_rank<<"] op construct finish"<<std::endl;
+
+        std::fill(u_local.begin(), u_local.end(), 0);
+
+        std::cout<<"[BST_MPI "<<names[a]<<" "<<ctx.my_rank<<"]  Apply..."<<std::endl;
+        // NOTE: add the local block offset to stay correct
+        TIMEIT("u += Av", operators[a]->evaluate_add(v_local.data(), u_local.data());)
+    }
 
     MPI_Finalize();
     return 0;
