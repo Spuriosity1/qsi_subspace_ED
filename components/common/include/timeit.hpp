@@ -74,6 +74,7 @@ class Timer {
                     std::chrono::high_resolution_clock::now() - tik_time)
                     ;
             times.push_back(diff.count());
+            std::cerr<<name<<diff.count()<<"ms"<<std::endl;
             return diff;
         }
 

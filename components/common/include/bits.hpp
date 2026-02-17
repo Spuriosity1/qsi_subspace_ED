@@ -1,6 +1,9 @@
 #pragma once
 
 #include <string>
+#include <fstream>
+#include <sstream>
+
 #if __cplusplus >= 202002L
     // C++20
     
@@ -35,4 +38,26 @@ inline std::string format_as_memory(size_t bytes){
     factor /= 1024;
     if (bytes > factor) { return std::to_string(bytes / factor) + "kB"; }
      return std::to_string(bytes ) + " B"; 
+}
+
+
+
+// Returns current RSS in bytes for this process
+inline size_t get_rss_bytes() {
+    std::ifstream f("/proc/self/status");
+    std::string line;
+    while (std::getline(f, line)) {
+        if (line.rfind("VmRSS:", 0) == 0) {
+            size_t kb = 0;
+            std::sscanf(line.c_str(), "VmRSS: %zu kB", &kb);
+            return kb * 1024;
+        }
+    }
+    return 0;
+}
+
+// Convenience: log RSS with a label, only on one rank unless all=true
+inline void log_rss(std::ostream& log, const std::string& label) {
+        log << "RSS at " << label 
+            << ": " << get_rss_bytes() / (1024.0*1024.0) << " MB\n";
 }

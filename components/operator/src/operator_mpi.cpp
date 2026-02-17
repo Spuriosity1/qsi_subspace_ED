@@ -518,6 +518,12 @@ void MPILazyOpSumPipePrealloc<coeff_t, B>::allocate_temporaries(){
     auto& ctx = this->ctx;
     ctx.log<<"Allocating temporaries..."<<std::endl;
 
+    log_rss(ctx.log, "allocate_temporaries() entry");
+    ctx.log << "[rank " << ctx.my_rank << "] local_block_size=" 
+            << ctx.local_block_size() 
+            << "  n_off_diag_ops=" << this->ops.off_diag_terms.size() << "\n";
+    
+
      // Build communication pattern cache
     comm_cache.sendcounts_per_op.resize(this->ops.off_diag_terms.size());
     comm_cache.recvcounts_per_op.resize(this->ops.off_diag_terms.size());
@@ -544,14 +550,14 @@ void MPILazyOpSumPipePrealloc<coeff_t, B>::allocate_temporaries(){
             sendcounts[target_rank]++;
         }
         
-        printvec(ctx.log << "<< send pattern "<< op_idx, sendcounts);
+        printvec(ctx.log << "(op "<<op_idx<<")<< send pattern "<< op_idx, sendcounts)<<"\n";
         
         // Exchange counts to learn recvcounts
         MPI_Alltoall(sendcounts.data(), 1, get_mpi_type<size_t>(),
                     recvcounts.data(), 1, get_mpi_type<size_t>(),
                     MPI_COMM_WORLD);
         
-        printvec(ctx.log << ">> recv pattern "<< op_idx, recvcounts);
+        printvec(ctx.log << "(op "<<op_idx<<")>> recv pattern "<< op_idx, recvcounts)<<"\n";
 
         // short-circuit: we do not receive from ourselves
         recvcounts[ctx.my_rank] = 0;
@@ -564,11 +570,30 @@ void MPILazyOpSumPipePrealloc<coeff_t, B>::allocate_temporaries(){
         
     }
 
+        
+    // ---- Critical: compute projected allocation before touching memory ----
+    // coeff_t + state_t, two buffers (send+recv), two OperatorCommState objects
+    constexpr size_t bytes_per_comm = sizeof(coeff_t) + sizeof(ZBasisBase::state_t);
+    size_t projected_bytes = 2 * (max_sends + max_recvs) * bytes_per_comm;
+    
+    ctx.log << "max_sends=" << max_sends 
+            << " max_recvs=" << max_recvs << "\n"
+            << "projected comm buffer alloc: " 
+            << projected_bytes / (1024.0*1024.0) << " MB"
+            << " (" << projected_bytes / (1024.0*1024.0*1024.0) << " GB)\n";
+    ctx.log.flush();
+    
+    log_rss(ctx.log, "before reserve()");
+
     for (int i=0; i<2; i++){
         comm_buffers[i].reserve(max_sends, max_recvs);
     }
 
+
     comm_cache.is_initialized = true;
+
+    log_rss(ctx.log, "allocate_temporaries exit");
+    ctx.log.flush();
 
 }
 

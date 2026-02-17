@@ -304,6 +304,21 @@ public:
     }
 
     void reserve(size_t worst_case_send, size_t worst_case_recv){
+        constexpr size_t bytes_per_comm = sizeof(coeff_t) + sizeof(state_t);
+        size_t send_bytes = worst_case_send * bytes_per_comm;
+        size_t recv_bytes = worst_case_recv * bytes_per_comm;
+        
+        // Print before each reserve() call so a crash mid-way is diagnosable
+        // (use stderr so it bypasses any buffering)
+        int rank; MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+        fprintf(stderr, "[rank %d] OperatorCommState::reserve: "
+                "send=%zu elems (%.1f MB), recv=%zu elems (%.1f MB), "
+                "total=%.1f MB\n",
+                rank,
+                worst_case_send, send_bytes/1e6,
+                worst_case_recv, recv_bytes/1e6,
+                (send_bytes + recv_bytes)/1e6);
+        fflush(stderr);
         // reserves for worst case
         send_dy_bufs.reserve(worst_case_send);
         send_states_bufs.reserve(worst_case_send);
@@ -311,8 +326,6 @@ public:
         recv_dy_bufs.reserve(worst_case_recv);
         recv_states_bufs.reserve(worst_case_recv);
     }
-
-
 
     void reserve_send_resize_recv(const std::vector<size_t>& sendcounts_, 
             const std::vector<size_t>& recvcounts_){

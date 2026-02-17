@@ -97,7 +97,6 @@ int main(int argc, char* argv[]){
 
     assert(ctx.local_block_size() == basis.dim());
 
-
     TIMEIT("allocating temporaries",
             H_mpi_pipeP.allocate_temporaries();
           )
