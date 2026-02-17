@@ -279,12 +279,12 @@ void MPILazyOpSumPipe<coeff_t, B>::evaluate_add_off_diag_pipeline(const coeff_t*
 
     auto& ctx = this->ctx;
 
-    Timer loc_apply_timer("[local apply]", ctx.my_rank);
-    Timer loc_up_timer("[local update]", ctx.my_rank);
-    Timer rem_up_timer("[remote update]", ctx.my_rank);
-    Timer countx_wait_timer("[count exchange wait]", ctx.my_rank);
-    Timer countx_wait_timer_2("[count exchange wait 2]", ctx.my_rank);
-    Timer remx_wait_timer("[remote exchange wait]", ctx.my_rank);
+    Timer loc_apply_timer("[local apply]", ctx.log);
+    Timer loc_up_timer("[local update]", ctx.log);
+    Timer rem_up_timer("[remote update]", ctx.log);
+    Timer countx_wait_timer("[count exchange wait]", ctx.log);
+    Timer countx_wait_timer_2("[count exchange wait 2]", ctx.log);
+    Timer remx_wait_timer("[remote exchange wait]", ctx.log);
 
     std::vector<const Timer*> timers{&loc_apply_timer, &loc_up_timer, &rem_up_timer, &countx_wait_timer, &remx_wait_timer};
 
@@ -504,7 +504,7 @@ void MPILazyOpSumPipe<coeff_t, B>::evaluate_add_off_diag_pipeline(const coeff_t*
 // print diagnostics
 #ifdef SUBSPACE_ED_BENCHMARK_OPERATIONS
         for (auto t : timers){
-            t->print_summary(ctx.log);
+            t->print_summary();
         }
 #endif
 
@@ -609,10 +609,10 @@ void MPILazyOpSumPipePrealloc<coeff_t, B>::evaluate_add_off_diag_pipeline(const 
     auto& ctx = this->ctx;
 
 
-    Timer loc_apply_timer("[local apply]", ctx.my_rank);
-    Timer loc_up_timer("[local update]", ctx.my_rank);
-    Timer rem_up_timer("[remote update]", ctx.my_rank);
-    Timer remx_wait_timer("[remote exchange wait]", ctx.my_rank);
+    Timer loc_apply_timer("[local apply]", ctx.log);
+    Timer loc_up_timer("[local update]", ctx.log);
+    Timer rem_up_timer("[remote update]", ctx.log);
+    Timer remx_wait_timer("[remote exchange wait]", ctx.log);
 
     std::vector<const Timer *> timers{&loc_apply_timer, &loc_up_timer,
                                       &rem_up_timer,
@@ -776,7 +776,7 @@ void MPILazyOpSumPipePrealloc<coeff_t, B>::evaluate_add_off_diag_pipeline(const 
     // print diagnostics
 #ifdef SUBSPACE_ED_BENCHMARK_OPERATIONS
     for (auto t : timers) {
-        t->print_summary(ctx.log);
+        t->print_summary();
     }
 #endif
 }
@@ -792,11 +792,11 @@ void MPILazyOpSumBatched<coeff_t, B>::evaluate_add_off_diag_batched(
 
     auto& ctx = this->ctx;
 
-    Timer initial_apply_timer("[initial apply]", ctx.my_rank);
-//    Timer sort_vectors_timer("[sort]", ctx.my_rank);
-    Timer loc_apply_timer("[local apply]", ctx.my_rank);
-    Timer remx_wait_timer("[waiting for data]", ctx.my_rank);
-    Timer rem_apply_timer("[remote apply]", ctx.my_rank);
+    Timer initial_apply_timer("[initial apply]", ctx.log);
+//    Timer sort_vectors_timer("[sort]", ctx.log);
+    Timer loc_apply_timer("[local apply]", ctx.log);
+    Timer remx_wait_timer("[waiting for data]", ctx.log);
+    Timer rem_apply_timer("[remote apply]", ctx.log);
 
     std::vector<const Timer*> timers{&initial_apply_timer,
         &loc_apply_timer, &remx_wait_timer, &rem_apply_timer};
@@ -953,7 +953,7 @@ void MPILazyOpSumBatched<coeff_t, B>::evaluate_add_off_diag_batched(
 
 #ifdef SUBSPACE_ED_BENCHMARK_OPERATIONS
     for (auto t : timers){
-        t->print_summary(ctx.log);
+        t->print_summary();
     }
 #endif
 

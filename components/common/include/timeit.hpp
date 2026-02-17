@@ -57,13 +57,9 @@ class Timer {
     std::chrono::time_point<std::chrono::high_resolution_clock> tik_time;
     std::vector<double> times;
     std::string name;
+    std::ostream& o;
     public:
-    Timer(const std::string& name_): name(name_){}
-    Timer(const std::string& name_, int rank){
-        std::ostringstream oss;
-        oss << "[rank "<<rank<<"] "<<name_;
-        name = oss.str();
-    }
+    Timer(const std::string& name_, std::ostream& os=std::cerr): name(name_), o(os){}
 
         void tik(){
             tik_time = std::chrono::high_resolution_clock::now();
@@ -74,11 +70,12 @@ class Timer {
                     std::chrono::high_resolution_clock::now() - tik_time)
                     ;
             times.push_back(diff.count());
-            std::cerr<<name<<diff.count()<<"ms"<<std::endl;
+
+            o << name <<" # "<<times.size()<<"\t "<<diff.count()<<"ms"<<std::endl;
             return diff;
         }
 
-        void print_summary(std::ostream& o) const{
+        void print_summary() const{
             double acc = 0;
             double acc2 = 0;
             double min = std::numeric_limits<double>::max();
