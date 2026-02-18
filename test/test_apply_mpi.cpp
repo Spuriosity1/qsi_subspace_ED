@@ -148,7 +148,7 @@ int main(int argc, char* argv[]){
 
     auto H_mpi_batch = MPILazyOpSumBatched<double, ZBasisBST_MPI>(basis, H_sym, ctx);
     auto H_mpi_pipe = MPILazyOpSumPipe<double, ZBasisBST_MPI>(basis, H_sym, ctx);
-    auto H_mpi_pipeP = MPILazyOpSumPipePrealloc<double, ZBasisBST_MPI>(basis, H_sym, ctx);
+    auto H_mpi_pipeP = MPILazyOpSumPipePrealloc<double, ZBasisBST_MPI>(basis, H_sym, ctx, 3);
 
     auto H_st = LazyOpSum(basis_st, H_sym);
 

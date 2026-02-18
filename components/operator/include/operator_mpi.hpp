@@ -398,15 +398,28 @@ public:
 };
 
 
+
+struct CommMetadataCache {
+    std::vector<std::vector<size_t>> sendcounts_per_op;  // [op_idx][rank]
+    std::vector<std::vector<size_t>> recvcounts_per_op;  // [op_idx][rank]
+    bool is_initialized = false;
+};
+
+// Pipelined, with preallocation (currently fastest)
 template<RealOrCplx coeff_t, Basis B>
 struct MPILazyOpSumPipePrealloc : public MPILazyOpSumBase<coeff_t, B> {
 
     explicit MPILazyOpSumPipePrealloc(
             const B& local_basis_, const SymbolicOpSum<coeff_t>& ops_,
-            MPIctx& context_
-      ) : MPILazyOpSumBase<coeff_t, B>(local_basis_, ops_, context_)
+            MPIctx& context_, size_t n_comm_buffer_=2
+      ) : MPILazyOpSumBase<coeff_t, B>(local_basis_, ops_, context_),
+    comm_buffers(n_comm_buffer_)
      {
+         if (n_comm_buffer_ < 2){
+             throw std::out_of_range("Must reserve at least two comm buffers");
+         }
     }
+
 
 
     void allocate_temporaries() override ;
@@ -419,15 +432,11 @@ struct MPILazyOpSumPipePrealloc : public MPILazyOpSumBase<coeff_t, B> {
 protected:
 
     // Communication pattern cache
-    struct CommMetadataCache {
-        std::vector<std::vector<size_t>> sendcounts_per_op;  // [op_idx][rank]
-        std::vector<std::vector<size_t>> recvcounts_per_op;  // [op_idx][rank]
-        bool is_initialized = false;
-    } comm_cache;
-    
-    OperatorCommState<coeff_t> comm_buffers[2];
+    CommMetadataCache comm_cache;
+    std::vector<OperatorCommState<coeff_t>> comm_buffers;
 
     void evaluate_add_off_diag_pipeline(const coeff_t* x, coeff_t* y);
 
 };
+
 

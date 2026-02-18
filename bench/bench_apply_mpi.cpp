@@ -26,6 +26,10 @@ int main(int argc, char* argv[]){
         .scan<'i', unsigned int>()
         .default_value(0u);
 
+    prog.add_argument("--n_buffers")
+        .help("number of comm buffers")
+        .scan<'i', size_t>()
+        .default_value(static_cast<size_t>(2));
 
     prog.add_argument("--trim")
         .default_value(false)
@@ -46,6 +50,7 @@ int main(int argc, char* argv[]){
     }
 
     unsigned int seed = prog.get<unsigned int>("--seed");
+    size_t n_buffers = prog.get<size_t>("--n_buffers");
     
     MPI_Init(NULL, NULL);
 
@@ -82,7 +87,7 @@ int main(int argc, char* argv[]){
     std::vector<MPILazyOpSumBase<double, ZBasisBST_MPI>*> operators;
 
     TIMEIT("H_mpi_pipeP construct",
-    auto H_mpi_pipeP = MPILazyOpSumPipePrealloc<double, ZBasisBST_MPI>(basis, H_sym, ctx);
+    auto H_mpi_pipeP = MPILazyOpSumPipePrealloc<double, ZBasisBST_MPI>(basis, H_sym, ctx, n_buffers);
     )
 
     std::vector<std::string> names = {"MPI batch", "MPI pipe", "MPI pipe prealloc"};

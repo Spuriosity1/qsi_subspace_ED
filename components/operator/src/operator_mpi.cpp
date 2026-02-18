@@ -585,8 +585,8 @@ void MPILazyOpSumPipePrealloc<coeff_t, B>::allocate_temporaries(){
     
     log_rss(ctx.log, "before reserve()");
 
-    for (int i=0; i<2; i++){
-        comm_buffers[i].reserve(max_sends, max_recvs);
+    for (auto& buf : comm_buffers){
+        buf.reserve(max_sends, max_recvs);
     }
 
 
@@ -618,14 +618,14 @@ void MPILazyOpSumPipePrealloc<coeff_t, B>::evaluate_add_off_diag_pipeline(const 
                                       &rem_up_timer,
                                       &remx_wait_timer};
 
+    size_t ncb = comm_buffers.size();
     int prev_opbuf_id=0;
-    int curr_opbuf_id=1;
+    int curr_opbuf_id=ncb-1;
 
-    bool has_prev_op = false;
+    size_t n_prev_op=0; 
 
     for ( size_t op_index=0; op_index<this->ops.off_diag_terms.size(); op_index++ ){
         const auto& [c, op] = this->ops.off_diag_terms[op_index];
-
 
         auto& prev_op_buf = comm_buffers[prev_opbuf_id];
         auto& curr_op_buf = comm_buffers[curr_opbuf_id];
@@ -685,8 +685,9 @@ void MPILazyOpSumPipePrealloc<coeff_t, B>::evaluate_add_off_diag_pipeline(const 
         )
 
 
-        // === PROCESS PREVIOUS OPERATOR'S RECEIVES ===
-        if (has_prev_op) {
+        // === PROCESS OLDEST OPERATOR'S RECEIVES ===
+        if (n_prev_op == ncb-1) {
+            --n_prev_op;
             BENCH_TIMER_TIMEIT(remx_wait_timer,
             // Wait for prev communications to arrive
             if (!prev_op_buf.requests.empty()) {
@@ -737,14 +738,17 @@ void MPILazyOpSumPipePrealloc<coeff_t, B>::evaluate_add_off_diag_pipeline(const 
         }
         
         // get ready for next iteration
-        std::swap(prev_opbuf_id, curr_opbuf_id);
-        has_prev_op = true;
+        curr_opbuf_id = (curr_opbuf_id + 1)% ncb;
+        prev_opbuf_id = (prev_opbuf_id + 1)% ncb;
+
+        ++n_prev_op;
                     
     } // end operator loop
 
-    auto& prev_op_buf = comm_buffers[prev_opbuf_id];
-    // === PROCESS FINAL OPERATOR'S RECEIVES ===
-    if (has_prev_op) {
+    // === PROCESS REMAINING OPERATOR RECEIVES ===
+
+    while (n_prev_op > 0) {
+        auto& prev_op_buf = comm_buffers[prev_opbuf_id];
         BENCH_TIMER_TIMEIT(remx_wait_timer,
         // Wait for prev communications to arrive
         if (!prev_op_buf.requests.empty()) {
@@ -770,7 +774,8 @@ void MPILazyOpSumPipePrealloc<coeff_t, B>::evaluate_add_off_diag_pipeline(const 
                 y[local_idx] += recv_dy_buff[j];
             }
         })
-
+        --n_prev_op;
+        prev_opbuf_id = (prev_opbuf_id + 1)% ncb;
     }
 
     // print diagnostics
