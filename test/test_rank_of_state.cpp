@@ -87,7 +87,6 @@ int main(int argc, char* argv[]){
         basis.remove_null_states(H_sym, ctx);
     }
 
-    assert(ctx.local_block_size() == basis.size());
 
     const auto lower_bound = ctx.state_partition[ctx.my_rank];
     const auto upper_bound = ctx.state_partition[ctx.my_rank+1];

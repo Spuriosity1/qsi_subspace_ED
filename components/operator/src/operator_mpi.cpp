@@ -12,9 +12,6 @@
             printHex(std::cerr, state) << "\n"; \
             throw std::logic_error("State not found in " error_msg); \
         } \
-        if (local_idx >= ctx.local_block_size()) { \
-            throw std::logic_error("Bad local_idx in " error_msg); \
-        } \
     } while(0)
 
 #else
@@ -33,12 +30,17 @@
 #endif
 
 // reads only the local basis into memory
-inline std::vector<Uint128> read_basis_hdf5(
-        MPIctx& ctx,
+inline std::vector<Uint128> read_basis_hdf5_MPI(
         const std::string& infile,
-        const char* dset_name = "basis"){
+        const char* dset_name = "basis"
+        ){
 
 	std::vector<Uint128> result;
+
+    int world_size, my_rank;
+
+    MPI_Comm_size(MPI_COMM_WORLD, &world_size);
+    MPI_Comm_rank(MPI_COMM_WORLD, &my_rank);
 
 	// HDF5 identifiers
 	hid_t file_id = -1, dataset_id = -1, dataspace_id = -1;
@@ -71,52 +73,15 @@ inline std::vector<Uint128> read_basis_hdf5(
 
         if (total_rows == 0){
             throw std::runtime_error("Basis is empty!");
-        }
-
-
-        // calculate the index partition in an efficient manner
-        {     
-            // Each rank reads its boundary states directly from file
-            auto read_state = [&](uint64_t idx) {
-                Uint128 val{};
-                hsize_t offset[2] = { idx, 0 };
-                hsize_t count[2]  = { 1, row_width };
-                herr_t status;
-                status = H5Sselect_hyperslab(dataspace_id, H5S_SELECT_SET, offset, nullptr, count, nullptr);
-                if (status < 0) throw HDF5Error(file_id, dataspace_id, dataset_id, "read_state: Failed to select hyperslab");
-
-                hid_t memspace = H5Screate_simple(2, count, nullptr);
-                status = H5Dread(dataset_id, H5T_NATIVE_UINT64, memspace, dataspace_id, H5P_DEFAULT, &val);
-
-                if (status < 0) throw HDF5Error(file_id, dataspace_id, dataset_id, "read_state: Failed to read memory");
-
-                H5Sclose(memspace);
-                return val;
-            };
-
-//            ctx.estimate_optimal_mask(total_rows, read_state, 4);
-            ctx.partition_indices_equal(total_rows);
-            ctx.populate_state_terminals(total_rows, read_state);
-        }
-    
+        }   
         
         // Local chunk indices (by global index)
-        const uint64_t local_start = static_cast<uint64_t>(ctx.idx_partition[ctx.my_rank]);
-        const uint64_t local_end   = static_cast<uint64_t>(ctx.idx_partition[ctx.my_rank+1]);
-        const uint64_t local_count = (local_end > local_start) ? (local_end - local_start) : 0;
+        uint64_t chunk = total_rows / world_size;
+        int64_t rem   = total_rows % world_size;
 
-        if (local_start + local_count > total_rows){
-            std::cerr << "Error on Rank "<<ctx.my_rank<<":"
-                <<"\ntotal_rows = "<<total_rows
-                <<"\nlocal_start = "<<local_start
-                <<"\nlocal_start + local_count = "<<local_start+local_count
-                <<"\nidx_partition=[";
-            for (const auto& I : ctx.idx_partition){
-                std::cerr << I <<",";
-            }
-            std::cerr <<"]\n";
-            throw std::logic_error("Bad slab spec: trying to read past the end!");
-        }
+        uint64_t local_count = chunk + (my_rank < rem ? 1 : 0);
+    
+        uint64_t my_offset = my_rank * chunk + std::min<uint64_t>(my_rank, rem);
 		
         // read the slab in [local_start ... local_end)
         if (local_count > 0) {
@@ -124,7 +89,7 @@ inline std::vector<Uint128> read_basis_hdf5(
             result.resize(local_count);
 
             // Select hyperslab in file dataspace
-            hsize_t file_offset[2] = { local_start, 0 };
+            hsize_t file_offset[2] = { my_offset, 0 };
             hsize_t file_count[2]  = { local_count, row_width };
             status = H5Sselect_hyperslab(dataspace_id, H5S_SELECT_SET, file_offset, nullptr, file_count, nullptr);
             if (status < 0) throw std::runtime_error("read_basis_hdf5: Failed to select hyperslab");
@@ -140,11 +105,7 @@ inline std::vector<Uint128> read_basis_hdf5(
         }
 
         // Print diagnostics
-        ctx.log<<"Loaded basis chunk.\n"<<ctx;
-        if (ctx.my_rank == 0){
-            std::cout<<"[Main] "<<ctx;
-        }
-        
+        std::cout<<"[r"<<my_rank<<"] Loaded basis chunk.";
 		
 		// Clean up
 		H5Sclose(dataspace_id);
@@ -163,6 +124,82 @@ inline std::vector<Uint128> read_basis_hdf5(
 
 
 
+
+void ZBasisBST_HashMPI::load_from_file(const fs::path& bfile, const std::string& dataset){
+    std::cerr << "Loading basis from file " << bfile <<"\n";
+
+    if (bfile.stem().extension() == ".partitioned"){
+        assert(bfile.extension() == ".h5");
+        states = read_basis_hdf5_MPI(bfile, dataset.c_str());
+    } else if (bfile.extension() == ".h5"){
+        assert(dataset=="basis");
+        states = read_basis_hdf5_MPI(bfile, "basis"); 
+    } else {
+        throw std::runtime_error(
+                "Bad basis format: file must end with .csv or .h5");
+    }
+
+    MPIHashContext ctx;
+    tfer_states_to_correct_ranks(ctx);
+
+    std::cerr << "Done!" <<"\n";
+}
+
+
+// redistribute states to the correct ranks
+void ZBasisBST_HashMPI::tfer_states_to_correct_ranks(MPIHashContext& ctx){ 
+    // allocate some temporary memory
+    std::vector<state_t> send_states(this->size());
+    std::vector<state_t> recv_states;
+
+    std::vector<int> send_counts(ctx.world_size,0);
+    std::vector<int> recv_counts(ctx.world_size);
+
+    std::vector<int> send_displs(ctx.world_size,0);
+    std::vector<int> recv_displs(ctx.world_size);
+
+    // tag them all
+    for (const auto& psi : states){
+        send_counts[ctx.rank_of_state(psi)]++;
+    }
+
+    MPI_Request r1;
+    MPI_Ialltoall(send_counts.data(), 1, get_mpi_type<int>(), 
+            recv_counts.data(), 1, get_mpi_type<int>(), MPI_COMM_WORLD, &r1);
+
+    for (int r=1; r<ctx.world_size; r++){
+        send_displs[r] = send_displs[r-1] + send_counts[r-1];
+    }
+
+    std::vector<int> counters(send_displs);
+    for (int il=0; il<this->size(); il++){
+        auto rank = ctx.rank_of_state(this->states[il]);
+        send_states[counters[rank]] = states[il];
+        counters[rank]++;
+    }
+
+    MPI_Wait(&r1, MPI_STATUS_IGNORE); // recv_counts now contains valid data
+    recv_states.resize(std::accumulate(recv_counts.begin(), recv_counts.end(), 0ull));
+    for (int r=1; r<ctx.world_size; r++){
+        recv_displs[r] = recv_displs[r-1] + recv_counts[r-1];
+    }
+
+    MPI_Alltoallv(send_states.data(), send_counts.data(), send_displs.data(), get_mpi_type<state_t>(),
+            recv_states.data(), recv_counts.data(), recv_displs.data(), get_mpi_type<state_t>(), MPI_COMM_WORLD);
+
+    std::swap(recv_states, this->states);
+    std::sort(this->states.begin(), this->states.end());
+    // all temporaries destroyed
+
+    idx_t my_size = this->size();
+    all_rank_dims.resize(ctx.world_size);
+    MPI_Allgather(&my_size, 1, get_mpi_type<idx_t>(), 
+            all_rank_dims.data(), 1, get_mpi_type<idx_t>(), MPI_COMM_WORLD);
+    _global_dim = std::accumulate(all_rank_dims.begin(), all_rank_dims.end(),
+            static_cast<idx_t>(0));
+}
+
+/*
 MPIctx ZBasisBST_MPI::load_from_file(const fs::path& bfile, const std::string& dataset){
      // MPI setup
     MPIctx ctx;
@@ -184,6 +221,7 @@ MPIctx ZBasisBST_MPI::load_from_file(const fs::path& bfile, const std::string& d
     std::cerr << "Done!" <<"\n";
     return ctx;
 }
+*/
 
 //void MPI_ZBasisBST::load_state(std::vector<double>& psi, const fs::path& eig_file){
 //    
@@ -249,7 +287,7 @@ void MPILazyOpSum<coeff_t, B>::evaluate_add_diagonal(const coeff_t* x, coeff_t* 
        
         // there is no need to communicate, it's literally just this??
 //        #pragma omp parallel for schedule(static)
-        for (ZBasisBase::idx_t i = 0; i<ctx.local_block_size(); ++i){
+        for (ZBasisBase::idx_t i = 0; i<basis.dim(); ++i){
             ZBasisBase::state_t psi = basis[i];
             coeff_t dy = c * x[i] * static_cast<double>(op.applyState(psi));
             assert(psi == basis[i]);
@@ -301,7 +339,7 @@ void MPILazyOpSum<coeff_t, B>::evaluate_add_off_diag_pipeline(const coeff_t* x, 
          // Organize sends by destination rank
         BENCH_TIMER_TIMEIT(loc_apply_timer,
 
-        for (ZBasisBase::idx_t il = 0; il < ctx.local_block_size(); ++il) {
+        for (ZBasisBase::idx_t il = 0; il < basis.dim(); ++il) {
             ZBasisBase::state_t state = basis[il];
             auto sign = op.applyState(state);
             if (sign == 0) continue;
@@ -547,7 +585,7 @@ void MPILazyOpSum<coeff_t, B>::evaluate_add_off_diag_batched(const coeff_t* x, c
     BENCH_TIMER_TIMEIT(initial_apply_timer,
 
     for ( const auto& [c, op] : ops.off_diag_terms ){
-        for (ZBasisBase::idx_t il = 0; il < ctx.local_block_size(); ++il) {
+        for (ZBasisBase::idx_t il = 0; il < basis.dim(); ++il) {
             ZBasisBase::state_t og_state = basis[il];
             auto state = og_state;
             auto sign = op.applyState(state);
@@ -573,8 +611,8 @@ void MPILazyOpSum<coeff_t, B>::evaluate_add_off_diag_batched(const coeff_t* x, c
             send_dy[pos] = dy;
 
             pos += (sign !=0); // overwrite if not needed
-            assert(pos < send_state.size());
-            assert(pos < send_dy.size());
+            assert(static_cast<size_t>(pos) < send_state.size());
+            assert(static_cast<size_t>(pos) < send_dy.size());
          }
     }
     );
@@ -685,105 +723,6 @@ void MPILazyOpSum<coeff_t, B>::evaluate_add_off_diag_batched(const coeff_t* x, c
 }
 
 
-template <RealOrCplx coeff_t, Basis basis_t>
-BasisTransferWisdom MPILazyOpSum<coeff_t, basis_t>::find_optimal_basis_load() {
-
-    std::vector<int> all_hardness(ctx.world_size);
-    int my_hardness=0;
-
-    // estimate the work of my rank
-    for (ZBasisBase::idx_t il = 0; il < ctx.local_block_size(); ++il) {
-        for (auto& [c, op] : ops.off_diag_terms ) {
-            ZBasisBase::state_t state = basis[il];
-            auto sign = op.applyState(state);
-            if (sign == 0) continue;
-            my_hardness++;
-//            auto target_rank = ctx.rank_of_state(state);
-//            naive_send_counts[target_rank]++;
-        }
-    }
-    MPI_Allgather(&my_hardness, 1, MPI_INT, all_hardness.data(), 1, MPI_INT, MPI_COMM_WORLD);
-
-    if (ctx.my_rank == 0)
-        printvec(std::cout<<"[Main] Global hardness: ", all_hardness)<<std::endl;
-
-
-    // rebalance the load
-    const auto partition = ctx.get_rebalance_plan(all_hardness);
-    const auto& my_send_partition = partition[ctx.my_rank];
-
-    // my_send_partition is a list of pairs [ (r0, n0), (r1, n1), (r2, n2) ]
-    // notes: 
-    // i) the ranks are strictly sequential and increasing
-    // ii) the sum of the n's must add up to the local size
-#ifndef NDEBUG
-    {
-        int r_prev=-1;
-        int acc=0;
-        for (auto& [r, n] : my_send_partition){
-            assert(r > r_prev);
-            r_prev = r;
-            acc += n;
-        }
-        assert(acc == ctx.local_block_size());
-    }
-#endif
-
-    // each rank knows its local send_counts, must be told the remote send sizes
-    // we know that we need to send the basis states
-    // [0 ... partition_local_idx[0]) -> rank my_send_partition[0].first
-    // [0 ... partition_local_idx[1]) -> rank my_send_partition[1].first
-    BasisTransferWisdom btw;
-
-    // for global exchange
-    std::vector<MPI_Count> all_b_send_counts(ctx.world_size, 0); // number of elements in send_counts of each rank
-    std::vector<MPI_Count> all_b_recv_counts(ctx.world_size, 0); // number of elements to be received by each rank        
-
-    ctx.log<<"<basis rebalance>\n";
-
-    for (size_t j=0; j<my_send_partition.size(); j++){
-        auto& [target_r, count] = my_send_partition[j];
-
-        all_b_send_counts[target_r] = count;
-        btw.send_counts.push_back(count); // the number of BASIS indices to send
-        btw.send_ranks.push_back(target_r);
-        ctx.log << "("<<count<<"records ) -> "<<target_r<<"\n";
-    }
-
-
-    MPI_Alltoall(all_b_send_counts.data(), 1, get_mpi_type<MPI_Count>(), all_b_recv_counts.data(), 1, get_mpi_type<MPI_Count>(), MPI_COMM_WORLD);
-    for (int r=0; r<ctx.world_size; r++){
-        auto n = all_b_recv_counts[r];
-        if ( n != 0){
-            btw.recv_ranks.push_back(r);
-            btw.recv_counts.push_back(n);
-        }
-    }
-
-    // figure out what the terminal indices ought to be
-    btw.idx_partition.clear();
-    btw.idx_partition.resize(ctx.world_size+1, 0);
-
-    MPI_Count my_new_dimension = std::accumulate(btw.recv_counts.begin(), btw.recv_counts.end(), 0);
-    std::vector<MPI_Count> all_dimensions(ctx.world_size);
-    MPI_Allgather(&my_new_dimension, 1, get_mpi_type<MPI_Count>(), all_dimensions.data(), 1, get_mpi_type<MPI_Count>(), MPI_COMM_WORLD);
-
-    btw.idx_partition[0] = 0;
-    for(int r=0; r<ctx.world_size; r++){
-        btw.idx_partition[r+1] = btw.idx_partition[r] + all_dimensions[r];
-    }
-
-    ctx.log<<"Sugested basis rebalance:";
-    printvec(ctx.log<<"\n[b_send_counts] ", btw.send_counts);
-    printvec(ctx.log<<"\n[b_send_ranks] ", btw.send_ranks);
-    printvec(ctx.log<<"\n[b_recv_counts] ", btw.recv_counts);
-    printvec(ctx.log<<"\n[b_recv_ranks] ", btw.recv_ranks);
-
-    ctx.log<<"\n</basis rebalance>"<<std::endl;
-
-    return btw;
-}
-
 
 
 
@@ -806,7 +745,7 @@ void MPILazyOpSum<coeff_t, basis_t>::allocate_temporaries() {
 
     // set up the real send_counts
     // TODO this should be computable just from known information
-    for (ZBasisBase::idx_t il = 0; il < ctx.local_block_size(); ++il) {
+    for (ZBasisBase::idx_t il = 0; il < basis.dim(); ++il) {
         for (auto& [c, op] : ops.off_diag_terms ) {
             ZBasisBase::state_t state = basis[il];
             auto sign = op.applyState(state);
@@ -864,5 +803,5 @@ void MPILazyOpSum<coeff_t, basis_t>::allocate_temporaries() {
 
 
 // explicit template instantiations: generate symbols to link with
-template struct MPILazyOpSum<double, ZBasisBST_MPI>;
+template struct MPILazyOpSum<double, ZBasisBST_HashMPI>;
 //template struct MPILazyOpSum<double, ZBasisInterp>;

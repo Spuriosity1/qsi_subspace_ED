@@ -106,7 +106,7 @@ int main(int argc, char* argv[]) {
     std::vector<LazyOpSum<double, basis_t>> lazy_projector;
     std::vector<LazyOpSum<double, basis_t>> lazy_OO;
 
-    for (int i=0; i<ringL.size(); i++){
+    for (size_t i=0; i<ringL.size(); i++){
         auto O = ringL[i];
         auto O_H = ringR[i];
         lazy_ringL_Op.emplace_back(basis, O);

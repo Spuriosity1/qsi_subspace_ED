@@ -3,7 +3,6 @@
 #include <random>
 #include <vector>
 #include <csignal>
-#include "mpi_context.hpp"
 #include "pyro_tree.hpp"
 
 #include <unistd.h>

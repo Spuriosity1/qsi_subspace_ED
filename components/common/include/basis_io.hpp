@@ -9,6 +9,27 @@
 #include "basis_io_h5.hpp" 
 #endif
 
+
+class RankLogger {
+    const int& rank;
+public:
+    RankLogger(const int& r) : rank(r) {}
+
+    template<typename T>
+    auto& operator<<(const T& value) {
+        std::cout << "[rank " << rank << "] " << value;
+return std::cout;
+    }
+
+    // support std::endl and other manipulators
+    auto& operator<<(std::ostream& (*manip)(std::ostream&)) {
+        std::cout << manip;
+return std::cout;
+    }
+};
+
+
+
 namespace basis_io {
 
 

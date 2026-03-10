@@ -32,6 +32,7 @@ inline std::filesystem::path get_basis_file(const std::filesystem::path& lattice
 template<Basis B>
 inline auto load_basis(B& basis, const argparse::ArgumentParser& prog){
     std::string basisfile;
+    // phase 1: load a consecutive block into file
     if (prog.is_used("--basis_file")) {
         basisfile = prog.get<std::string>("--basis_file");
     } else {

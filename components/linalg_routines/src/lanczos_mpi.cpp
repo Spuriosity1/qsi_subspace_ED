@@ -220,7 +220,7 @@ Result lanczos_iterate_checkpoint(ApplyFn evaluate_add,
     double eigval = std::numeric_limits<double>::max();
     size_t start_iter = 0;
     
-    // Get SLURM job end time
+    // Get SLURM job end tt qime
     time_t job_end_time = get_slurm_end_time();
     if (settings.ctx.my_rank == 0 && job_end_time > 0) {
         time_t now = std::time(nullptr);
@@ -228,7 +228,7 @@ Result lanczos_iterate_checkpoint(ApplyFn evaluate_add,
         std::cout << "[Lanczos] SLURM job has ~" << remaining_mins 
                   << " minutes remaining\n";
     }
-    
+
     // Try to load checkpoint
     CheckpointData<_S> ckpt_data;
     bool loaded = load_checkpoint(checkpoint_file, ckpt_data, settings.ctx);

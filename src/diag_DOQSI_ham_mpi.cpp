@@ -19,7 +19,7 @@ using namespace projED;
 int main(int argc, char* argv[]) {
 	argparse::ArgumentParser prog(argv[0]);
 	prog.add_argument("lattice_file");
-	prog.add_argument("-s", "--sector");
+	prog.add_argument("--sector");
     prog.add_argument("--basis_file", "-b")
         .help("A basis file (HDF5 format). Defaults to ${lattice_file%.json}.h5");
 
@@ -48,7 +48,7 @@ int main(int argc, char* argv[]) {
 
 
         prog.add_argument("--Jpm")
-            .help("Jom, units of Jzz")
+            .help("Jpm, units of Jzz")
             .scan<'g', double>();
     }
 
@@ -90,11 +90,12 @@ int main(int argc, char* argv[]) {
 	// Step 2: Load basis from H5
     std::cout<<"Loading basis..."<<std::endl;
 
-    ZBasisBST_MPI basis;
+    ZBasisBST_HashMPI basis;
     std::cout<<"[MPI_BST]  Loading basis..."<<std::endl;
-    SparseMPIContext ctx = load_basis(basis, prog);
+    load_basis(basis, prog);
     std::cout<<"[MPI_BST]  Done! local basis dim="<<basis.dim()<<std::endl;
 
+    MPIctx ctx;
 
 	using coeff_t=double;
 	SymbolicOpSum<coeff_t> H_sym;
@@ -147,18 +148,19 @@ int main(int argc, char* argv[]) {
     /// Build H
 
 	auto H = MPILazyOpSum(basis, H_sym, ctx);
+    H.allocate_temporaries();
 
     ////////////////////////////////////////
     // Do the diagonalisation
     lanczos_mpi::Settings settings(ctx);
     parse_lanczos_settings(prog, settings);
 
-    RealApplyFn evadd = [&H, &ctx](const coeff_t* x_local, coeff_t* y_local){
+    RealApplyFn evadd = [&H](const coeff_t* x_local, coeff_t* y_local){
         H.evaluate_add(x_local, y_local);
     };
 
     double eigval;
-    std::vector<double> local_v0(ctx.local_block_size());
+    std::vector<double> local_v0(basis.dim());
 
 //    auto res = lanczos_mpi::eigval0(evadd, eigval, local_v0, settings);
 
@@ -188,7 +190,7 @@ int main(int argc, char* argv[]) {
 
     if(settings.calc_eigenvector) {
         std::cout << "[Lanczos] iterating to determine eigenvector\n";
-        std::vector<double> evector(ctx.local_block_size());
+        std::vector<double> evector(basis.dim());
         
         // Second pass for eigenvector 
         res = lanczos_mpi::lanczos_iterate_checkpoint(
@@ -227,11 +229,10 @@ int main(int argc, char* argv[]) {
     // dummy (here in case we calc more later
     std::vector<double> eigvals{eigval};
 
-    // Write eigenvectors using parallel I/O: shape (dim, n_eigvecs)
+    // Write eigenvectors using parallel I/O: shape (rank, dim, n_eigvecs)
     {
-        hsize_t global_dims[2] = {static_cast<hsize_t>(ctx.global_basis_dim()), 1};
-        hsize_t local_size = ctx.local_block_size();
-        hsize_t offset = ctx.local_start_index();
+        hsize_t global_dims[3] = {static_cast<hsize_t>(ctx.world_size),static_cast<hsize_t>(basis.global_dim()), 1};
+        hsize_t local_size = basis.dim();
         
         // Create dataspace for the full dataset
         hid_t filespace = H5Screate_simple(2, global_dims, NULL);
@@ -241,12 +242,12 @@ int main(int argc, char* argv[]) {
                                   filespace, H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT);
         
         // Select hyperslab for this process
-        hsize_t count[2] = {local_size, 1};
-        hsize_t start[2] = {offset, 0};
+        hsize_t count[3] = {1,local_size, 2};
+        hsize_t start[3] = {static_cast<hsize_t>(ctx.my_rank), 0, 0};
         H5Sselect_hyperslab(filespace, H5S_SELECT_SET, start, NULL, count, NULL);
         
         // Create memory dataspace
-        hid_t memspace = H5Screate_simple(2, count, NULL);
+        hid_t memspace = H5Screate_simple(3, count, NULL);
         
         // Create property list for collective dataset write
         hid_t plist_xfer = H5Pcreate(H5P_DATASET_XFER);

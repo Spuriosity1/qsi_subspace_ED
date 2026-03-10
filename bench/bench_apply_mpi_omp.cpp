@@ -71,8 +71,8 @@ int main(int argc, char* argv[]){
     std::vector<double> v_local, u_local;
     v_local.resize(ctx.local_block_size());
 
-    assert(ctx.local_block_size() == basis.dim());
-    u_local.resize(ctx.local_block_size());
+//    assert(ctx.local_block_size() == basis.dim());
+    u_local.resize(basis.dim());
 
     std::mt19937 rng(seed);
     projED::set_random_unit_mpi(v_local, rng);

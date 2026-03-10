@@ -50,7 +50,7 @@ int main(int argc, char* argv[]){
     
     MPI_Init(NULL, NULL);
 
-	ZBasisBST_MPI basis;
+	ZBasisBST_HashMPI basis;
    
 	// Step 1: Load ring data from JSON
     auto lattice_file = prog.get<std::string>("lattice_file");
@@ -62,8 +62,9 @@ int main(int argc, char* argv[]){
 	json jdata;
 	jfile >> jdata;
 
+    MPIHashContext ctx;
     // Step 2: load and partition the basis
-    TIMEIT("Loading basis", SparseMPIContext ctx = load_basis(basis, prog);)
+    TIMEIT("Loading basis", load_basis(basis, prog);)
     std::cout<<"[rank "<<ctx.my_rank<<"] Done! Basis dim="<<basis.dim()<<std::endl;
 
 
@@ -76,7 +77,7 @@ int main(int argc, char* argv[]){
 
     if (prog.get<bool>("--trim")){
         TIMEIT("remove unneeded elements",
-            basis.remove_null_states(H_sym, ctx);
+            basis.remove_null_states(H_sym);
         )
     }
 
@@ -84,15 +85,15 @@ int main(int argc, char* argv[]){
             auto H_mpi = MPILazyOpSum(basis, H_sym, ctx);
           )
 
-    if (prog.get<bool>("--rebalance")){
-        TIMEIT("basis optimise",
-            auto wisdom = H_mpi.find_optimal_basis_load();
-        )
-
-        TIMEIT("apply basis optimisation",
-            basis.exchange_local_states(wisdom, ctx);
-          )
-    }
+//    if (prog.get<bool>("--rebalance")){
+//        TIMEIT("basis optimise",
+//            auto wisdom = H_mpi.find_optimal_basis_load();
+//        )
+//
+//        TIMEIT("apply basis optimisation",
+//            basis.exchange_local_states(wisdom, ctx);
+//          )
+//    }
 
     TIMEIT("allocating temporaries",
             H_mpi.allocate_temporaries();
@@ -103,10 +104,9 @@ int main(int argc, char* argv[]){
     std::cout<<"[rank "<<ctx.my_rank<<"] op construct finish"<<std::endl;
 
     std::vector<double> v_local, u_local;
-    v_local.resize(ctx.local_block_size());
+    v_local.resize(basis.dim());
 
-    assert(ctx.local_block_size() == basis.dim());
-    u_local.resize(ctx.local_block_size());
+    u_local.resize(basis.dim());
 
     std::mt19937 rng(seed);
     projED::set_random_unit_mpi(v_local, rng);

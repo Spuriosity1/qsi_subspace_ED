@@ -24,7 +24,7 @@ using namespace std;
 //typedef ZBasisBST_MPI basis_t;
 //
 
-void load_state(std::vector<double>& psi, const ZBasisBST_MPI& basis, const std::filesystem::path& infile, const MPIctx& ctx, int col=0){
+void load_state(std::vector<double>& psi, const ZBasisBST_HashMPI& basis, const std::filesystem::path& infile, const MPIctx& ctx, int col=0){
     
 	hid_t file_id = -1, dataset_id = -1, dataspace_id = -1;
 	hid_t plist_id = -1, dxpl_id = -1;
@@ -67,7 +67,7 @@ void load_state(std::vector<double>& psi, const ZBasisBST_MPI& basis, const std:
             throw std::runtime_error("eigenvector is empty!");
         }
         
-        hsize_t local_count = ctx.local_block_size();
+        hsize_t local_count = basis.dim();
         hsize_t local_start = ctx.local_start_index();
         
         // Allocate memory for the result

@@ -83,8 +83,7 @@ int main(int argc, char** argv) {
 
 
     // construct the basis partition
-    MPIctx ctx;
-    ctx.partition_indices_equal(dim);
+    MPIHashContext ctx;
 
     // The random vector
     std::mt19937 rng(seed);
@@ -93,7 +92,7 @@ int main(int argc, char** argv) {
     generate_random_Herm(M, rng);
 
     // Output vector
-    std::vector<double> local_v0(ctx.local_block_size());
+    std::vector<double> local_v0(dim);
 
     lanczos_mpi::Settings settings(ctx);
     settings.krylov_dim = program.get<int>("--krylov_dim");
@@ -106,11 +105,16 @@ int main(int argc, char** argv) {
     settings.verbosity = 3;
     settings.calc_eigenvector = true;
 
-       // Build size and displacement arrays for MPI collective operations
+   // Build size and displacement arrays for MPI collective operations
     std::vector<int> all_sizes(ctx.world_size), all_displs(ctx.world_size);
-    for (int r = 0; r < ctx.world_size; ++r) {
-        all_sizes[r] = static_cast<int>(ctx.block_size(r));
-        all_displs[r] = static_cast<int>(ctx.idx_partition[r]);
+
+
+    int my_size = .;
+    MPI_Allgather(&my_size, 1, get_mpi_type<int>(), all_sizes.data(), 1, get_mpi_type<int>(), MPI_COMM_WORLD);
+
+    all_displs[0] = 0;
+    for (int r = 1; r < ctx.world_size; ++r) {
+        all_displs[r] = all_displs[r-1]+all_sizes[r-1];
     }
 
     using coeff_t = double;
@@ -120,8 +124,7 @@ int main(int argc, char** argv) {
         auto dim = M.cols();
         
         // Get local size for this rank
-        int local_size = static_cast<int>(ctx.local_block_size());
-        int local_start = static_cast<int>(ctx.local_start_index());
+        int local_size = static_cast<int>(all_sizes[ctx.my_rank]);
         
         // Reconstruct global vector via Allgatherv
         Eigen::VectorXd x_global(dim);

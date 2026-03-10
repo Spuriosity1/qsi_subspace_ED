@@ -16,19 +16,19 @@
 using json = nlohmann::json;
 
 
-template<typename T>
-void check_basis_partition(const T& basis, const MPIctx& ctx){
-
-    std::cout<<"[MPI_BST] Checking basis partition..."<<std::endl;
-        Uint128 state_prev=0;
-        for (int il=0;  il<ctx.local_block_size(); il++){
-            assert(basis[il] > state_prev);
-            state_prev = basis[il];
-            assert(basis[il] >= ctx.state_partition[ctx.my_rank]);
-            assert(basis[il] < ctx.state_partition[ctx.my_rank+1]);
-        }
-    std::cout<<"Done"<<std::endl;
-}
+//template<typename T>
+//void check_basis_partition(const T& basis, const MPIctx& ctx){
+//
+//    std::cout<<"[MPI_BST] Checking basis partition..."<<std::endl;
+//        Uint128 state_prev=0;
+//        for (int il=0;  il<ctx.local_block_size(); il++){
+//            assert(basis[il] > state_prev);
+//            state_prev = basis[il];
+//            assert(basis[il] >= ctx.state_partition[ctx.my_rank]);
+//            assert(basis[il] < ctx.state_partition[ctx.my_rank+1]);
+//        }
+//    std::cout<<"Done"<<std::endl;
+//}
 
 
 
@@ -52,9 +52,9 @@ int main(int argc, char* argv[]){
     prog.add_argument("--trim")
         .default_value(false)
         .implicit_value(true);
-    prog.add_argument("--rebalance")
-        .default_value(false)
-        .implicit_value(true);
+//    prog.add_argument("--rebalance")
+//        .default_value(false)
+//        .implicit_value(true);
 
 
     try {
@@ -71,7 +71,7 @@ int main(int argc, char* argv[]){
     MPI_Init(NULL, NULL);
 
 
-	ZBasisBST_MPI basis;
+	ZBasisBST_HashMPI basis_loc;
     ZBasisBST basis_st;
 //    ZBasisInterp basis_i;
    
@@ -87,8 +87,8 @@ int main(int argc, char* argv[]){
 
     // Step 2: load and partition the basis
     std::cout<<"[MPI_BST]  Loading basis..."<<std::endl;
-    SparseMPIContext ctx = load_basis(basis, prog);
-    std::cout<<"[MPI_BST]  Done! Basis dim="<<basis.dim()<<std::endl;
+    load_basis(basis_loc, prog);
+    std::cout<<"[MPI_BST]  Done! Basis dim="<<basis_loc.dim()<<std::endl;
 
     std::cout<<"[BST]  Loading basis..."<<std::endl;
     load_basis(basis_st, prog);
@@ -113,9 +113,9 @@ int main(int argc, char* argv[]){
     std::cout<<"[MPI_BST] Checking applyState consistency..."<<std::endl;
 
     for (auto& [c, O] : H_sym.off_diag_terms){
-        for (int il=0;  il<ctx.local_block_size(); il++){
-            auto p1 = basis[il];
-            auto p2 = basis[il];
+        for (int il=0;  il<basis_loc.dim(); il++){
+            auto p1 = basis_loc[il];
+            auto p2 = basis_loc[il];
 
             int s1 = O.applyState(p1);
             int s2 = O.applyState_branch(p2);
@@ -129,75 +129,69 @@ int main(int argc, char* argv[]){
 
     std::cout<<"Done"<<std::endl;
 
+    MPIHashContext ctx;
+
     ctx.log<<"[Symbolic ham construction done.]"<<std::endl;
 
     if (prog.get<bool>("--trim")){
         ctx.log<<"[remove unneeded elements]"<<std::endl;
         basis_st.remove_null_states(H_sym);
-        basis.remove_null_states(H_sym, ctx);
+        basis_loc.remove_null_states(H_sym);
     }
  
     ctx.log<<"[op construct]"<<std::endl;
-    auto H_mpi = MPILazyOpSum(basis, H_sym, ctx);
+    auto H_mpi = MPILazyOpSum(basis_loc, H_sym, ctx);
     auto H_st = LazyOpSum(basis_st, H_sym);
 
 
-    if (prog.get<bool>("--rebalance")){
-        ctx.log<<"[calc basis wisdom]"<<std::endl;
-        auto wisdom = H_mpi.find_optimal_basis_load();
-        ctx.log<<"[basis reshuffle]"<<std::endl;
-        basis.exchange_local_states(wisdom, ctx);
-    }
+//    if (prog.get<bool>("--rebalance")){
+//        ctx.log<<"[calc basis wisdom]"<<std::endl;
+//        auto wisdom = H_mpi.find_optimal_basis_load();
+//        ctx.log<<"[basis reshuffle]"<<std::endl;
+//        basis.exchange_local_states(wisdom, ctx);
+//    }
     ctx.log<<"[allocate temporaries]"<<std::endl;
     H_mpi.allocate_temporaries();
 
-    std::vector<double> v_global, u_global, u1_local;
+    std::vector<double> v_global, v_local, u_global, u1_local;
     v_global.resize(basis_st.dim());
     u_global.resize(basis_st.dim());
 
-    assert(ctx.local_block_size() == basis.dim());
-    u1_local.resize(ctx.local_block_size());
-//    u2_local.resize(ctx.local_block_size());
+    u1_local.resize(basis_loc.dim());
+
 
     std::mt19937 rng(seed);
     projED::set_random_unit(v_global, rng);
 
+    // populate v_local
+    v_local.reserve(basis_loc.dim());
+    std::vector<int64_t> index_map;
+    for (int64_t ig=0; ig<basis_st.dim(); ig++){
+        const auto& psi = basis_st[ig];
+        if (ctx.rank_of_state(psi)== ctx.my_rank){
+            index_map.push_back(ig);
+            v_local.push_back(v_global[ig]);
+        }
+    }
+
     std::fill(u_global.begin(), u_global.end(), 0);
     std::fill(u1_local.begin(), u1_local.end(), 0);
-//    std::fill(u2_local.begin(), u2_local.end(), 0);
-
-
-    check_basis_partition(basis, ctx);
 
     std::cout<<"[BST "<<ctx.my_rank<<"]  Apply..."<<std::endl;
     TIMEIT("[BST] u += Av", H_st.evaluate_add(v_global.data(), u_global.data());)
 
     std::cout<<"[BST_MPI "<<ctx.my_rank<<"]  Apply..."<<std::endl;
-    // NOTE: add the local block offset to stay correct
-    TIMEIT("[MPI] u += Av", H_mpi.evaluate_add(v_global.data() + ctx.local_start_index(), u1_local.data());)
+    
+    TIMEIT("[MPI] u += Av", H_mpi.evaluate_add(v_local.data(), u1_local.data());)
 
-    // we need to carefully check the offsets
     double tol =1e-9;
-    auto start_offset = ctx.local_start_index();
     
     size_t error_1_count = 0;
     double max_error_1 = 0;
-//    size_t error_2_count = 0;
-//    double max_error_2 = 0;
 
-
-
-    
-
-//    std::ostringstream filename;
-//    filename << "comparison_rank" << ctx.my_rank << ".csv";
-//    std::ofstream out(filename.str());
-//    out << "local_index,global_index,u_global,u_local\n";
-
-    for (int i=0;  i<ctx.local_block_size(); i++){
-        auto g_idx = start_offset + i;
+    for (int i=0;  i<basis_loc.dim(); i++){
+        auto g_idx = index_map[i];
         auto error_1 = std::abs(u_global[g_idx] - u1_local[i]);
-//        auto error_2 = std::abs(u_global[g_idx] - u2_local[i]);
 
         if( error_1 > tol ){
             if (error_1_count == 0){
@@ -209,14 +203,6 @@ int main(int argc, char* argv[]){
         }
 
 
-//        if( error_2 > tol ){
-//            if (error_2_count == 0){
-//                std::cout<<"BST != MPI pipe on global index "<< g_idx
-//                    <<"= ("<<ctx.my_rank<<") + "<<i<<": +"<<error_2<<"\n";
-//            }
-//            error_2_count++;
-//            max_error_2 = std::max(max_error_2, error_2);
-//        }
     }
 
     if (error_1_count > 0) {

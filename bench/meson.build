@@ -48,11 +48,10 @@ bench_lanczos = executable('bench_lanczos',
   install: false
   )
 
-bench_lanczos_mpi = executable('bench_lanczos_mpi',
-  'bench_lanczos_mpi.cpp',
-  include_directories: [inc, operator_inc],
-  dependencies: [common_dep, eigen_dep, linalg_routines_mpi_dep],
-  link_with: [operator_mpi_lib],
-  install: false
-  )
-  
+#bench_lanczos_mpi = executable('bench_lanczos_mpi',
+#  'bench_lanczos_mpi.cpp',
+#  include_directories: [inc, operator_inc],
+#  dependencies: [common_dep, eigen_dep, linalg_routines_mpi_dep],
+#  link_with: [operator_mpi_lib],
+#  install: false
+#  )
