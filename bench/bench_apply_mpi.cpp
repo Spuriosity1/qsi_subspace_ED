@@ -114,6 +114,7 @@ int main(int argc, char* argv[]){
     std::fill(u_local.begin(), u_local.end(), 0);
 
     std::cout<<"[BST_MPI "<<ctx.my_rank<<"]  Apply..."<<std::endl;
+
     // NOTE: add the local block offset to stay correct
     TIMEIT("u += Av", H_mpi.evaluate_add(v_local.data(), u_local.data());)
 
