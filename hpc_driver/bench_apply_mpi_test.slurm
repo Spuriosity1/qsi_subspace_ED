@@ -42,6 +42,6 @@ echo "Time: `date`"
 echo "Running on master node: `hostname`"
 echo "Current directory: `pwd`"
 
-srun ../build/bench/bench_apply_mpi ../../lattice_files/pyro_2,0,0_0,3,0_0,0,3.json 
+srun --cpu-bind=cores ../build/bench/bench_apply_mpi ../../lattice_files/pyro_2,0,0_0,3,0_0,0,4.json --sector basis_s12.12.12.12 --trim -a 2
 
 

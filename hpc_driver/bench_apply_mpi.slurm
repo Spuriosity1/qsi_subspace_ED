@@ -5,15 +5,16 @@
 #SBATCH -A CASTELNOVO-SL2-CPU
 #SBATCH -p icelake-himem
 #! How many whole nodes should be allocated?
-#SBATCH --nodes=4
+#SBATCH --nodes=12
 #! How many (MPI) tasks will there be in total? (<= nodes*76)
 #! The Ice Lake (icelake) nodes have 76 CPUs (cores) each and
 #! 3380 MiB of memory per CPU.
-#SBATCH --ntasks=300
-#SBATCH --cpus-per-task=1
+#SBATCH --ntasks=48
+#SBATCH --ntasks-per-socket=2
+#SBATCH --cpus-per-task=6
 #SBATCH --mem-per-cpu=6760
 #! How much wallclock time will be required?
-#SBATCH --time=4:00:00
+#SBATCH --time=0:30:00
 #! What types of email messages do you wish to receive?
 #SBATCH --mail-type=START,END
 #SBATCH --output=track/bapply_mpi.%A_%a.out
@@ -42,6 +43,6 @@ echo "Time: `date`"
 echo "Running on master node: `hostname`"
 echo "Current directory: `pwd`"
 
-srun ../build/bench/bench_apply_mpi ../../lattice_files/pyro_-2,2,2_2,-2,2_2,2,-2.json
+srun --cpu-bind=cores ../build/bench/bench_apply_mpi ../../lattice_files/pyro_-2,2,2_2,-2,2_2,2,-2.json --trim --n_buffers 3
 
 
