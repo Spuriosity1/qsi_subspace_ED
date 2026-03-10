@@ -155,7 +155,8 @@ union Uint128 {
 // Hash function for Uint128 to use in unordered_map
 struct Uint128Hash {
 	std::size_t operator()(const Uint128& b) const {
-		return std::hash<uint64_t>()(b.uint64[0]) ^ (std::hash<uint64_t>()(b.uint64[1]));
+//		return std::hash<uint64_t>()(b.uint64[0]) ^ (std::hash<uint64_t>()(b.uint64[1]));
+        return b.uint64[0] ^ b.uint64[1];
 	}
 };
 

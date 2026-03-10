@@ -105,7 +105,7 @@ inline std::vector<Uint128> read_basis_hdf5_MPI(
         }
 
         // Print diagnostics
-        std::cout<<"[r"<<my_rank<<"] Loaded basis chunk.";
+        std::cout<<"[r"<<my_rank<<"] Loaded basis chunk.\n";
 		
 		// Clean up
 		H5Sclose(dataspace_id);
@@ -140,6 +140,7 @@ void ZBasisBST_HashMPI::load_from_file(const fs::path& bfile, const std::string&
     }
 
     MPIHashContext ctx;
+    std::cerr<<"[r"<<ctx.my_rank<<"] Transfer states to correct ranks...\n";
     tfer_states_to_correct_ranks(ctx);
 
     std::cerr << "Done!" <<"\n";
