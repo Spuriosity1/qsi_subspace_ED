@@ -43,6 +43,6 @@ echo "Time: `date`"
 echo "Running on master node: `hostname`"
 echo "Current directory: `pwd`"
 
-srun --cpu-bind=cores ../build/bench/bench_apply_mpi ../../lattice_files/pyro_-2,2,2_2,-2,2_2,2,-2.json --trim --n_buffers 3
+srun --cpu-bind=cores ../build/bench/bench_apply_mpi ../../lattice_files/pyro_-2,2,2_2,-2,2_2,2,-2.json
 
 
