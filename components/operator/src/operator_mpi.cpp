@@ -729,6 +729,8 @@ void MPILazyOpSum<coeff_t, B>::evaluate_add_off_diag_batched(const coeff_t* x, c
 
 template <RealOrCplx coeff_t, Basis basis_t>
 void MPILazyOpSum<coeff_t, basis_t>::allocate_temporaries() {
+    return; // do nothing
+
     // runs through the current local basis applying op to everything.
     // We cound how many we want to send to each rank, then exchange synchronously.
     // We can then resize recv_states_bufs appropriately.
