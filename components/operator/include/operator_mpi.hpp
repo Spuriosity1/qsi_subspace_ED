@@ -89,7 +89,8 @@ template <RealOrCplx coeff_t, Basis basis_t>
 void MPILazyOpSum<coeff_t, basis_t>::evaluate_add(const coeff_t* x, coeff_t* y) {
     evaluate_add_diagonal(x, y);
     evaluate_add_off_diag_pipeline(x, y);
-//    evaluate_add_off_diag_batched(x, y);
+
+    //evaluate_add_off_diag_batched(x, y);
 }
 
 
