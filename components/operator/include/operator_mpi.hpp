@@ -44,7 +44,6 @@ struct MPILazyOpSum {
         this->evaluate_add(x, y);
 	}
 
-
     // allocates send/receive buffers for MPI alltoall
     // based on current matrix structure
     void allocate_temporaries();
