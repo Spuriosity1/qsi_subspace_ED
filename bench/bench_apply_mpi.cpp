@@ -101,7 +101,7 @@ int main(int argc, char* argv[]){
 
 
 
-    std::cout<<"[rank "<<ctx.my_rank<<"] op construct finish"<<std::endl;
+    std::cout<<"[rank "<<ctx.my_rank<<"] op construct finish, local dim="<<basis.dim()<<std::endl;
 
     std::vector<double> v_local, u_local;
     v_local.resize(basis.dim());

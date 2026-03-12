@@ -17,23 +17,23 @@ echo "basis_size,max_memory_kb,time_real_s,time_user_s,time_sys_s,dataset_name" 
 datasets=($(h5ls -r "$HDF5_FILE" | grep '^/' | awk '{print $1}'))
 
 # Shuffle datasets
-shuf_datasets=($(shuf -e "${datasets[@]}"))
+# shuf_datasets=($(shuf -e "${datasets[@]}"))
 
 # Initialize counter
 success_count=0
 
 
-max_size=80000000
-min_size=10000000
+max_size=80000
+min_size=10000
 
-for dataset in "${shuf_datasets[@]}"; do
+for dataset in "${datasets[@]}"; do
     # Stop if we have N successful outputs
     if [ "$success_count" -ge "$N" ]; then
         break
     fi
 
     # Extract the number of rows (e.g., 5912 from {5912/Inf, 2})
-    size=$(h5ls -r "$HDF5_FILE" | grep "$dataset" | awk -F'[{/,}]' '{print $3}')
+    size=$(h5ls -r "$HDF5_FILE" | grep "$dataset" | awk -F'[{/,}]' '{print $3}' | tail -n 1)
 
     # Skip if size is empty
     if [ -z "$size" ]; then
