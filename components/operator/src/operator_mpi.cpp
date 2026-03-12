@@ -394,16 +394,21 @@ void MPILazyOpSum<coeff_t, B>::evaluate_add_off_diag_pipeline(const coeff_t* x, 
         }
         
 
-        // Process local updates immediately
-        BENCH_TIMER_TIMEIT(loc_up_timer,
-            for (size_t i = 0; i < curr_op_comm.send_states[ctx.my_rank].size(); ++i) {
-                ZBasisBase::idx_t local_idx;
-                ASSERT_STATE_FOUND("self", curr_op_comm.send_states[ctx.my_rank][i],
-                        basis.search(curr_op_comm.send_states[ctx.my_rank][i], local_idx)
-                        );
-                y[local_idx] += curr_op_comm.send_dy[ctx.my_rank][i];
-            }
-        )
+
+        loc_up_timer.tik();
+#pragma omp parallel for schedule(static)
+        for (size_t i = 0; i < curr_op_comm.send_states[ctx.my_rank].size(); ++i) {
+            ZBasisBase::idx_t local_idx;
+
+            ASSERT_STATE_FOUND("self",
+                    curr_op_comm.send_states[ctx.my_rank][i],
+                    basis.search(curr_op_comm.send_states[ctx.my_rank][i], local_idx)
+                    );
+
+#pragma omp atomic
+            y[local_idx] += curr_op_comm.send_dy[ctx.my_rank][i];
+        }
+        loc_up_timer.tok();
 
 
         // === PROCESS PREVIOUS OPERATOR'S RECEIVES ===
