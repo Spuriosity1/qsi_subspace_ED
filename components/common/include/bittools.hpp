@@ -152,12 +152,30 @@ union Uint128 {
 };
 
 
-// Hash function for Uint128 to use in unordered_map
+//// Hash function for Uint128 to use in unordered_map
+//struct Uint128Hash {
+//	std::size_t operator()(const Uint128& b) const {
+////		return std::hash<uint64_t>()(b.uint64[0]) ^ (std::hash<uint64_t>()(b.uint64[1]));
+//        return std::hash<uint64_t>()(b.uint64[0] ^ b.uint64[1]);
+//	}
+//};
+
+
 struct Uint128Hash {
-	std::size_t operator()(const Uint128& b) const {
-//		return std::hash<uint64_t>()(b.uint64[0]) ^ (std::hash<uint64_t>()(b.uint64[1]));
-        return std::hash<uint64_t>()(b.uint64[0] ^ b.uint64[1]);
-	}
+    std::size_t operator()(const Uint128& b) const {
+        uint64_t h1 = b.uint64[0];
+        uint64_t h2 = b.uint64[1];
+
+        // MurmurHash3 mix / finalizer constants
+        h1 ^= h2;
+        h1 ^= h1 >> 33;
+        h1 *= 0xff51afd7ed558ccdULL;
+        h1 ^= h1 >> 33;
+        h1 *= 0xc4ceb9fe1a85ec53ULL;
+        h1 ^= h1 >> 33;
+
+        return static_cast<std::size_t>(h1);
+    }
 };
 
 struct Uint128Eq {

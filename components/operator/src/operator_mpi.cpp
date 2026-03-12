@@ -308,12 +308,32 @@ void MPILazyOpSum<coeff_t, B>::evaluate_add_off_diag_pipeline(const coeff_t* x, 
         std::vector<std::vector<coeff_t>> send_dy;
         std::vector<std::vector<ZBasisBase::state_t>> send_states;
 
-        std::vector<std::vector<ZBasisBase::state_t>> recv_states_bufs;
         std::vector<std::vector<coeff_t>> recv_dy_bufs;
-        std::vector<int> recv_sources;
+        std::vector<std::vector<ZBasisBase::state_t>> recv_states_bufs;
+
         MPI_Request count_exchange_req;
         std::vector<int> recvcounts;
+
         bool count_exchange_done = false;
+
+        void resize(int world_size){
+            send_dy.resize(world_size);
+            send_states.resize(world_size);
+
+            recv_dy_bufs.resize(world_size);
+            recv_states_bufs.resize(world_size);
+
+            recvcounts.resize(world_size);
+        }
+
+        void reset_for_new_op(){
+            count_exchange_done=false;
+            requests.clear();
+            for (auto& v : send_dy)     v.clear();
+            for (auto& v : send_states) v.clear();
+            for (auto& v : recv_dy_bufs)     v.clear();
+            for (auto& v : recv_states_bufs) v.clear();
+        }
     };
 
     Timer loc_apply_timer("[local apply]", ctx.my_rank);
@@ -327,15 +347,19 @@ void MPILazyOpSum<coeff_t, B>::evaluate_add_off_diag_pipeline(const coeff_t* x, 
 
     std::vector<std::chrono::duration<double, std::milli>> loc_apply_times;
 
+
     OperatorCommState prev_op_comm;
+    OperatorCommState curr_op_comm;
+
+    // Pre-size the send buffers once; reset_for_new_op() will only clear them
+    prev_op_comm.resize(ctx.world_size);
+    curr_op_comm.resize(ctx.world_size);
+
     bool has_prev_op = false;
 
     int op_index = 0;
     for ( const auto& [c, op] : ops.off_diag_terms ){
-
-        OperatorCommState curr_op_comm;
-        curr_op_comm.send_states.resize(ctx.world_size);
-        curr_op_comm.send_dy.resize(ctx.world_size);
+        curr_op_comm.reset_for_new_op();
 
          // Organize sends by destination rank
         BENCH_TIMER_TIMEIT(loc_apply_timer,
@@ -394,27 +418,23 @@ void MPILazyOpSum<coeff_t, B>::evaluate_add_off_diag_pipeline(const coeff_t* x, 
             )
 
             DEBUG_PRINT_VEC(">> recv ", op_index-1, prev_op_comm.recvcounts, ctx)
-            
-            // Now we know who will send to us for previous operator
-            // recvcounts is now populated and readable
+
+            // Every rank sends to every rank: recv buf per source is just recvcounts[source]
             for (int source = 0; source < ctx.world_size; ++source) {
-                if (source == ctx.my_rank || prev_op_comm.recvcounts[source] == 0) continue;
-                
-                // allocate space to store the received data
-                prev_op_comm.recv_sources.push_back(source);
-                prev_op_comm.recv_states_bufs.emplace_back(prev_op_comm.recvcounts[source]);
-                prev_op_comm.recv_dy_bufs.emplace_back(prev_op_comm.recvcounts[source]);
-                
-                size_t idx = prev_op_comm.recv_states_bufs.size() - 1;
-                // we just added a new row to the buffer, this is its index
+                if (source == ctx.my_rank) continue;
+                int cnt = prev_op_comm.recvcounts[source];
+                prev_op_comm.recv_states_bufs[source].resize(cnt);
+                prev_op_comm.recv_dy_bufs[source].resize(cnt);
+                if (cnt == 0) continue;
+
                 prev_op_comm.requests.push_back(MPI_Request{});
-                MPI_Irecv(prev_op_comm.recv_states_bufs[idx].data(), 
-                         prev_op_comm.recvcounts[source], get_mpi_type<ZBasisBase::state_t>(),
+                MPI_Irecv(prev_op_comm.recv_states_bufs[source].data(), 
+                         cnt, get_mpi_type<ZBasisBase::state_t>(),
                          source, 10*(op_index-1) +1, MPI_COMM_WORLD, &prev_op_comm.requests.back());
                 
                 prev_op_comm.requests.push_back(MPI_Request{});
-                MPI_Irecv(prev_op_comm.recv_dy_bufs[idx].data(),
-                         prev_op_comm.recvcounts[source], get_mpi_type<coeff_t>(),
+                MPI_Irecv(prev_op_comm.recv_dy_bufs[source].data(),
+                         cnt, get_mpi_type<coeff_t>(),
                          source, 10*(op_index-1) +2, MPI_COMM_WORLD, &prev_op_comm.requests.back());
             }
             
@@ -429,14 +449,13 @@ void MPILazyOpSum<coeff_t, B>::evaluate_add_off_diag_pipeline(const coeff_t* x, 
             
             BENCH_TIMER_TIMEIT(rem_up_timer,
             // Process previous operator's received updates
-            for (size_t i = 0; i < prev_op_comm.recv_sources.size(); ++i) {
-                for (size_t j = 0; j < prev_op_comm.recv_states_bufs[i].size(); ++j) {
+            for (int source = 0; source < ctx.world_size; ++source) {
+                if (source == ctx.my_rank) continue;
+                for (size_t j = 0; j < prev_op_comm.recv_states_bufs[source].size(); ++j) {
                     ZBasisBase::idx_t local_idx;
-                    ASSERT_STATE_FOUND("remote", prev_op_comm.recv_states_bufs[i][j], 
-                            basis.search( prev_op_comm.recv_states_bufs[i][j], local_idx)
-                    );
-
-                    y[local_idx] += prev_op_comm.recv_dy_bufs[i][j];
+                    ASSERT_STATE_FOUND("remote", prev_op_comm.recv_states_bufs[source][j],
+                            basis.search(prev_op_comm.recv_states_bufs[source][j], local_idx));
+                    y[local_idx] += prev_op_comm.recv_dy_bufs[source][j];
                 }
             }
             )
@@ -449,10 +468,10 @@ void MPILazyOpSum<coeff_t, B>::evaluate_add_off_diag_pipeline(const coeff_t* x, 
         curr_op_comm.count_exchange_done = true;
         )
 
-        // Begin sending to all non-empty, non-self targets
+        // Begin sending to all nonempty, non-self targets
         for (int target_rank=0; target_rank<ctx.world_size; target_rank++){
             if (target_rank == ctx.my_rank || 
-                    curr_op_comm.send_dy[target_rank].size() == 0) continue;
+                    curr_op_comm.send_states[target_rank].empty()) continue;
 
             curr_op_comm.requests.push_back(MPI_Request{});
             MPI_Isend(
@@ -467,10 +486,9 @@ void MPILazyOpSum<coeff_t, B>::evaluate_add_off_diag_pipeline(const coeff_t* x, 
                     &curr_op_comm.requests.back());
 
         }
-        
 
         // get ready for next iteration
-        prev_op_comm = std::move(curr_op_comm);
+        std::swap(curr_op_comm, prev_op_comm);
         has_prev_op = true;
         op_index++;
 
@@ -488,29 +506,25 @@ void MPILazyOpSum<coeff_t, B>::evaluate_add_off_diag_pipeline(const coeff_t* x, 
         }
         )
 
-        DEBUG_PRINT_VEC(">> recv final ", op_index-1, prev_op_comm.recvcounts, ctx)
-        
-        // Now we know who will send to us for previous operator
-        // recvcounts is now populated and readable
+        DEBUG_PRINT_VEC(">> recv ", op_index-1, prev_op_comm.recvcounts, ctx)
+
+        // Every rank sends to every rank: recv buf per source is just recvcounts[source]
         for (int source = 0; source < ctx.world_size; ++source) {
-            if (source == ctx.my_rank || prev_op_comm.recvcounts[source] == 0) continue;
-            
-            // allocate space to store the received data
-            prev_op_comm.recv_sources.push_back(source);
-            prev_op_comm.recv_states_bufs.emplace_back(prev_op_comm.recvcounts[source]);
-            prev_op_comm.recv_dy_bufs.emplace_back(prev_op_comm.recvcounts[source]);
-            
-            size_t idx = prev_op_comm.recv_states_bufs.size() - 1;
-            // we just added a new row to the buffer, this is its index
+            if (source == ctx.my_rank) continue;
+            int cnt = prev_op_comm.recvcounts[source];
+            prev_op_comm.recv_states_bufs[source].resize(cnt);
+            prev_op_comm.recv_dy_bufs[source].resize(cnt);
+            if (cnt == 0) continue;
+
             prev_op_comm.requests.push_back(MPI_Request{});
-            MPI_Irecv(prev_op_comm.recv_states_bufs[idx].data(), 
-                     prev_op_comm.recvcounts[source], get_mpi_type<ZBasisBase::state_t>(),
-                     source, 10*(op_index-1) + 1, MPI_COMM_WORLD, &prev_op_comm.requests.back());
+            MPI_Irecv(prev_op_comm.recv_states_bufs[source].data(), 
+                     cnt, get_mpi_type<ZBasisBase::state_t>(),
+                     source, 10*(op_index-1) +1, MPI_COMM_WORLD, &prev_op_comm.requests.back());
             
             prev_op_comm.requests.push_back(MPI_Request{});
-            MPI_Irecv(prev_op_comm.recv_dy_bufs[idx].data(),
-                     prev_op_comm.recvcounts[source], get_mpi_type<coeff_t>(),
-                     source, 10*(op_index-1) + 2, MPI_COMM_WORLD, &prev_op_comm.requests.back());
+            MPI_Irecv(prev_op_comm.recv_dy_bufs[source].data(),
+                     cnt, get_mpi_type<coeff_t>(),
+                     source, 10*(op_index-1) +2, MPI_COMM_WORLD, &prev_op_comm.requests.back());
         }
         
         
@@ -524,14 +538,13 @@ void MPILazyOpSum<coeff_t, B>::evaluate_add_off_diag_pipeline(const coeff_t* x, 
         
         BENCH_TIMER_TIMEIT(rem_up_timer,
         // Process previous operator's received updates
-        for (size_t i = 0; i < prev_op_comm.recv_sources.size(); ++i) {
-            for (size_t j = 0; j < prev_op_comm.recv_states_bufs[i].size(); ++j) {
+        for (int source = 0; source < ctx.world_size; ++source) {
+            if (source == ctx.my_rank) continue;
+            for (size_t j = 0; j < prev_op_comm.recv_states_bufs[source].size(); ++j) {
                 ZBasisBase::idx_t local_idx;
-                ASSERT_STATE_FOUND("remote", prev_op_comm.recv_states_bufs[i][j], 
-                        basis.search( prev_op_comm.recv_states_bufs[i][j], local_idx)
-                );
-
-                y[local_idx] += prev_op_comm.recv_dy_bufs[i][j];
+                ASSERT_STATE_FOUND("remote", prev_op_comm.recv_states_bufs[source][j],
+                        basis.search(prev_op_comm.recv_states_bufs[source][j], local_idx));
+                y[local_idx] += prev_op_comm.recv_dy_bufs[source][j];
             }
         }
         )
