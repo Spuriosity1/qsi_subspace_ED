@@ -171,8 +171,8 @@ int main(int argc, char** argv) {
         err_eigvec += eps * eps;
     }
 
-    std::cout << "Eigenvalue error: " << err_eigval <<"\n";
-    std::cout << "Eigenvector error: " << err_eigvec <<"\n";
+    std::cout << "Eigenvalue error vs. exact: " << err_eigval <<"\n";
+    std::cout << "Eigenvector error vs. exact: " << err_eigvec <<"\n";
 
     MPI_Finalize();
 

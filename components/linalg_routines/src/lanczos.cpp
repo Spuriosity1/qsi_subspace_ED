@@ -152,8 +152,10 @@ Result lanczos_iterate(ApplyFn evaluate_add,
                 std::cout << "Iter "<< iter_no << " eigval error " << retval.eigval_error << "\n";
             }
 
-            if (retval.eigval_converged && ritz ) {
-                retval.eigvec_converged = true;
+            if (retval.eigval_converged ) {
+                if (ritz) {
+                    retval.eigvec_converged = true;
+                }
                 break;
             }
         }
