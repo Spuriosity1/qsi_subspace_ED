@@ -187,14 +187,36 @@ struct ZBasisBST : public ZBasisBase
     // throws an error if not present
 	idx_t idx_of_state(const state_t& state) const;
 
+    int search(const state_t& state, idx_t& J) const;
+
+    void load_from_file(const fs::path& bfile, const std::string& dataset="basis");
+
+protected:
+    std::vector<__uint128_t> eyt;       // Eytzinger layout
+    std::vector<idx_t> eyt_index;       // maps node → sorted index
+
+    void build_eytzinger();
+};
+
+
+// Wrapper for a std::vector implementing indexable set semantics
+// Represents a set of Sz product states spanning some subspace
+struct ZBasisBasicBST : public ZBasisBase
+{
+	// returns the index of a particular basis state
+    // throws an error if not present
+	idx_t idx_of_state(const state_t& state) const;
+
     // Inserts the states "others" into the basis, remembering the inserted states 
-    // 'new_states'. Leaves "to_insert" holding a de-duplicated, sorted version of its original state.
+//    // 'new_states'. Leaves "to_insert" holding a de-duplicated, sorted version of its original state.
 	size_t insert_states(std::vector<state_t>& to_insert);
 
     int search(const state_t& state, idx_t& J) const;
+
 };
 
-struct ZBasisInterp : public ZBasisBST {
+
+struct ZBasisInterp : public ZBasisBasicBST {
     void load_from_file(const fs::path& bfile, const std::string& dataset="basis");
     int search(const state_t& state, idx_t& J) const;
     protected:
@@ -203,6 +225,12 @@ struct ZBasisInterp : public ZBasisBST {
     void find_bounds(); // finds the bounds
 };
 
+
+//struct ZBasisHash : public ZBasisBase
+//{
+//    idx_t idx_of_state(const state_t& state) const;
+//    int search(const state_t& state, idx_t& J) const;
+//};
 
 
 // Operators are instantiated relative to some basis, they keep 

@@ -15,7 +15,7 @@ using namespace std;
 using json=nlohmann::json;
 
 
-struct constr_explorer : public ZBasisBST {
+struct constr_explorer : public ZBasisBasicBST {
 	constr_explorer(const nlohmann::json& data);
 
 	void build_states(ZBasisBST::state_t init);

@@ -143,6 +143,14 @@ void ZBasisBST_HashMPI::load_from_file(const fs::path& bfile, const std::string&
     std::cerr<<"[r"<<ctx.my_rank<<"] Transfer states to correct ranks...\n";
     tfer_states_to_correct_ranks(ctx);
 
+
+    std::cerr<<"[r"<<ctx.my_rank<<"] Build etyzinger rep...\n";
+    this->build_eytzinger();
+
+    // delete the now unneeded states
+    this->states.clear();
+    this->states.shrink_to_fit();
+
     std::cerr << "Done!" <<"\n";
 }
 

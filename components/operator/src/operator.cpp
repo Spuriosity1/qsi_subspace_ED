@@ -1,7 +1,8 @@
 #include "operator.hpp"
 #include <cassert>
+#include <functional>
 
-int ZBasisBST::search(const state_t& state, idx_t& J) const {
+int ZBasisBasicBST::search(const state_t& state, idx_t& J) const {
 //    auto it = std::lower_bound(states.begin(), states.end(), state);
 //    return it;
     
@@ -33,6 +34,49 @@ int ZBasisBST::search(const state_t& state, idx_t& J) const {
     return 0; // not found;
 }
 
+
+//int ZBasisBST::search(const state_t& state, idx_t& J) const {
+//    // searches the cursed eytzinger thing
+//    assert(eyt.size() > 0);
+//
+//    const __uint128_t x = state.uint128;
+//    const __uint128_t* a = eyt.data();
+//
+//    const size_t n = states.size();
+//
+//    size_t i = 1;
+//
+//    while (i <= n) {
+////        __builtin_prefetch(&a[i * 2]);
+//        i = (x <= a[i]) ? (i * 2) : (i * 2 + 1);
+//    }
+//
+//    i >>= __builtin_ctzll(~i);
+//
+//    if (i <= n && a[i] == x) {
+//        J = eyt_index[i];
+//        return 1;
+//    }
+//
+//    return 0;
+//}
+
+int ZBasisBST::search(const state_t& state, idx_t& J) const {
+    const __uint128_t x = state.uint128;
+    const __uint128_t* a = eyt.data();
+    const size_t n = states.size();
+
+    size_t i = 1;
+    while (i <= n) {
+        if (a[i] == x) {
+            J = eyt_index[i];
+            return 1;
+        }
+        i = (x < a[i]) ? (i * 2) : (i * 2 + 1);
+    }
+
+    return 0;
+}
 
 
 int ZBasisInterp::search(const state_t& state, idx_t& J) const {
@@ -85,10 +129,40 @@ void ZBasisInterp::find_bounds(){
     
 }
 
+void ZBasisBST::build_eytzinger() {
+
+    const size_t n = states.size();
+
+    eyt.resize(n + 1);
+    eyt_index.resize(n + 1);
+
+    size_t k = 0;
+
+    std::function<void(size_t)> dfs = [&](size_t i) {
+        if (i <= n) {
+            dfs(i * 2);
+
+            eyt[i] = states[k].uint128;
+            eyt_index[i] = k;
+            ++k;
+
+            dfs(i * 2 + 1);
+        }
+    };
+
+    dfs(1);
+}
+
+void ZBasisBST::load_from_file(const fs::path& bfile, const std::string& dataset){
+    this->ZBasisBase::load_from_file(bfile, dataset);
+    assert(this->states.size() > 0);
+    build_eytzinger();
+}
+
 
 // Inserts "to_insert" into the basis, storing the new states in new_states.
 // Ensures they are inserted in sorted order.
-size_t ZBasisBST::insert_states(std::vector<ZBasisBST::state_t>& to_insert){
+size_t ZBasisBasicBST::insert_states(std::vector<ZBasisBST::state_t>& to_insert){
     size_t n_insertions = 0;
 
     // sort to_insert and remove duplicates
@@ -134,6 +208,7 @@ size_t ZBasisBST::insert_states(std::vector<ZBasisBST::state_t>& to_insert){
     states.swap(merged);
     return n_insertions;
 }
+
 
 void ZBasisBase::load_from_file(const fs::path& bfile, const std::string& dataset){
     std::cerr << "Loading basis from file " << bfile <<"\n";

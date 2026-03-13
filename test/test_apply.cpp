@@ -16,6 +16,8 @@ int main(int argc, char* argv[]){
     
 	argparse::ArgumentParser prog(argv[0]);
 	prog.add_argument("lattice_file");
+    prog.add_argument("--basis_file", "-b")
+        .help("A basis file (HDF5 format). Defaults to ${lattice_file%.json}.h5");
 	prog.add_argument("-s", "--sector");
 	prog.add_argument("--n_spinons")
         .default_value(0)
@@ -37,7 +39,8 @@ int main(int argc, char* argv[]){
 
     unsigned int seed = prog.get<unsigned int>("--seed");
 
-	ZBasisBST basis;
+	ZBasisBasicBST basis;
+	ZBasisBST basis_eyt;
     ZBasisInterp basis_i;
 //	ZBasisHashmap basis_h;
    
@@ -56,6 +59,9 @@ int main(int argc, char* argv[]){
     load_basis(basis, prog);
     std::cout<<"[BST]  Done! Basis dim="<<basis.dim()<<std::endl;
 
+    std::cout<<"[BST eyt]  Loading basis..."<<std::endl;
+    load_basis(basis_eyt, prog);
+    std::cout<<"[BST eyt]  Done! Basis dim="<<basis.dim()<<std::endl;
 
     std::cout<<"[inter]  Loading basis..."<<std::endl;
     load_basis(basis_i, prog);
@@ -72,6 +78,7 @@ int main(int argc, char* argv[]){
     build_hamiltonian(H_sym, jdata, gv);
 
     auto H_bst = LazyOpSum(basis, H_sym);
+    auto H_eyt = LazyOpSum(basis_eyt, H_sym);
     auto H_inte = LazyOpSum(basis_i, H_sym);
 //    auto H_hash = LazyOpSum(basis_h, H_sym);
 
@@ -86,29 +93,35 @@ int main(int argc, char* argv[]){
 
     std::fill(u1.begin(), u1.end(), 0);
     std::fill(u2.begin(), u2.end(), 0);
-//    std::fill(u3.begin(), u3.end(), 0);
+    std::fill(u3.begin(), u3.end(), 0);
 
     std::cout<<"[BST]  Apply..."<<std::endl;
     TIMEIT("u += Av", H_bst.evaluate_add(v.data(), u1.data());)
+    std::cout<<"[BST eyt]  Apply..."<<std::endl;
+    TIMEIT("u += Av", H_eyt.evaluate_add(v.data(), u3.data());)
     std::cout<<"[interp]  Apply..."<<std::endl;
     TIMEIT("u += Av", H_inte.evaluate_add(v.data(), u2.data());)
 //    std::cout<<"[Hash] Apply..."<<std::endl;
 //    TIMEIT("u += Av", H_hash.evaluate_add(v.data(), u3.data());)
 
+    int retval = 0;
     double tol =1e-9;
     for (int i=0;  i<basis.dim(); i++){
         if( abs(u1[i] - u2[i]) > tol ){
             std::cout<<"BST !+= interp\n";
-            return 1;
         }
+        retval |= 1;
     }
 
-//    for (int i=0;  i<basis.dim(); i++){
-//        if( abs(u1[i] - u3[i]) > tol ){
-//            std::cout<<"BST !+= Hash\n";
-//            return 2;
-//        }
-//    }
-    std::cout <<"All algos agree\n";
+    for (int i=0;  i<basis.dim(); i++){
+        if( abs(u1[i] - u3[i]) > tol ){
+            std::cout<<"BST != Eyt\n";
+            break;
+        }
+        retval |= 2;
+    }
+
+    if (retval == 0)
+        std::cout <<"All algos agree\n";
     return 0;
 }

@@ -113,5 +113,6 @@ void LazyOpSum<coeff_t, basis_t>::evaluate_add(const coeff_t* x, coeff_t* y) con
 
 // explicit template instantiations
 template struct LazyOpSum<double, ZBasisBST>;
+template struct LazyOpSum<double, ZBasisBasicBST>;
 template struct LazyOpSum<double, ZBasisInterp>;
 // template struct LazyOpSum<std::complex<double>>;
