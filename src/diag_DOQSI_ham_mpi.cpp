@@ -90,7 +90,7 @@ int main(int argc, char* argv[]) {
 	// Step 2: Load basis from H5
     std::cout<<"Loading basis..."<<std::endl;
 
-    ZBasisBST_HashMPI basis;
+    ZBasisInterp_HashMPI basis;
     std::cout<<"[MPI_BST]  Loading basis..."<<std::endl;
     load_basis(basis, prog);
     std::cout<<"[MPI_BST]  Done! local basis dim="<<basis.dim()<<std::endl;
