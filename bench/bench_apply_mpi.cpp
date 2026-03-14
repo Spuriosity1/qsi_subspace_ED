@@ -85,16 +85,6 @@ int main(int argc, char* argv[]){
             auto H_mpi = MPILazyOpSum(basis, H_sym, ctx);
           )
 
-//    if (prog.get<bool>("--rebalance")){
-//        TIMEIT("basis optimise",
-//            auto wisdom = H_mpi.find_optimal_basis_load();
-//        )
-//
-//        TIMEIT("apply basis optimisation",
-//            basis.exchange_local_states(wisdom, ctx);
-//          )
-//    }
-
     TIMEIT("allocating temporaries",
             H_mpi.allocate_temporaries();
           )
@@ -115,7 +105,6 @@ int main(int argc, char* argv[]){
 
     std::cout<<"[BST_MPI "<<ctx.my_rank<<"]  Apply..."<<std::endl;
 
-    // NOTE: add the local block offset to stay correct
     TIMEIT("u += Av", H_mpi.evaluate_add(v_local.data(), u_local.data());)
 
     MPI_Finalize();

@@ -41,8 +41,10 @@ int main(int argc, char* argv[]){
 
     unsigned int seed = prog.get<unsigned int>("--seed");
 
-    ZBasisInterp basis;
-   
+    ZBasisBST    basis_bst;
+    ZBasisInterp basis_interp;
+    ZBasisBSTFast basis_fast;
+
 	// Step 1: Load ring data from JSON
     auto lattice_file = prog.get<std::string>("lattice_file");
 	std::ifstream jfile(lattice_file);
@@ -54,30 +56,46 @@ int main(int argc, char* argv[]){
 	jfile >> jdata;
 
 
-    std::cout<<" Loading basis..."<<std::endl;
-    load_basis(basis, prog);
-    std::cout<<" Done! Basis dim="<<basis.dim()<<std::endl;
+    std::cout<<"[BST]   Loading basis..."<<std::endl;
+    load_basis(basis_bst, prog);
+    std::cout<<"[BST]   Done! dim="<<basis_bst.dim()<<std::endl;
+
+    std::cout<<"[interp] Loading basis..."<<std::endl;
+    load_basis(basis_interp, prog);
+    std::cout<<"[interp] Done! dim="<<basis_interp.dim()<<std::endl;
+
+    std::cout<<"[fast]  Loading basis..."<<std::endl;
+    load_basis(basis_fast, prog);
+    std::cout<<"[fast]  Done! dim="<<basis_fast.dim()<<std::endl;
 
 
 	using T=double;
 	SymbolicOpSum<T> H_sym;
-    
+
     std::vector<double> gv {1.0, -0.2, -0.2, -0.2};
     build_hamiltonian(H_sym, jdata, gv);
 
-    auto Ham = LazyOpSum(basis, H_sym);
+    auto H_bst   = LazyOpSum(basis_bst,   H_sym);
+    auto H_interp = LazyOpSum(basis_interp, H_sym);
+    auto H_fast  = LazyOpSum(basis_fast,  H_sym);
 
-    std::vector<double> v, u1;
-    v.resize(basis.dim());
-
-    u1.resize(basis.dim());
+    std::vector<double> v, u;
+    v.resize(basis_bst.dim());
+    u.resize(basis_bst.dim());
     std::mt19937 rng(seed);
     projED::set_random_unit(v, rng);
 
+    std::cout<<"[BST]   Apply..."<<std::endl;
+    std::fill(u.begin(), u.end(), 0);
+    TIMEIT("u += Av", H_bst.evaluate_add(v.data(), u.data());)
 
-    std::cout<<"[BST]  Apply..."<<std::endl;
-    TIMEIT("u += Av", Ham.evaluate_add(v.data(), u1.data());)
+    std::cout<<"[interp] Apply..."<<std::endl;
+    std::fill(u.begin(), u.end(), 0);
+    TIMEIT("u += Av", H_interp.evaluate_add(v.data(), u.data());)
 
+    std::cout<<"[fast]  Apply..."<<std::endl;
+    std::fill(u.begin(), u.end(), 0);
+    TIMEIT("u += Av", H_fast.evaluate_add(v.data(), u.data());)
 
     return 0;
 }

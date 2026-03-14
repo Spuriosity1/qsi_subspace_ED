@@ -187,20 +187,41 @@ struct ZBasisBST : public ZBasisBase
     // throws an error if not present
 	idx_t idx_of_state(const state_t& state) const;
 
-    // Inserts the states "others" into the basis, remembering the inserted states 
-    // 'new_states'. Leaves "to_insert" holding a de-duplicated, sorted version of its original state.
-	size_t insert_states(std::vector<state_t>& to_insert);
-
     int search(const state_t& state, idx_t& J) const;
 };
+
+// Merge to_insert into an existing sorted states vector.
+// Leaves to_insert holding a de-duplicated, sorted version of its original content.
+// Returns the number of new (non-duplicate) states inserted.
+size_t insert_states(std::vector<ZBasisBST::state_t>& states,
+                     std::vector<ZBasisBST::state_t>& to_insert);
 
 struct ZBasisInterp : public ZBasisBST {
     void load_from_file(const fs::path& bfile, const std::string& dataset="basis");
     int search(const state_t& state, idx_t& J) const;
-    protected:
+    private:
     std::unordered_map<uint64_t, std::pair<idx_t, idx_t>> bounds;
+    void find_bounds();
+};
 
-    void find_bounds(); // finds the bounds
+// Sentinel-indexed binary search.
+//
+// For large bases (N ~ 10^9), ZBasisBST::search performs O(log N) cold DRAM
+// accesses (~100 ns each), thrashing the memory controller.
+//
+// This type builds a sparse "sentinel" index: sentinels[i] = states[i*stride],
+// sized to fit in L3 cache (~4 MB).  A search first binary-searches the warm
+// sentinel (converting log2(N/stride) DRAM misses into L3 hits), then searches
+// only the stride-sized window in the main array (log2(stride) cold misses).
+//
+// For N = 1e9, stride ~ 4096: cold DRAM accesses drop from 30 to ~12.
+struct ZBasisBSTFast : public ZBasisBST {
+    void load_from_file(const fs::path& bfile, const std::string& dataset="basis");
+    int search(const state_t& state, idx_t& J) const;
+private:
+    std::vector<state_t> sentinels; // sentinels[i] = states[i * stride]
+    idx_t stride = 1;
+    void build_sentinels();
 };
 
 

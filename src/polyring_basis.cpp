@@ -95,7 +95,7 @@ void constr_explorer::build_states(ZBasisBST::state_t init) {
         
         prev_set.clear();
 		// insert the new keys
-		insertions = this->insert_states(tmp); // tmp now containsthe new, unique states
+		insertions = insert_states(states, tmp); // tmp now contains the new, unique states
         std::swap(tmp, prev_set);
 		iter_no++;
 

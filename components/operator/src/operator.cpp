@@ -4,7 +4,7 @@
 int ZBasisBST::search(const state_t& state, idx_t& J) const {
 //    auto it = std::lower_bound(states.begin(), states.end(), state);
 //    return it;
-    
+
     const __uint128_t* arr = reinterpret_cast<const __uint128_t*>(states.data());
     int64_t left = 0, right = states.size() - 1;
 
@@ -86,24 +86,21 @@ void ZBasisInterp::find_bounds(){
 }
 
 
-// Inserts "to_insert" into the basis, storing the new states in new_states.
-// Ensures they are inserted in sorted order.
-size_t ZBasisBST::insert_states(std::vector<ZBasisBST::state_t>& to_insert){
+size_t insert_states(std::vector<ZBasisBST::state_t>& states,
+                     std::vector<ZBasisBST::state_t>& to_insert) {
     size_t n_insertions = 0;
 
-    // sort to_insert and remove duplicates
     std::sort(to_insert.begin(), to_insert.end());
     to_insert.erase(std::unique(to_insert.begin(), to_insert.end()), to_insert.end());
 
     std::vector<ZBasisBST::state_t> merged;
     merged.reserve(states.size() + to_insert.size());
-    
+
     auto it_old = states.begin();
     auto it_new = to_insert.begin();
 
-    while (it_old != states.end() && it_new != to_insert.end()){
+    while (it_old != states.end() && it_new != to_insert.end()) {
         if (*it_new < *it_old) {
-            // New unique state to insert
             merged.push_back(*it_new);
             ++n_insertions;
             ++it_new;
@@ -111,26 +108,22 @@ size_t ZBasisBST::insert_states(std::vector<ZBasisBST::state_t>& to_insert){
             merged.push_back(*it_old);
             ++it_old;
         } else {
-            // Duplicate; keep existing
             merged.push_back(*it_old);
             ++it_old;
             ++it_new;
         }
     }
 
-    // Append any remaining new states
     while (it_new != to_insert.end()) {
         merged.push_back(*it_new);
         ++n_insertions;
         ++it_new;
     }
-
-    // Append remaining old states
     while (it_old != states.end()) {
         merged.push_back(*it_old);
         ++it_old;
     }
-    
+
     states.swap(merged);
     return n_insertions;
 }
@@ -156,6 +149,68 @@ void ZBasisBase::load_from_file(const fs::path& bfile, const std::string& datase
 void ZBasisInterp::load_from_file(const fs::path& bfile, const std::string& dataset){
     this->ZBasisBase::load_from_file(bfile, dataset);
     find_bounds();
+}
+
+
+void ZBasisBSTFast::build_sentinels() {
+    // Target ~4 MB for the sentinel array so it reliably fits in L3 cache.
+    // For N ~ 1e9 this gives stride ~ 4096, reducing cold DRAM accesses during
+    // search from log2(N) ~ 30 to log2(stride) ~ 12.
+    static constexpr size_t TARGET_BYTES = 4ULL * 1024 * 1024;
+    const idx_t n = dim();
+    const idx_t max_sentinels = static_cast<idx_t>(TARGET_BYTES / sizeof(state_t));
+    stride = std::max<idx_t>(1, n / max_sentinels);
+
+    sentinels.clear();
+    sentinels.reserve((n + stride - 1) / stride);
+    for (idx_t i = 0; i < n; i += stride)
+        sentinels.push_back(states[i]);
+}
+
+void ZBasisBSTFast::load_from_file(const fs::path& bfile, const std::string& dataset){
+    this->ZBasisBase::load_from_file(bfile, dataset);
+    build_sentinels();
+}
+
+int ZBasisBSTFast::search(const state_t& state, idx_t& J) const {
+    const __uint128_t* arr  = reinterpret_cast<const __uint128_t*>(states.data());
+    const __uint128_t* sarr = reinterpret_cast<const __uint128_t*>(sentinels.data());
+
+    // Step 1: binary-search the warm sentinel index.
+    // Finds sl = first sentinel index where sentinels[sl] >= state.
+    // After this, the target (if present) lies in states[lo .. hi]
+    // where hi - lo <= stride, costing only log2(stride) cold DRAM accesses.
+    idx_t sl = 0, sr = (idx_t)sentinels.size() - 1;
+    while (sl < sr) {
+        idx_t sm = sl + (sr - sl) / 2;
+        if (sarr[sm] < state.uint128) sl = sm + 1;
+        else sr = sm;
+    }
+
+    // Derive [lo, hi] from sentinel position.
+    // sentinels[sl] = states[sl*stride] is the first sentinel >= state,
+    // so the target lies between states[(sl-1)*stride] and states[sl*stride].
+    idx_t lo = (sl > 0) ? (sl - 1) * stride : 0;
+    idx_t hi = (sl < (idx_t)sentinels.size() - 1) ? sl * stride : dim() - 1;
+
+    // Step 2: binary search within [lo, hi] (at most stride+1 elements).
+    static const idx_t CACHE_SIZE = 32;
+    while (hi - lo > CACHE_SIZE) {
+        idx_t mid = lo + (hi - lo) / 2;
+        if (arr[mid] < state.uint128) lo = mid + 1;
+        else hi = mid;
+    }
+
+    for (J = lo; J + 3 <= hi; J += 4) {
+        if (arr[J]   == state) {             return 1; }
+        if (arr[J+1] == state) { J = J + 1; return 1; }
+        if (arr[J+2] == state) { J = J + 2; return 1; }
+        if (arr[J+3] == state) { J = J + 3; return 1; }
+    }
+    for (; J <= hi; ++J) {
+        if (arr[J] == state) return 1;
+    }
+    return 0;
 }
 
 
