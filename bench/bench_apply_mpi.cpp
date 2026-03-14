@@ -28,7 +28,7 @@ int main(int argc, char* argv[]){
         .default_value(0u);
 
 
-    prog.add_argument("--trim")
+    prog.add_argument("--notrim")
         .default_value(false)
         .implicit_value(true);
 
@@ -37,6 +37,9 @@ int main(int argc, char* argv[]){
         .default_value(false)
         .implicit_value(true);
 
+    prog.add_argument("--basis-type")
+        .help("Basis search structure: bst | interp | fast  (default: run all three)")
+        .default_value(std::string("all"));
 
     try {
         prog.parse_args(argc, argv);
@@ -46,13 +49,16 @@ int main(int argc, char* argv[]){
         return 1;
     }
 
-    unsigned int seed = prog.get<unsigned int>("--seed");
-    
-    MPI_Init(NULL, NULL);
+    auto bt = prog.get<std::string>("--basis-type");
+    if (bt != "all" && bt != "bst" && bt != "interp" && bt != "fast") {
+        std::cerr << "Invalid --basis-type '" << bt << "'. Must be one of: bst, interp, fast, all\n";
+        std::cerr << prog;
+        return 1;
+    }
 
-    ZBasisBST_HashMPI     basis_bst;
-    ZBasisInterp_HashMPI  basis_interp;
-    ZBasisBSTFast_HashMPI basis_fast;
+    unsigned int seed = prog.get<unsigned int>("--seed");
+
+    MPI_Init(NULL, NULL);
 
 	// Step 1: Load ring data from JSON
     auto lattice_file = prog.get<std::string>("lattice_file");
@@ -66,50 +72,29 @@ int main(int argc, char* argv[]){
 
     MPIHashContext ctx;
 
-    TIMEIT("[BST]    load", load_basis(basis_bst,    prog);)
-    std::cout<<"[rank "<<ctx.my_rank<<"] BST    dim="<<basis_bst.dim()<<std::endl;
-
-    TIMEIT("[interp] load", load_basis(basis_interp, prog);)
-    std::cout<<"[rank "<<ctx.my_rank<<"] interp dim="<<basis_interp.dim()<<std::endl;
-
-    TIMEIT("[fast]   load", load_basis(basis_fast,   prog);)
-    std::cout<<"[rank "<<ctx.my_rank<<"] fast   dim="<<basis_fast.dim()<<std::endl;
-
-
 	using T=double;
 	SymbolicOpSum<T> H_sym;
 
     std::vector<double> gv {1.0, -0.2, -0.2, -0.2};
     build_hamiltonian(H_sym, jdata, gv);
 
-    if (prog.get<bool>("--trim")){
-        TIMEIT("trim", basis_bst.remove_null_states(H_sym);
-                       basis_interp.remove_null_states(H_sym);
-                       basis_fast.remove_null_states(H_sym);)
-    }
+    auto bench_one = [&](auto& basis, const char* tag) {
+        TIMEIT((std::string("[") + tag + "] load").c_str(),  load_basis(basis, prog);)
+        if (!prog.get<bool>("--notrim")) basis.remove_null_states(H_sym);
+        std::cout << "[rank " << ctx.my_rank << "] " << tag
+                  << " dim=" << basis.dim() << "\n";
+        auto H = MPILazyOpSum(basis, H_sym, ctx);
+        H.allocate_temporaries();
+        std::vector<double> v(basis.dim()), u(basis.dim(), 0.0);
+        std::mt19937 rng(seed);
+        projED::set_random_unit_mpi(v, rng);
+        TIMEIT((std::string("[") + tag + "] u += Av").c_str(),
+               H.evaluate_add(v.data(), u.data());)
+    };
 
-    auto H_bst    = MPILazyOpSum(basis_bst,    H_sym, ctx);
-    auto H_interp = MPILazyOpSum(basis_interp, H_sym, ctx);
-    auto H_fast   = MPILazyOpSum(basis_fast,   H_sym, ctx);
-    H_bst.allocate_temporaries();
-    H_interp.allocate_temporaries();
-    H_fast.allocate_temporaries();
-
-    std::vector<double> v_local(basis_bst.dim()), u_local(basis_bst.dim());
-    std::mt19937 rng(seed);
-    projED::set_random_unit_mpi(v_local, rng);
-
-    std::cout<<"[BST_MPI "<<ctx.my_rank<<"] Apply..."<<std::endl;
-    std::fill(u_local.begin(), u_local.end(), 0);
-    TIMEIT("[BST]    u += Av", H_bst.evaluate_add(v_local.data(), u_local.data());)
-
-    std::cout<<"[interp_MPI "<<ctx.my_rank<<"] Apply..."<<std::endl;
-    std::fill(u_local.begin(), u_local.end(), 0);
-    TIMEIT("[interp] u += Av", H_interp.evaluate_add(v_local.data(), u_local.data());)
-
-    std::cout<<"[fast_MPI "<<ctx.my_rank<<"] Apply..."<<std::endl;
-    std::fill(u_local.begin(), u_local.end(), 0);
-    TIMEIT("[fast]   u += Av", H_fast.evaluate_add(v_local.data(), u_local.data());)
+    if (bt == "all" || bt == "bst")    { ZBasisBST_HashMPI     b; bench_one(b, "BST");    }
+    if (bt == "all" || bt == "interp") { ZBasisInterp_HashMPI  b; bench_one(b, "interp"); }
+    if (bt == "all" || bt == "fast")   { ZBasisBSTFast_HashMPI b; bench_one(b, "fast");   }
 
     MPI_Finalize();
     return 0;
