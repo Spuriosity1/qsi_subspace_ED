@@ -6,20 +6,26 @@
 #include "mpi_context.hpp"
 
 
-struct ZBasisBST_HashMPI : public ZBasisBST {
+// MPI-distributed wrapper around any local basis type.
+// Each rank holds the subset of states whose hash maps to that rank.
+// After loading and redistribution, on_states_changed() is called on the
+// local basis so that search-acceleration structures (bounds, sentinels, …)
+// are rebuilt automatically for whichever LocalBasis is used.
+template<typename LocalBasis>
+struct ZBasisMPI : public LocalBasis {
     using ctx_t = MPIHashContext;
     void load_from_file(const fs::path& bfile, const std::string& dataset="basis");
-    idx_t global_dim() const {
-        return _global_dim;
-    }
-    idx_t dim_of_rank(int r) const {
-        return all_rank_dims[r];
-    }
+    ZBasisBase::idx_t global_dim() const { return _global_dim; }
+    ZBasisBase::idx_t dim_of_rank(int r) const { return _all_rank_dims[r]; }
     private:
-    void tfer_states_to_correct_ranks(ctx_t& ctx); // helper which redistributes stats to the correct rank
-    idx_t _global_dim=0;
-    std::vector<idx_t> all_rank_dims;
+    void tfer_states_to_correct_ranks(ctx_t& ctx);
+    ZBasisBase::idx_t _global_dim = 0;
+    std::vector<ZBasisBase::idx_t> _all_rank_dims;
 };
+
+using ZBasisBST_HashMPI     = ZBasisMPI<ZBasisBST>;
+using ZBasisInterp_HashMPI  = ZBasisMPI<ZBasisInterp>;
+using ZBasisBSTFast_HashMPI = ZBasisMPI<ZBasisBSTFast>;
 
 using MPIctx=MPIHashContext;
 

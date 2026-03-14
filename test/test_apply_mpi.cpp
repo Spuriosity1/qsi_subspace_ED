@@ -71,9 +71,9 @@ int main(int argc, char* argv[]){
     MPI_Init(NULL, NULL);
 
 
-	ZBasisBST_HashMPI basis_loc;
+	ZBasisBST_HashMPI     basis_loc;
+    ZBasisBSTFast_HashMPI basis_fast_loc;
     ZBasisBST basis_st;
-//    ZBasisInterp basis_i;
    
 	// Step 1: Load ring data from JSON
     auto lattice_file = prog.get<std::string>("lattice_file");
@@ -89,6 +89,10 @@ int main(int argc, char* argv[]){
     std::cout<<"[MPI_BST]  Loading basis..."<<std::endl;
     load_basis(basis_loc, prog);
     std::cout<<"[MPI_BST]  Done! Basis dim="<<basis_loc.dim()<<std::endl;
+
+    std::cout<<"[MPI_fast] Loading basis..."<<std::endl;
+    load_basis(basis_fast_loc, prog);
+    std::cout<<"[MPI_fast] Done! Basis dim="<<basis_fast_loc.dim()<<std::endl;
 
     std::cout<<"[BST]  Loading basis..."<<std::endl;
     load_basis(basis_st, prog);
@@ -140,8 +144,9 @@ int main(int argc, char* argv[]){
     }
  
     ctx.log<<"[op construct]"<<std::endl;
-    auto H_mpi = MPILazyOpSum(basis_loc, H_sym, ctx);
-    auto H_st = LazyOpSum(basis_st, H_sym);
+    auto H_mpi  = MPILazyOpSum(basis_loc,      H_sym, ctx);
+    auto H_fast = MPILazyOpSum(basis_fast_loc, H_sym, ctx);
+    auto H_st   = LazyOpSum(basis_st, H_sym);
 
 
 //    if (prog.get<bool>("--rebalance")){
@@ -152,12 +157,14 @@ int main(int argc, char* argv[]){
 //    }
     ctx.log<<"[allocate temporaries]"<<std::endl;
     H_mpi.allocate_temporaries();
+    H_fast.allocate_temporaries();
 
-    std::vector<double> v_global, v_local, u_global, u1_local;
+    std::vector<double> v_global, v_local, u_global, u1_local, u2_local;
     v_global.resize(basis_st.dim());
     u_global.resize(basis_st.dim());
 
     u1_local.resize(basis_loc.dim());
+    u2_local.resize(basis_fast_loc.dim());
 
 
     std::mt19937 rng(seed);
@@ -176,49 +183,40 @@ int main(int argc, char* argv[]){
 
     std::fill(u_global.begin(), u_global.end(), 0);
     std::fill(u1_local.begin(), u1_local.end(), 0);
+    std::fill(u2_local.begin(), u2_local.end(), 0);
 
     std::cout<<"[BST "<<ctx.my_rank<<"]  Apply..."<<std::endl;
-    TIMEIT("[BST] u += Av", H_st.evaluate_add(v_global.data(), u_global.data());)
+    TIMEIT("[BST]      u += Av", H_st.evaluate_add(v_global.data(), u_global.data());)
 
     std::cout<<"[BST_MPI "<<ctx.my_rank<<"]  Apply..."<<std::endl;
-    
-    TIMEIT("[MPI] u += Av", H_mpi.evaluate_add(v_local.data(), u1_local.data());)
+    TIMEIT("[MPI_BST]  u += Av", H_mpi.evaluate_add(v_local.data(), u1_local.data());)
 
-    double tol =1e-9;
-    
-    size_t error_1_count = 0;
-    double max_error_1 = 0;
+    std::cout<<"[fast_MPI "<<ctx.my_rank<<"] Apply..."<<std::endl;
+    TIMEIT("[MPI_fast] u += Av", H_fast.evaluate_add(v_local.data(), u2_local.data());)
 
-    for (int i=0;  i<basis_loc.dim(); i++){
-        auto g_idx = index_map[i];
-        auto error_1 = std::abs(u_global[g_idx] - u1_local[i]);
+    double tol = 1e-9;
+    bool ok = true;
 
-        if( error_1 > tol ){
-            if (error_1_count == 0){
-                std::cout<<"BST != MPI sync on global index "<< g_idx
-                    <<"= ("<<ctx.my_rank<<") + "<<i<<": +"<<error_1<<"\n";
-            }
-            error_1_count++;
-            max_error_1 = std::max(max_error_1, error_1);
+    auto check = [&](const char* label, const std::vector<double>& u_loc) {
+        size_t nerr = 0;
+        double max_err = 0;
+        for (int i = 0; i < (int)u_loc.size(); i++){
+            auto g_idx = index_map[i];
+            auto err = std::abs(u_global[g_idx] - u_loc[i]);
+            if (err > tol){ nerr++; max_err = std::max(max_err, err); }
         }
+        if (nerr > 0){
+            std::cout << label << " rank " << ctx.my_rank << ": "
+                      << nerr << " errors, max=" << max_err << "\n";
+            ok = false;
+        } else {
+            std::cout << label << " rank " << ctx.my_rank << ": agrees with global BST.\n";
+        }
+    };
 
+    check("[MPI_BST] ", u1_local);
+    check("[MPI_fast]", u2_local);
 
-    }
-
-    if (error_1_count > 0) {
-        std::cout << "[MPI] Rank " << ctx.my_rank << ": " << error_1_count 
-              << " errors found, max error = " << max_error_1 << "\n";
-    } else {
-        std::cout << "[MPI] Rank " << ctx.my_rank <<": agrees with global BST."<<std::endl;
-    }
-
-
-//    if (error_2_count > 0) {
-//        std::cout << "[pipe] Rank " << ctx.my_rank << ": " << error_2_count 
-//              << " errors found, max error = " << max_error_2 << "\n";
-//    } else {
-//        std::cout << "[pipe] Rank " << ctx.my_rank <<": agrees with global BST."<<std::endl;
-//    }
     MPI_Finalize();
-    return 0;
+    return ok ? 0 : 1;
 }

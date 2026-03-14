@@ -125,15 +125,16 @@ inline std::vector<Uint128> read_basis_hdf5_MPI(
 
 
 
-void ZBasisBST_HashMPI::load_from_file(const fs::path& bfile, const std::string& dataset){
+template<typename B>
+void ZBasisMPI<B>::load_from_file(const fs::path& bfile, const std::string& dataset){
     std::cerr << "Loading basis from file " << bfile <<"\n";
 
     if (bfile.stem().extension() == ".partitioned"){
         assert(bfile.extension() == ".h5");
-        states = read_basis_hdf5_MPI(bfile, dataset.c_str());
+        this->states = read_basis_hdf5_MPI(bfile, dataset.c_str());
     } else if (bfile.extension() == ".h5"){
         assert(dataset=="basis");
-        states = read_basis_hdf5_MPI(bfile, "basis"); 
+        this->states = read_basis_hdf5_MPI(bfile, "basis");
     } else {
         throw std::runtime_error(
                 "Bad basis format: file must end with .csv or .h5");
@@ -143,61 +144,60 @@ void ZBasisBST_HashMPI::load_from_file(const fs::path& bfile, const std::string&
     std::cerr<<"[r"<<ctx.my_rank<<"] Transfer states to correct ranks...\n";
     tfer_states_to_correct_ranks(ctx);
 
-    std::cerr << "Done!" <<"\n";
+    std::cerr << "Done!\n";
 }
 
 
-// redistribute states to the correct ranks
-void ZBasisBST_HashMPI::tfer_states_to_correct_ranks(MPIHashContext& ctx){ 
-    // allocate some temporary memory
-    std::vector<state_t> send_states(this->size());
-    std::vector<state_t> recv_states;
+// Redistribute states to the correct ranks via hash-based partitioning,
+// then sort the local partition and rebuild any search-acceleration structures.
+template<typename B>
+void ZBasisMPI<B>::tfer_states_to_correct_ranks(MPIHashContext& ctx){
+    std::vector<ZBasisBase::state_t> send_states(this->size());
+    std::vector<ZBasisBase::state_t> recv_states;
 
-    std::vector<int> send_counts(ctx.world_size,0);
+    std::vector<int> send_counts(ctx.world_size, 0);
     std::vector<int> recv_counts(ctx.world_size);
+    std::vector<int> send_displs(ctx.world_size, 0);
+    std::vector<int> recv_displs(ctx.world_size, 0);
 
-    std::vector<int> send_displs(ctx.world_size,0);
-    std::vector<int> recv_displs(ctx.world_size);
-
-    // tag them all
-    for (const auto& psi : states){
+    for (const auto& psi : this->states)
         send_counts[ctx.rank_of_state(psi)]++;
-    }
 
     MPI_Request r1;
-    MPI_Ialltoall(send_counts.data(), 1, get_mpi_type<int>(), 
+    MPI_Ialltoall(send_counts.data(), 1, get_mpi_type<int>(),
             recv_counts.data(), 1, get_mpi_type<int>(), MPI_COMM_WORLD, &r1);
 
-    for (int r=1; r<ctx.world_size; r++){
+    for (int r = 1; r < ctx.world_size; r++)
         send_displs[r] = send_displs[r-1] + send_counts[r-1];
-    }
 
     std::vector<int> counters(send_displs);
-    for (int il=0; il<this->size(); il++){
+    for (int il = 0; il < this->size(); il++){
         auto rank = ctx.rank_of_state(this->states[il]);
-        send_states[counters[rank]] = states[il];
+        send_states[counters[rank]] = this->states[il];
         counters[rank]++;
     }
 
-    MPI_Wait(&r1, MPI_STATUS_IGNORE); // recv_counts now contains valid data
+    MPI_Wait(&r1, MPI_STATUS_IGNORE);
     recv_states.resize(std::accumulate(recv_counts.begin(), recv_counts.end(), 0ull));
-    for (int r=1; r<ctx.world_size; r++){
+    for (int r = 1; r < ctx.world_size; r++)
         recv_displs[r] = recv_displs[r-1] + recv_counts[r-1];
-    }
 
-    MPI_Alltoallv(send_states.data(), send_counts.data(), send_displs.data(), get_mpi_type<state_t>(),
-            recv_states.data(), recv_counts.data(), recv_displs.data(), get_mpi_type<state_t>(), MPI_COMM_WORLD);
+    MPI_Alltoallv(send_states.data(), send_counts.data(), send_displs.data(), get_mpi_type<ZBasisBase::state_t>(),
+            recv_states.data(), recv_counts.data(), recv_displs.data(), get_mpi_type<ZBasisBase::state_t>(), MPI_COMM_WORLD);
 
     std::swap(recv_states, this->states);
     std::sort(this->states.begin(), this->states.end());
-    // all temporaries destroyed
 
-    idx_t my_size = this->size();
-    all_rank_dims.resize(ctx.world_size);
-    MPI_Allgather(&my_size, 1, get_mpi_type<idx_t>(), 
-            all_rank_dims.data(), 1, get_mpi_type<idx_t>(), MPI_COMM_WORLD);
-    _global_dim = std::accumulate(all_rank_dims.begin(), all_rank_dims.end(),
-            static_cast<idx_t>(0));
+    // Rebuild search-acceleration structures (bounds, sentinels, …) for
+    // whichever LocalBasis is being used.
+    this->on_states_changed();
+
+    ZBasisBase::idx_t my_size = this->size();
+    _all_rank_dims.resize(ctx.world_size);
+    MPI_Allgather(&my_size, 1, get_mpi_type<ZBasisBase::idx_t>(),
+            _all_rank_dims.data(), 1, get_mpi_type<ZBasisBase::idx_t>(), MPI_COMM_WORLD);
+    _global_dim = std::accumulate(_all_rank_dims.begin(), _all_rank_dims.end(),
+            static_cast<ZBasisBase::idx_t>(0));
 }
 
 /*
@@ -825,5 +825,10 @@ void MPILazyOpSum<coeff_t, basis_t>::allocate_temporaries() {
 
 
 // explicit template instantiations: generate symbols to link with
+template struct ZBasisMPI<ZBasisBST>;
+template struct ZBasisMPI<ZBasisInterp>;
+template struct ZBasisMPI<ZBasisBSTFast>;
+
 template struct MPILazyOpSum<double, ZBasisBST_HashMPI>;
-//template struct MPILazyOpSum<double, ZBasisInterp>;
+template struct MPILazyOpSum<double, ZBasisInterp_HashMPI>;
+template struct MPILazyOpSum<double, ZBasisBSTFast_HashMPI>;

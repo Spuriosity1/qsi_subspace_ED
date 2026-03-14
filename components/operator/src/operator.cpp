@@ -143,12 +143,7 @@ void ZBasisBase::load_from_file(const fs::path& bfile, const std::string& datase
         throw std::runtime_error(
                 "Bad basis format: file must end with .csv or .h5");
     }
-}
-
-
-void ZBasisInterp::load_from_file(const fs::path& bfile, const std::string& dataset){
-    this->ZBasisBase::load_from_file(bfile, dataset);
-    find_bounds();
+    on_states_changed(); // rebuild bounds table, sentinel index, etc.
 }
 
 
@@ -165,11 +160,6 @@ void ZBasisBSTFast::build_sentinels() {
     sentinels.reserve((n + stride - 1) / stride);
     for (idx_t i = 0; i < n; i += stride)
         sentinels.push_back(states[i]);
-}
-
-void ZBasisBSTFast::load_from_file(const fs::path& bfile, const std::string& dataset){
-    this->ZBasisBase::load_from_file(bfile, dataset);
-    build_sentinels();
 }
 
 int ZBasisBSTFast::search(const state_t& state, idx_t& J) const {

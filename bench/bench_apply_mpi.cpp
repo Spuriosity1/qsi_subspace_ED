@@ -50,8 +50,10 @@ int main(int argc, char* argv[]){
     
     MPI_Init(NULL, NULL);
 
-	ZBasisBST_HashMPI basis;
-   
+    ZBasisBST_HashMPI     basis_bst;
+    ZBasisInterp_HashMPI  basis_interp;
+    ZBasisBSTFast_HashMPI basis_fast;
+
 	// Step 1: Load ring data from JSON
     auto lattice_file = prog.get<std::string>("lattice_file");
 	std::ifstream jfile(lattice_file);
@@ -63,49 +65,51 @@ int main(int argc, char* argv[]){
 	jfile >> jdata;
 
     MPIHashContext ctx;
-    // Step 2: load and partition the basis
-    TIMEIT("Loading basis", load_basis(basis, prog);)
-    std::cout<<"[rank "<<ctx.my_rank<<"] Done! Basis dim="<<basis.dim()<<std::endl;
+
+    TIMEIT("[BST]    load", load_basis(basis_bst,    prog);)
+    std::cout<<"[rank "<<ctx.my_rank<<"] BST    dim="<<basis_bst.dim()<<std::endl;
+
+    TIMEIT("[interp] load", load_basis(basis_interp, prog);)
+    std::cout<<"[rank "<<ctx.my_rank<<"] interp dim="<<basis_interp.dim()<<std::endl;
+
+    TIMEIT("[fast]   load", load_basis(basis_fast,   prog);)
+    std::cout<<"[rank "<<ctx.my_rank<<"] fast   dim="<<basis_fast.dim()<<std::endl;
 
 
 	using T=double;
 	SymbolicOpSum<T> H_sym;
-    
+
     std::vector<double> gv {1.0, -0.2, -0.2, -0.2};
     build_hamiltonian(H_sym, jdata, gv);
 
-
     if (prog.get<bool>("--trim")){
-        TIMEIT("remove unneeded elements",
-            basis.remove_null_states(H_sym);
-        )
+        TIMEIT("trim", basis_bst.remove_null_states(H_sym);
+                       basis_interp.remove_null_states(H_sym);
+                       basis_fast.remove_null_states(H_sym);)
     }
 
-    TIMEIT("operator construct",
-            auto H_mpi = MPILazyOpSum(basis, H_sym, ctx);
-          )
+    auto H_bst    = MPILazyOpSum(basis_bst,    H_sym, ctx);
+    auto H_interp = MPILazyOpSum(basis_interp, H_sym, ctx);
+    auto H_fast   = MPILazyOpSum(basis_fast,   H_sym, ctx);
+    H_bst.allocate_temporaries();
+    H_interp.allocate_temporaries();
+    H_fast.allocate_temporaries();
 
-    TIMEIT("allocating temporaries",
-            H_mpi.allocate_temporaries();
-          )
-
-
-
-    std::cout<<"[rank "<<ctx.my_rank<<"] op construct finish, local dim="<<basis.dim()<<std::endl;
-
-    std::vector<double> v_local, u_local;
-    v_local.resize(basis.dim());
-
-    u_local.resize(basis.dim());
-
+    std::vector<double> v_local(basis_bst.dim()), u_local(basis_bst.dim());
     std::mt19937 rng(seed);
     projED::set_random_unit_mpi(v_local, rng);
 
+    std::cout<<"[BST_MPI "<<ctx.my_rank<<"] Apply..."<<std::endl;
     std::fill(u_local.begin(), u_local.end(), 0);
+    TIMEIT("[BST]    u += Av", H_bst.evaluate_add(v_local.data(), u_local.data());)
 
-    std::cout<<"[BST_MPI "<<ctx.my_rank<<"]  Apply..."<<std::endl;
+    std::cout<<"[interp_MPI "<<ctx.my_rank<<"] Apply..."<<std::endl;
+    std::fill(u_local.begin(), u_local.end(), 0);
+    TIMEIT("[interp] u += Av", H_interp.evaluate_add(v_local.data(), u_local.data());)
 
-    TIMEIT("u += Av", H_mpi.evaluate_add(v_local.data(), u_local.data());)
+    std::cout<<"[fast_MPI "<<ctx.my_rank<<"] Apply..."<<std::endl;
+    std::fill(u_local.begin(), u_local.end(), 0);
+    TIMEIT("[fast]   u += Av", H_fast.evaluate_add(v_local.data(), u_local.data());)
 
     MPI_Finalize();
     return 0;

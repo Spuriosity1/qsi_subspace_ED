@@ -175,6 +175,11 @@ struct ZBasisBase {
 
     protected:
         std::vector<state_t> states;
+        // Called after states is set or replaced (load, MPI redistribution, etc.).
+        // Derived classes override this to rebuild search-acceleration structures
+        // (bounds table, sentinel index, …) so that any mutation point automatically
+        // leaves the basis in a valid, searchable state.
+        virtual void on_states_changed() noexcept {}
 };
 
 
@@ -197,8 +202,9 @@ size_t insert_states(std::vector<ZBasisBST::state_t>& states,
                      std::vector<ZBasisBST::state_t>& to_insert);
 
 struct ZBasisInterp : public ZBasisBST {
-    void load_from_file(const fs::path& bfile, const std::string& dataset="basis");
     int search(const state_t& state, idx_t& J) const;
+    protected:
+    void on_states_changed() noexcept override { find_bounds(); }
     private:
     std::unordered_map<uint64_t, std::pair<idx_t, idx_t>> bounds;
     void find_bounds();
@@ -216,9 +222,10 @@ struct ZBasisInterp : public ZBasisBST {
 //
 // For N = 1e9, stride ~ 4096: cold DRAM accesses drop from 30 to ~12.
 struct ZBasisBSTFast : public ZBasisBST {
-    void load_from_file(const fs::path& bfile, const std::string& dataset="basis");
     int search(const state_t& state, idx_t& J) const;
-private:
+    protected:
+    void on_states_changed() noexcept override { build_sentinels(); }
+    private:
     std::vector<state_t> sentinels; // sentinels[i] = states[i * stride]
     idx_t stride = 1;
     void build_sentinels();
