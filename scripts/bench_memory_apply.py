@@ -215,8 +215,7 @@ def main():
                 "mpirun", "-n", str(NRANKS),
                 "build/bench/bench_apply_mpi",
                 JSON,
-                "--sector", dataset,
-                "--trim",
+                "--sector", dataset
             ]
 
             try:

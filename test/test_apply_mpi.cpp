@@ -49,7 +49,7 @@ int main(int argc, char* argv[]){
         .scan<'i', unsigned int>()
         .default_value(0u);
 
-    prog.add_argument("--trim")
+    prog.add_argument("--notrim")
         .default_value(false)
         .implicit_value(true);
 //    prog.add_argument("--rebalance")
@@ -137,7 +137,7 @@ int main(int argc, char* argv[]){
 
     ctx.log<<"[Symbolic ham construction done.]"<<std::endl;
 
-    if (prog.get<bool>("--trim")){
+    if (!prog.get<bool>("--trim")){
         ctx.log<<"[remove unneeded elements]"<<std::endl;
         basis_st.remove_null_states(H_sym);
         basis_loc.remove_null_states(H_sym);

@@ -48,7 +48,7 @@ for dataset in "${datasets[@]}"; do
     echo "Processing $dataset (size $size rows)"
 
     # Run command with /usr/bin/time and capture output
-    output=$(/usr/bin/time -v mpirun -n $NRANKS build/bench/bench_apply_mpi "$JSON_FILE" --sector "$dataset" --trim 2>&1)
+    output=$(/usr/bin/time -v mpirun -n $NRANKS build/bench/bench_apply_mpi "$JSON_FILE" --sector "$dataset" 2>&1)
 
     # Extract time and memory info
     time_real=$(echo "$output" | grep "Elapsed (wall clock) time" | awk '{print $5}')

@@ -1,1 +1,1 @@
-build/test/test_apply_mpi ../lattice_files/pyro_2,0,0_0,3,0_0,0,3.json --sector basis_s8.10.9.9 --trim
+build/test/test_apply_mpi ../lattice_files/pyro_2,0,0_0,3,0_0,0,3.json --sector basis_s8.10.9.9 

@@ -32,7 +32,7 @@ int main(int argc, char* argv[]){
         .scan<'i', unsigned int>()
         .default_value(0u);
 
-    prog.add_argument("--trim")
+    prog.add_argument("--notrim")
         .default_value(false)
         .implicit_value(true);
 
@@ -82,7 +82,7 @@ int main(int argc, char* argv[]){
     }
 
 
-    if (prog.get<bool>("--trim")){
+    if (!prog.get<bool>("--notrim")){
         ctx.log<<"[remove unneeded elements]"<<std::endl;
         basis.remove_null_states(H_sym, ctx);
     }
