@@ -160,12 +160,25 @@ void ZBasisMPI<B>::load_from_file(const fs::path& bfile, const std::string& data
 // then sort the local partition and rebuild any search-acceleration structures.
 template<typename B>
 void ZBasisMPI<B>::tfer_states_to_correct_ranks(MPIHashContext& ctx){
+    constexpr size_t S = sizeof(ZBasisBase::state_t);
+    auto log_mem = [&](const char* phase) {
+        size_t rss = rss_bytes();
+        std::cerr << "[tfer r" << ctx.my_rank << " " << phase << "]"
+                  << "  n=" << this->size()
+                  << "  cap=" << this->states.capacity()
+                  << "  states_MiB=" << this->states.capacity() * S / (1<<20)
+                  << "  rss_MiB=" << rss / (1<<20)
+                  << "\n" << std::flush;
+    };
+
     std::vector<ZBasisBase::state_t> recv_states;
 
     std::vector<int> send_counts(ctx.world_size, 0);
     std::vector<int> recv_counts(ctx.world_size);
     std::vector<int> send_displs(ctx.world_size, 0);
     std::vector<int> recv_displs(ctx.world_size, 0);
+
+    log_mem("entry");
 
     for (const auto& psi : this->states)
         send_counts[ctx.rank_of_state(psi)]++;
@@ -192,11 +205,18 @@ void ZBasisMPI<B>::tfer_states_to_correct_ranks(MPIHashContext& ctx){
         std::swap(sorted, this->states);
         // sorted (old unsorted states) freed here
     }
+    log_mem("post-sort");  // old capacity freed; this->states is trimmed size
 
     MPI_Wait(&r1, MPI_STATUS_IGNORE);
     recv_states.resize(std::accumulate(recv_counts.begin(), recv_counts.end(), 0ull));
     for (int r = 1; r < ctx.world_size; r++)
         recv_displs[r] = recv_displs[r-1] + recv_counts[r-1];
+
+    std::cerr << "[tfer r" << ctx.my_rank << " pre-alltoallv]"
+              << "  send_MiB=" << this->states.size() * S / (1<<20)
+              << "  recv_MiB=" << recv_states.size() * S / (1<<20)
+              << "  rss_MiB=" << rss_bytes() / (1<<20)
+              << "\n" << std::flush;
 
     MPI_Alltoallv(this->states.data(), send_counts.data(), send_displs.data(), get_mpi_type<ZBasisBase::state_t>(),
             recv_states.data(), recv_counts.data(), recv_displs.data(), get_mpi_type<ZBasisBase::state_t>(), MPI_COMM_WORLD);
@@ -205,11 +225,15 @@ void ZBasisMPI<B>::tfer_states_to_correct_ranks(MPIHashContext& ctx){
     { std::vector<ZBasisBase::state_t> tmp; std::swap(tmp, this->states); }
 
     std::swap(recv_states, this->states);
+    log_mem("post-alltoallv");  // send buffer freed, recv now in this->states
+
     std::sort(this->states.begin(), this->states.end());
+    log_mem("post-sort2");
 
     // Rebuild search-acceleration structures (bounds, sentinels, …) for
     // whichever LocalBasis is being used.
     this->on_states_changed();
+    log_mem("post-on_states_changed");  // bounds map / sentinels now built
 
     ZBasisBase::idx_t my_size = this->size();
     _all_rank_dims.resize(ctx.world_size);

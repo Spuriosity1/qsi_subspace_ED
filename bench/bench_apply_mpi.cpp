@@ -7,18 +7,6 @@
 #include "timeit.hpp"
 #include <fstream>
 
-// Returns resident set size in bytes (Linux /proc, falls back to 0).
-static size_t rss_bytes() {
-    std::ifstream f("/proc/self/status");
-    std::string line;
-    while (std::getline(f, line)) {
-        if (line.rfind("VmRSS:", 0) == 0) {
-            size_t kb = std::stoull(line.substr(6));
-            return kb * 1024;
-        }
-    }
-    return 0;
-}
 
 static void print_mem(const MPIHashContext& ctx, const char* label) {
     size_t rss = rss_bytes();

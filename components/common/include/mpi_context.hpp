@@ -10,6 +10,20 @@
 #include "bittools.hpp"
 #include <stdexcept>
 
+// Returns resident set size in bytes from /proc/self/status (Linux).
+// Returns 0 on platforms that don't support it (e.g. macOS).
+inline size_t rss_bytes() {
+    std::ifstream f("/proc/self/status");
+    std::string line;
+    while (std::getline(f, line)) {
+        if (line.rfind("VmRSS:", 0) == 0) {
+            size_t kb = std::stoull(line.substr(6));
+            return kb * 1024;
+        }
+    }
+    return 0;
+}
+
 // MPI datatype helper
 template<typename T>
 MPI_Datatype get_mpi_type();
