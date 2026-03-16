@@ -10,6 +10,7 @@ __pycache__
 test/tmp
 *.ipynb
 *.swp
+*.log
 .old
 .clangd
 hpc_driver/track

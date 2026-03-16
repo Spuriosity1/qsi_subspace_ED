@@ -11,7 +11,7 @@
 #! 3380 MiB of memory per CPU.
 #SBATCH --ntasks=48
 #SBATCH --ntasks-per-socket=2
-#SBATCH --cpus-per-task=6
+#SBATCH --cpus-per-task=1
 #SBATCH --mem-per-cpu=6760
 #! How much wallclock time will be required?
 #SBATCH --time=0:30:00
@@ -28,6 +28,7 @@ module load intel/mkl/2020.4
 # point to custom HDF5
 export LD_LIBRARY_PATH=/home/als217/install/HDF_Group/HDF5/1.14.6/lib:${LD_LIBRARY_PATH}
 
+export OMP_NUM_THREADS=1 # no benefit from using these
 export OPENBLAS_NUM_THREADS=$SLURM_CPUS_PER_TASK
 export MKL_NUM_THREADS=$SLURM_CPUS_PER_TASK
 
