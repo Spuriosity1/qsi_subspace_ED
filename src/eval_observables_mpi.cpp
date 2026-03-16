@@ -21,7 +21,7 @@ using json=nlohmann::json;
 using namespace std;
 
 
-//typedef ZBasisBST_MPI basis_t;
+//typedef ZBasisBST_HashMPI basis_t;
 //
 
 void load_state(std::vector<double>& psi, const ZBasisBST_HashMPI& basis, const std::filesystem::path& infile, const MPIctx& ctx, int col=0){
@@ -68,7 +68,9 @@ void load_state(std::vector<double>& psi, const ZBasisBST_HashMPI& basis, const 
         }
         
         hsize_t local_count = basis.dim();
-        hsize_t local_start = ctx.local_start_index();
+        hsize_t local_start = 0;
+        for (int r = 0; r < ctx.my_rank; r++)
+            local_start += static_cast<hsize_t>(basis.dim_of_rank(r));
         
         // Allocate memory for the result
         psi.resize(local_count);
@@ -111,12 +113,10 @@ void load_state(std::vector<double>& psi, const ZBasisBST_HashMPI& basis, const 
         
         // Print diagnostics (only on rank 0 to avoid clutter)
         if (ctx.my_rank == 0) {
-            assert(ctx.idx_partition.size() == ctx.state_partition.size());
-            std::cout<<"Loaded basis chunk. Partition scheme:\n index\t state\n";
-            for (size_t i=0; i<ctx.idx_partition.size(); i++){
-                std::cout<<ctx.idx_partition[i]<<"\t";
-                printHex(std::cout, ctx.state_partition[i])<<"\n";
-            }
+            std::cout << "Loaded eigenvector. Rank dims: ";
+            for (int r = 0; r < ctx.world_size; r++)
+                std::cout << basis.dim_of_rank(r) << " ";
+            std::cout << "\n";
         }
 		
 		// Clean up
@@ -138,7 +138,7 @@ void load_state(std::vector<double>& psi, const ZBasisBST_HashMPI& basis, const 
 
 
 
-typedef ZBasisBST_MPI basis_t;
+typedef ZBasisBST_HashMPI basis_t;
     
 int main(int argc, char* argv[]) {
 	argparse::ArgumentParser prog("eval_observables");
@@ -203,7 +203,8 @@ int main(int argc, char* argv[]) {
     basis_t basis;
     std::cout<<"[MPI_BST]  Loading basis..."<<std::endl;
     // NOTE n_spinons not handled properly
-    SparseMPIContext ctx = basis.load_from_file( get_basis_file(latfile, 0, dset_name!="basis"), 
+    MPIctx ctx;
+    basis.load_from_file( get_basis_file(latfile, 0, dset_name!="basis"),
             dset_name
             );
     std::cout<<"[MPI_BST]  Done! local basis dim="<<basis.dim()<<std::endl;
@@ -223,8 +224,8 @@ int main(int argc, char* argv[]) {
     auto lazy_ringR_0 = MPILazyOpSum<double, basis_t>(basis, ringR[0], ctx);
 
     std::vector<double> chi, u;
-    chi.resize(ctx.local_block_size());
-    u.resize(ctx.local_block_size());
+    chi.resize(basis.dim());
+    u.resize(basis.dim());
 
 
     int n_operators = ringL.size();

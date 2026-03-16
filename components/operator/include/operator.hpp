@@ -171,6 +171,7 @@ struct ZBasisBase {
     template<typename coeff_t>
     void remove_null_states(const SymbolicOpSum<coeff_t>& osm) {
         remove_annihilated_states(osm, this->states);
+        this->on_states_changed();
     }
 
     protected:
@@ -203,6 +204,9 @@ size_t insert_states(std::vector<ZBasisBST::state_t>& states,
 
 struct ZBasisInterp : public ZBasisBST {
     int search(const state_t& state, idx_t& J) const;
+    // Number of distinct upper-64-bit values (= bounds map entries).
+    // Each entry costs ~56 bytes of unordered_map overhead.
+    size_t n_bounds_entries() const { return bounds.size(); }
     protected:
     void on_states_changed() noexcept override { find_bounds(); }
     private:

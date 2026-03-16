@@ -320,13 +320,13 @@ ring_normed = executable('ring_normed',
   )
 
 
-#eval_observables_mpi = executable('eval_observables_mpi',
-#  files(['src/eval_observables_mpi.cpp', 'src/expectation_eval.cpp']),
-#  dependencies: [g_deps, eigen_dep, omp_dep, operator_mpi_dep, linalg_routines_dep],
-#  include_directories: inc,
-#  link_with: expectation_eval,
-#  cpp_args: target_args
-#  )
+eval_observables_mpi = executable('eval_observables_mpi',
+  files(['src/eval_observables_mpi.cpp', 'src/expectation_eval.cpp']),
+  dependencies: [g_deps, eigen_dep, omp_dep, operator_mpi_dep, linalg_routines_dep],
+  include_directories: inc,
+  link_with: expectation_eval,
+  cpp_args: target_args
+  )
 #
 #
 #eval_dsf = executable('eval_dsf',

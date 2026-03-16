@@ -7,6 +7,31 @@
 #include "timeit.hpp"
 #include <fstream>
 
+// Returns resident set size in bytes (Linux /proc, falls back to 0).
+static size_t rss_bytes() {
+    std::ifstream f("/proc/self/status");
+    std::string line;
+    while (std::getline(f, line)) {
+        if (line.rfind("VmRSS:", 0) == 0) {
+            size_t kb = std::stoull(line.substr(6));
+            return kb * 1024;
+        }
+    }
+    return 0;
+}
+
+static void print_mem(const MPIHashContext& ctx, const char* label) {
+    size_t rss = rss_bytes();
+    size_t rss_max = 0;
+    MPI_Reduce(&rss, &rss_max, 1, get_mpi_type<size_t>(), MPI_MAX, 0, MPI_COMM_WORLD);
+    size_t rss_sum = 0;
+    MPI_Reduce(&rss, &rss_sum, 1, get_mpi_type<size_t>(), MPI_SUM, 0, MPI_COMM_WORLD);
+    if (ctx.my_rank == 0)
+        std::cout << "[mem] " << label
+                  << "  max=" << rss_max / (1<<20) << " MiB"
+                  << "  total=" << rss_sum / (1<<20) << " MiB\n";
+}
+
 
 using json = nlohmann::json;
 
@@ -79,17 +104,37 @@ int main(int argc, char* argv[]){
     build_hamiltonian(H_sym, jdata, gv);
 
     auto bench_one = [&](auto& basis, const char* tag) {
+        print_mem(ctx, (std::string(tag) + " before load").c_str());
         TIMEIT((std::string("[") + tag + "] load").c_str(),  load_basis(basis, prog);)
+        print_mem(ctx, (std::string(tag) + " after load").c_str());
+
         if (!prog.get<bool>("--notrim")) basis.remove_null_states(H_sym);
-        std::cout << "[rank " << ctx.my_rank << "] " << tag
-                  << " dim=" << basis.dim() << "\n";
+        print_mem(ctx, (std::string(tag) + " after trim").c_str());
+
+        // Per-rank breakdown
+        size_t states_bytes = basis.dim() * sizeof(ZBasisBase::state_t);
+        if (ctx.my_rank == 0)
+            std::cout << "[" << tag << "] local dim=" << basis.dim()
+                      << "  states=" << states_bytes / (1<<20) << " MiB";
+        if constexpr (std::is_base_of_v<ZBasisInterp, std::decay_t<decltype(basis)>>) {
+            size_t nb = basis.n_bounds_entries();
+            if (ctx.my_rank == 0)
+                std::cout << "  bounds_entries=" << nb
+                          << " (~" << nb * 56 / (1<<20) << " MiB)";
+        }
+        if (ctx.my_rank == 0) std::cout << "\n";
+
         auto H = MPILazyOpSum(basis, H_sym, ctx);
         H.allocate_temporaries();
+
         std::vector<double> v(basis.dim()), u(basis.dim(), 0.0);
         std::mt19937 rng(seed);
         projED::set_random_unit_mpi(v, rng);
+        print_mem(ctx, (std::string(tag) + " before apply (vecs allocated)").c_str());
+
         TIMEIT((std::string("[") + tag + "] u += Av").c_str(),
                H.evaluate_add(v.data(), u.data());)
+        print_mem(ctx, (std::string(tag) + " after apply").c_str());
     };
 
     if (bt == "all" || bt == "bst")    { ZBasisBST_HashMPI     b; bench_one(b, "BST");    }

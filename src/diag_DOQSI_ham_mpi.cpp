@@ -229,34 +229,35 @@ int main(int argc, char* argv[]) {
     // dummy (here in case we calc more later
     std::vector<double> eigvals{eigval};
 
-    // Write eigenvectors using parallel I/O: shape (rank, dim, n_eigvecs)
+    // Write eigenvectors using parallel I/O: shape (global_dim, 1), packed in rank order
     {
-        hsize_t global_dims[3] = {static_cast<hsize_t>(ctx.world_size),static_cast<hsize_t>(basis.global_dim()), 1};
+        hsize_t global_dims[2] = {static_cast<hsize_t>(basis.global_dim()), 1};
         hsize_t local_size = basis.dim();
-        
-        // Create dataspace for the full dataset
+
+        // Row offset for this rank = sum of all preceding ranks' dims
+        hsize_t local_start = 0;
+        for (int r = 0; r < ctx.my_rank; r++)
+            local_start += static_cast<hsize_t>(basis.dim_of_rank(r));
+
         hid_t filespace = H5Screate_simple(2, global_dims, NULL);
-        
-        // Create dataset
-        hid_t dset_id = H5Dcreate(file_id, "eigenvectors", H5T_NATIVE_DOUBLE, 
+        hid_t dset_id = H5Dcreate(file_id, "eigenvectors", H5T_NATIVE_DOUBLE,
                                   filespace, H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT);
-        
-        // Select hyperslab for this process
-        hsize_t count[3] = {1,local_size, 2};
-        hsize_t start[3] = {static_cast<hsize_t>(ctx.my_rank), 0, 0};
-        H5Sselect_hyperslab(filespace, H5S_SELECT_SET, start, NULL, count, NULL);
-        
-        // Create memory dataspace
-        hid_t memspace = H5Screate_simple(3, count, NULL);
-        
-        // Create property list for collective dataset write
+
+        hsize_t start[2] = {local_start, 0};
+        hsize_t count[2] = {local_size, 1};
+        if (local_size > 0) {
+            H5Sselect_hyperslab(filespace, H5S_SELECT_SET, start, NULL, count, NULL);
+        } else {
+            H5Sselect_none(filespace);
+        }
+        hid_t memspace = (local_size > 0) ? H5Screate_simple(2, count, NULL)
+                                          : H5Screate(H5S_NULL);
+
         hid_t plist_xfer = H5Pcreate(H5P_DATASET_XFER);
         H5Pset_dxpl_mpio(plist_xfer, H5FD_MPIO_COLLECTIVE);
-        
-        // Write data
+
         H5Dwrite(dset_id, H5T_NATIVE_DOUBLE, memspace, filespace, plist_xfer, local_v0.data());
-        
-        // Close resources
+
         H5Pclose(plist_xfer);
         H5Sclose(memspace);
         H5Sclose(filespace);

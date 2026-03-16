@@ -152,7 +152,6 @@ void ZBasisMPI<B>::load_from_file(const fs::path& bfile, const std::string& data
 // then sort the local partition and rebuild any search-acceleration structures.
 template<typename B>
 void ZBasisMPI<B>::tfer_states_to_correct_ranks(MPIHashContext& ctx){
-    std::vector<ZBasisBase::state_t> send_states(this->size());
     std::vector<ZBasisBase::state_t> recv_states;
 
     std::vector<int> send_counts(ctx.world_size, 0);
@@ -170,11 +169,20 @@ void ZBasisMPI<B>::tfer_states_to_correct_ranks(MPIHashContext& ctx){
     for (int r = 1; r < ctx.world_size; r++)
         send_displs[r] = send_displs[r-1] + send_counts[r-1];
 
-    std::vector<int> counters(send_displs);
-    for (int il = 0; il < this->size(); il++){
-        auto rank = ctx.rank_of_state(this->states[il]);
-        send_states[counters[rank]] = this->states[il];
-        counters[rank]++;
+    // Bucket-sort this->states in-place by destination rank.
+    // This lets us use it directly as the MPI send buffer, avoiding a
+    // separate send_states allocation and keeping peak at 2× basis size
+    // (this->states + recv_states) rather than 3×.
+    {
+        std::vector<ZBasisBase::state_t> sorted(this->size());
+        std::vector<int> counters(send_displs);
+        for (int il = 0; il < this->size(); il++){
+            auto rank = ctx.rank_of_state(this->states[il]);
+            sorted[counters[rank]] = this->states[il];
+            counters[rank]++;
+        }
+        std::swap(sorted, this->states);
+        // sorted (old unsorted states) freed here
     }
 
     MPI_Wait(&r1, MPI_STATUS_IGNORE);
@@ -182,8 +190,11 @@ void ZBasisMPI<B>::tfer_states_to_correct_ranks(MPIHashContext& ctx){
     for (int r = 1; r < ctx.world_size; r++)
         recv_displs[r] = recv_displs[r-1] + recv_counts[r-1];
 
-    MPI_Alltoallv(send_states.data(), send_counts.data(), send_displs.data(), get_mpi_type<ZBasisBase::state_t>(),
+    MPI_Alltoallv(this->states.data(), send_counts.data(), send_displs.data(), get_mpi_type<ZBasisBase::state_t>(),
             recv_states.data(), recv_counts.data(), recv_displs.data(), get_mpi_type<ZBasisBase::state_t>(), MPI_COMM_WORLD);
+
+    // Release the send data before taking ownership of recv (keeps peak at 1×).
+    { std::vector<ZBasisBase::state_t> tmp; std::swap(tmp, this->states); }
 
     std::swap(recv_states, this->states);
     std::sort(this->states.begin(), this->states.end());

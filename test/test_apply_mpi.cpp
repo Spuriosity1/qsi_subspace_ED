@@ -137,10 +137,11 @@ int main(int argc, char* argv[]){
 
     ctx.log<<"[Symbolic ham construction done.]"<<std::endl;
 
-    if (!prog.get<bool>("--trim")){
+    if (!prog.get<bool>("--notrim")){
         ctx.log<<"[remove unneeded elements]"<<std::endl;
         basis_st.remove_null_states(H_sym);
         basis_loc.remove_null_states(H_sym);
+        basis_fast_loc.remove_null_states(H_sym);
     }
  
     ctx.log<<"[op construct]"<<std::endl;
