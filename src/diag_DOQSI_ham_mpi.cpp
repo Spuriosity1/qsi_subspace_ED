@@ -52,6 +52,11 @@ int main(int argc, char* argv[]) {
             .scan<'g', double>();
     }
 
+
+    prog.add_argument("--notrim")
+        .default_value(false)
+        .implicit_value(true);
+
     prog.add_argument("-o", "--output_dir")
         .required()
         .help("output directory");
@@ -94,6 +99,7 @@ int main(int argc, char* argv[]) {
     std::cout<<"[MPI_BST]  Loading basis..."<<std::endl;
     load_basis(basis, prog);
     std::cout<<"[MPI_BST]  Done! local basis dim="<<basis.dim()<<std::endl;
+
 
     MPIctx ctx;
 
@@ -143,6 +149,10 @@ int main(int argc, char* argv[]) {
     if (ctx.my_rank == 0) {
         std::cout << "[Main] Checkpoint file: " << checkpoint_file << "\n";
     }
+
+
+    /// trim the basis
+    if (!prog.get<bool>("--notrim")) basis.remove_null_states(H_sym);
 
     //////////////////////////////////
     /// Build H

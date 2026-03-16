@@ -6,6 +6,7 @@
 #include <vector>
 #include <fstream>
 #include "H5Fpublic.h"
+#include "hamiltonian_setup.hpp"
 #include "mpi.h"
 #include "physics/geometry.hpp"
 #include "blas_adapter.hpp"
@@ -150,6 +151,9 @@ int main(int argc, char* argv[]) {
 	prog.add_argument("-s", "--n_spinons")
         .default_value(0)
         .scan<'i',int>();
+    prog.add_argument("--notrim")
+        .default_value(false)
+        .implicit_value(true);
 //	prog.add_argument("--n_eigvecs", "-N")
 //		.help("Number of eigenvectors to check")
 //		.default_value(2)
@@ -219,6 +223,14 @@ int main(int argc, char* argv[]) {
     std::vector<MPILazyOpSum<double, basis_t>> lazy_ring_operators;
     for (auto& O : ringL){
         lazy_ring_operators.emplace_back(basis, O, ctx);
+    }
+
+
+    /// trim the basis
+    if (!prog.get<bool>("--notrim")){
+        SymbolicOpSum<double> H_sym; // only needed here
+        build_hamiltonian(H_sym, jdata, std::vector<double>{1,1,1,1});
+        basis.remove_null_states(H_sym);
     }
 
     auto lazy_ringR_0 = MPILazyOpSum<double, basis_t>(basis, ringR[0], ctx);
