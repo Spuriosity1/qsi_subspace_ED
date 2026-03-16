@@ -201,36 +201,31 @@ int main(int argc, char* argv[]) {
 	json jdata;
 	jfile >> jdata;
 
-	// Step 2: Load basis from H5
-    std::cout<<"Loading basis..."<<std::endl;
+    // Step 2: Build Hamiltonian structure (needed for trimming)
+    MPIctx ctx;
+    auto [ringL, ringR, sl] = get_ring_ops(jdata);
 
+    // Step 3: Load raw slab, trim locally, then redistribute
     basis_t basis;
     std::cout<<"[MPI_BST]  Loading basis..."<<std::endl;
     // NOTE n_spinons not handled properly
-    MPIctx ctx;
-    basis.load_from_file( get_basis_file(latfile, 0, dset_name!="basis"),
-            dset_name
-            );
+    basis.load_raw( get_basis_file(latfile, 0, dset_name!="basis"), dset_name );
+    if (!prog.get<bool>("--notrim")){
+        SymbolicOpSum<double> H_sym; // only needed for trimming
+        build_hamiltonian(H_sym, jdata, std::vector<double>{1,1,1,1});
+        basis.remove_null_states(H_sym);
+    }
+    basis.redistribute();
     std::cout<<"[MPI_BST]  Done! local basis dim="<<basis.dim()<<std::endl;
 
-    // Step 3: Slab load of the state
+    // Step 4: Slab load of the eigenvector (offsets now match trimmed basis)
     std::vector<double> psi;
     load_state(psi, basis, in_datafile, ctx, 0);
 
-
-    // Step 4: the rings
-    auto [ringL, ringR, sl] = get_ring_ops(jdata);
+    // Step 5: the rings
     std::vector<MPILazyOpSum<double, basis_t>> lazy_ring_operators;
     for (auto& O : ringL){
         lazy_ring_operators.emplace_back(basis, O, ctx);
-    }
-
-
-    /// trim the basis
-    if (!prog.get<bool>("--notrim")){
-        SymbolicOpSum<double> H_sym; // only needed here
-        build_hamiltonian(H_sym, jdata, std::vector<double>{1,1,1,1});
-        basis.remove_null_states(H_sym);
     }
 
     auto lazy_ringR_0 = MPILazyOpSum<double, basis_t>(basis, ringR[0], ctx);

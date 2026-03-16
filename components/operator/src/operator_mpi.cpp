@@ -126,7 +126,7 @@ inline std::vector<Uint128> read_basis_hdf5_MPI(
 
 
 template<typename B>
-void ZBasisMPI<B>::load_from_file(const fs::path& bfile, const std::string& dataset){
+void ZBasisMPI<B>::load_raw(const fs::path& bfile, const std::string& dataset){
     std::cerr << "Loading basis from file " << bfile <<"\n";
 
     if (bfile.stem().extension() == ".partitioned"){
@@ -139,12 +139,20 @@ void ZBasisMPI<B>::load_from_file(const fs::path& bfile, const std::string& data
         throw std::runtime_error(
                 "Bad basis format: file must end with .csv or .h5");
     }
+}
 
+template<typename B>
+void ZBasisMPI<B>::redistribute(){
     MPIHashContext ctx;
     std::cerr<<"[r"<<ctx.my_rank<<"] Transfer states to correct ranks...\n";
     tfer_states_to_correct_ranks(ctx);
-
     std::cerr << "Done!\n";
+}
+
+template<typename B>
+void ZBasisMPI<B>::load_from_file(const fs::path& bfile, const std::string& dataset){
+    load_raw(bfile, dataset);
+    redistribute();
 }
 
 

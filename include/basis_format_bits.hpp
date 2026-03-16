@@ -29,23 +29,32 @@ inline std::filesystem::path get_basis_file(const std::filesystem::path& lattice
 }
 
 
-template<Basis B>
-inline auto load_basis(B& basis, const argparse::ArgumentParser& prog){
+inline std::pair<std::string, std::string>
+get_basis_args(const argparse::ArgumentParser& prog){
     std::string basisfile;
-    // phase 1: load a consecutive block into file
     if (prog.is_used("--basis_file")) {
         basisfile = prog.get<std::string>("--basis_file");
     } else {
-        basisfile = get_basis_file(prog.get<std::string>("lattice_file"), 
+        basisfile = get_basis_file(prog.get<std::string>("lattice_file"),
             prog.get<int>("--n_spinons"),
             prog.is_used("--sector"));
     }
+    std::string dataset = prog.is_used("--sector")
+        ? prog.get<std::string>("--sector") : "basis";
+    return {basisfile, dataset};
+}
 
-	if (prog.is_used("--sector")) {
-        auto sector = prog.get<std::string>("--sector");
-        return basis.load_from_file(basisfile, sector.c_str());
-    } else {
-        return basis.load_from_file(basisfile);
-    }
+template<Basis B>
+inline auto load_basis(B& basis, const argparse::ArgumentParser& prog){
+    auto [basisfile, dataset] = get_basis_args(prog);
+    return basis.load_from_file(basisfile, dataset);
+}
+
+// Load a raw slab without MPI redistribution.
+// Follow with remove_null_states (optional) then basis.redistribute().
+template<Basis B>
+inline auto load_basis_raw(B& basis, const argparse::ArgumentParser& prog){
+    auto [basisfile, dataset] = get_basis_args(prog);
+    return basis.load_raw(basisfile, dataset);
 }
 

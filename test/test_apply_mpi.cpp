@@ -85,24 +85,9 @@ int main(int argc, char* argv[]){
 	json jdata;
 	jfile >> jdata;
 
-    // Step 2: load and partition the basis
-    std::cout<<"[MPI_BST]  Loading basis..."<<std::endl;
-    load_basis(basis_loc, prog);
-    std::cout<<"[MPI_BST]  Done! Basis dim="<<basis_loc.dim()<<std::endl;
-
-    std::cout<<"[MPI_fast] Loading basis..."<<std::endl;
-    load_basis(basis_fast_loc, prog);
-    std::cout<<"[MPI_fast] Done! Basis dim="<<basis_fast_loc.dim()<<std::endl;
-
-    std::cout<<"[BST]  Loading basis..."<<std::endl;
-    load_basis(basis_st, prog);
-    std::cout<<"[BST]  Done! Basis dim="<<basis_st.dim()<<std::endl;
-
 	using T=double;
 	SymbolicOpSum<T> H_sym;
 
-    
-    
     auto [ringL, ringR, sl_list]  = get_ring_ops(jdata);
     std::vector<double> gv {1.0, -0.2, -0.2, -0.2};
     for (size_t idx=0; idx<sl_list.size(); idx++){
@@ -113,6 +98,28 @@ int main(int argc, char* argv[]){
         H_sym.add_term(gv[sl_list[idx]], L);
     }
 
+    // Step 2: load raw slab, trim, then redistribute to hash-correct ranks
+    std::cout<<"[MPI_BST]  Loading basis..."<<std::endl;
+    load_basis_raw(basis_loc, prog);
+    std::cout<<"[MPI_fast] Loading basis..."<<std::endl;
+    load_basis_raw(basis_fast_loc, prog);
+    std::cout<<"[BST]  Loading basis..."<<std::endl;
+    load_basis(basis_st, prog);
+
+    MPIHashContext ctx;
+
+    if (!prog.get<bool>("--notrim")){
+        ctx.log<<"[remove unneeded elements]"<<std::endl;
+        basis_st.remove_null_states(H_sym);
+        basis_loc.remove_null_states(H_sym);
+        basis_fast_loc.remove_null_states(H_sym);
+    }
+
+    basis_loc.redistribute();
+    std::cout<<"[MPI_BST]  Done! Basis dim="<<basis_loc.dim()<<std::endl;
+    basis_fast_loc.redistribute();
+    std::cout<<"[MPI_fast] Done! Basis dim="<<basis_fast_loc.dim()<<std::endl;
+    std::cout<<"[BST]  Done! Basis dim="<<basis_st.dim()<<std::endl;
 
     std::cout<<"[MPI_BST] Checking applyState consistency..."<<std::endl;
 
@@ -130,19 +137,9 @@ int main(int argc, char* argv[]){
         }
     }
 
-
     std::cout<<"Done"<<std::endl;
 
-    MPIHashContext ctx;
-
     ctx.log<<"[Symbolic ham construction done.]"<<std::endl;
-
-    if (!prog.get<bool>("--notrim")){
-        ctx.log<<"[remove unneeded elements]"<<std::endl;
-        basis_st.remove_null_states(H_sym);
-        basis_loc.remove_null_states(H_sym);
-        basis_fast_loc.remove_null_states(H_sym);
-    }
  
     ctx.log<<"[op construct]"<<std::endl;
     auto H_mpi  = MPILazyOpSum(basis_loc,      H_sym, ctx);

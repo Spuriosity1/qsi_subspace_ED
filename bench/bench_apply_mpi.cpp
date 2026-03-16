@@ -105,11 +105,14 @@ int main(int argc, char* argv[]){
 
     auto bench_one = [&](auto& basis, const char* tag) {
         print_mem(ctx, (std::string(tag) + " before load").c_str());
-        TIMEIT((std::string("[") + tag + "] load").c_str(),  load_basis(basis, prog);)
-        print_mem(ctx, (std::string(tag) + " after load").c_str());
+        TIMEIT((std::string("[") + tag + "] load raw").c_str(), load_basis_raw(basis, prog);)
+        print_mem(ctx, (std::string(tag) + " after load raw").c_str());
 
         if (!prog.get<bool>("--notrim")) basis.remove_null_states(H_sym);
         print_mem(ctx, (std::string(tag) + " after trim").c_str());
+
+        TIMEIT((std::string("[") + tag + "] redistribute").c_str(), basis.redistribute();)
+        print_mem(ctx, (std::string(tag) + " after redistribute").c_str());
 
         // Per-rank breakdown
         size_t states_bytes = basis.dim() * sizeof(ZBasisBase::state_t);

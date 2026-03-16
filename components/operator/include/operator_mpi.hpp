@@ -14,7 +14,14 @@
 template<typename LocalBasis>
 struct ZBasisMPI : public LocalBasis {
     using ctx_t = MPIHashContext;
+    // Load slab from file AND redistribute to correct ranks in one step.
     void load_from_file(const fs::path& bfile, const std::string& dataset="basis");
+    // Load a contiguous slab from file without any MPI redistribution.
+    // Call redistribute() (optionally after remove_null_states) to finish setup.
+    void load_raw(const fs::path& bfile, const std::string& dataset="basis");
+    // Redistribute states to their hash-correct ranks, then rebuild search
+    // structures and populate global_dim / dim_of_rank metadata.
+    void redistribute();
     ZBasisBase::idx_t global_dim() const { return _global_dim; }
     ZBasisBase::idx_t dim_of_rank(int r) const { return _all_rank_dims[r]; }
     private:

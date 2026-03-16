@@ -92,15 +92,6 @@ int main(int argc, char* argv[]) {
 	json jdata;
 	jfile >> jdata;
 
-	// Step 2: Load basis from H5
-    std::cout<<"Loading basis..."<<std::endl;
-
-    ZBasisInterp_HashMPI basis;
-    std::cout<<"[MPI_BST]  Loading basis..."<<std::endl;
-    load_basis(basis, prog);
-    std::cout<<"[MPI_BST]  Done! local basis dim="<<basis.dim()<<std::endl;
-
-
     MPIctx ctx;
 
 	using coeff_t=double;
@@ -122,7 +113,7 @@ int main(int argc, char* argv[]) {
         auto Bv = prog.get<std::vector<double>>("B");
 
         Eigen::Vector3d B;
-        for (size_t i=0; i<3; i++) 
+        for (size_t i=0; i<3; i++)
             B[i] = Bv[i];
 
         snprintf(outfilename_buf, 1024, "Jpm=%.4f%%Bx=%.4f%%By=%.4f%%Bz=%.4f%%",
@@ -136,23 +127,25 @@ int main(int argc, char* argv[]) {
 
     s << prog.get<std::string>("--output_dir") << "/" << outfilename_buf;
 
-
-      // Build checkpoint filename
+    // Build checkpoint filename
     std::string checkpoint_file;
     if (prog.get<std::string>("--checkpoint").empty()) {
-        // Auto-generate checkpoint filename based on parameters
         checkpoint_file = s.str() + ".checkpoint.h5";
     } else {
         checkpoint_file = prog.get<std::string>("--checkpoint");
     }
-    
+
     if (ctx.my_rank == 0) {
         std::cout << "[Main] Checkpoint file: " << checkpoint_file << "\n";
     }
 
-
-    /// trim the basis
+	// Step 2: Load raw slab, trim locally, then redistribute to hash-correct ranks
+    ZBasisInterp_HashMPI basis;
+    std::cout<<"[MPI_BST]  Loading basis..."<<std::endl;
+    load_basis_raw(basis, prog);
     if (!prog.get<bool>("--notrim")) basis.remove_null_states(H_sym);
+    basis.redistribute();
+    std::cout<<"[MPI_BST]  Done! local basis dim="<<basis.dim()<<std::endl;
 
     //////////////////////////////////
     /// Build H
