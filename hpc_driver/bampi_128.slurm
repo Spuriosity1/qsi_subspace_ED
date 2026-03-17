@@ -47,6 +47,6 @@ echo "Current directory: `pwd`"
 
 LATFILE="../../lattice_files/pyro_-2,2,2_2,-2,2_2,2,-2.json"
 
-srun --cpu-bind=cores ../build/bench/bench_apply_mpi "$LATFILE"
+srun --cpu-bind=cores ../build/bench/bench_apply_mpi "$LATFILE" --basis-type fast
 
 
