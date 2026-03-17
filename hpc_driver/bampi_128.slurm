@@ -9,8 +9,8 @@
 #! How many (MPI) tasks will there be in total? (<= nodes*76)
 #! The Ice Lake (icelake) nodes have 76 CPUs (cores) each and
 #! 3380 MiB of memory per CPU.
-#SBATCH --ntasks=160
-#SBATCH --cpus-per-task=2
+#SBATCH --ntasks=320
+#SBATCH --cpus-per-task=1
 #SBATCH --mem-per-cpu=6760
 #! How much wallclock time will be required?
 #SBATCH --time=1:40:00
@@ -28,8 +28,10 @@ module load intel/mkl/2020.4
 export LD_LIBRARY_PATH=/home/als217/install/HDF_Group/HDF5/1.14.6/lib:${LD_LIBRARY_PATH}
 
 export OPENBLAS_NUM_THREADS=$SLURM_CPUS_PER_TASK
-export OMP_NUM_THREADS=$SLURM_CPUS_PER_TASK
 export MKL_NUM_THREADS=$SLURM_CPUS_PER_TASK
+
+
+export OMP_NUM_THREADS=1 # multithreading is actually worse
 
 workdir="/home/als217/rds/hpc-work/QSI/test_qsi_subspace_ED/hpc_driver"
 
