@@ -204,12 +204,24 @@ size_t insert_states(std::vector<ZBasisBST::state_t>& states,
 
 struct ZBasisInterp : public ZBasisBST {
     int search(const state_t& state, idx_t& J) const;
-    // Number of distinct upper-64-bit values (= bounds map entries).
-    // Each entry costs ~56 bytes of unordered_map overhead.
+    // Number of bounds map entries. Each entry costs ~56 bytes of unordered_map overhead.
+    // With the default mask (~0ULL) this equals the number of distinct upper-64-bit values.
+    // Reducing hi_mask (fewer set bits) collapses multiple keys into one, trading map
+    // size for wider per-key search ranges.
     size_t n_bounds_entries() const { return bounds.size(); }
+
+    // Mask applied to states[J].uint64[1] before using as the bounds-map key.
+    // Default: ~0ULL (use all 64 bits, original behaviour).
+    // A mask of the form 0xFFFF...FF00...00 retains only the top N bits and caps
+    // the map at 2^N entries regardless of how many distinct upper-64 values exist.
+    // Must be set before loading the basis (or call on_states_changed() again after).
+    void set_hi_mask(uint64_t mask) noexcept { hi_mask = mask; }
+    uint64_t get_hi_mask() const noexcept { return hi_mask; }
+
     protected:
     void on_states_changed() noexcept override { find_bounds(); }
     private:
+    uint64_t hi_mask = ~0ULL;
     std::unordered_map<uint64_t, std::pair<idx_t, idx_t>> bounds;
     void find_bounds();
 };

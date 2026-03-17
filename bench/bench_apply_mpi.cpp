@@ -54,6 +54,12 @@ int main(int argc, char* argv[]){
         .help("Basis search structure: bst | interp | fast  (default: run all three)")
         .default_value(std::string("all"));
 
+    prog.add_argument("--interp-bits")
+        .help("For interp basis: number of high bits of uint64[1] to use as bounds-map key (1-64, default: 64). "
+              "Fewer bits = smaller map (~56 bytes * 2^N) but wider per-key search range.")
+        .default_value(64)
+        .scan<'i', int>();
+
     try {
         prog.parse_args(argc, argv);
     } catch (const std::runtime_error& err) {
@@ -68,6 +74,14 @@ int main(int argc, char* argv[]){
         std::cerr << prog;
         return 1;
     }
+
+    int interp_bits = prog.get<int>("--interp-bits");
+    if (interp_bits < 1 || interp_bits > 64) {
+        std::cerr << "--interp-bits must be between 1 and 64\n";
+        return 1;
+    }
+    // Top-N-bit mask: 0xFFFF...FF00...00 with N high bits set
+    uint64_t interp_hi_mask = (interp_bits >= 64) ? ~0ULL : (~0ULL << (64 - interp_bits));
 
     unsigned int seed = prog.get<unsigned int>("--seed");
 
@@ -92,6 +106,14 @@ int main(int argc, char* argv[]){
     build_hamiltonian(H_sym, jdata, gv);
 
     auto bench_one = [&](auto& basis, const char* tag) {
+        if constexpr (std::is_base_of_v<ZBasisInterp, std::decay_t<decltype(basis)>>) {
+            basis.set_hi_mask(interp_hi_mask);
+            if (ctx.my_rank == 0)
+                std::cout << "[" << tag << "] hi_mask=0x" << std::hex << interp_hi_mask
+                          << std::dec << " (" << interp_bits << " bits, max "
+                          << (1ULL << std::min(interp_bits, 20)) << (interp_bits > 20 ? "..." : "")
+                          << " entries)\n";
+        }
         print_mem(ctx, (std::string(tag) + " before load").c_str());
         TIMEIT((std::string("[") + tag + "] load raw").c_str(), load_basis_raw(basis, prog);)
         print_mem(ctx, (std::string(tag) + " after load raw").c_str());
