@@ -140,7 +140,7 @@ int main(int argc, char* argv[]) {
     }
 
 	// Step 2: Load raw slab, trim locally, then redistribute to hash-correct ranks
-    ZBasisInterp_HashMPI basis;
+    ZBasisBSTFast_HashMPI basis;
     std::cout<<"[MPI_BST]  Loading basis..."<<std::endl;
     load_basis_raw(basis, prog);
     if (!prog.get<bool>("--notrim")) basis.remove_null_states(H_sym);
