@@ -96,9 +96,19 @@ struct MPIHashContext {
     }
 
     idx_t rank_of_state(state_t psi) const noexcept {
-        uint64_t x = psi.uint64[0] ^ psi.uint64[1]; // fold
-        x *= 0x9E3779B97F4A7C15ull;           // golden ratio mix
-        return x % world_size;
+        // splitmix64 finalizer: bijective 64-bit→64-bit with full avalanche.
+        // Each output bit depends on all input bits, so consecutive sorted
+        // ice-rule states (which differ by only a few bits) map to
+        // completely uncorrelated ranks.  Applied to each 64-bit half
+        // independently before XOR-combining to use the full 128-bit state.
+        // The additive offset on the upper half avoids h=0^0 when uint64[1]=0.
+        auto mix = [](uint64_t x) -> uint64_t {
+            x ^= x >> 30; x *= 0xBF58476D1CE4E5B9ULL;
+            x ^= x >> 27; x *= 0x94D049BB133111EBULL;
+            return x ^ (x >> 31);
+        };
+        uint64_t h = mix(psi.uint64[0]) ^ mix(psi.uint64[1] + 0x9E3779B97F4A7C15ULL);
+        return (idx_t)(h % (uint64_t)world_size);
     }
 
     int world_size;

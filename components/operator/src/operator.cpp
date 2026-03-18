@@ -36,26 +36,23 @@ int ZBasisBST::search(const state_t& state, idx_t& J) const {
 
 
 int ZBasisInterp::search(const state_t& state, idx_t& J) const {
-//    auto it = std::lower_bound(states.begin(), states.end(), state);
-//    return it;
-//
     const __uint128_t* arr = reinterpret_cast<const __uint128_t*>(states.data());
-    auto [left, right] = bounds.at(state.uint64[1]);
+    uint64_t key = state.uint64[1] & hi_mask;
+    auto it = bounds.find(key);
+    if (it == bounds.end()) return 0;
+    auto [left, right] = it->second;
 
     static const idx_t CACHE_SIZE=32;
-    
+
+    // When hi_mask < ~0ULL the range may span multiple distinct uint64[1] values,
+    // so compare the full 128-bit value rather than just uint64[0].
     while (right - left > CACHE_SIZE) {
         idx_t mid = (left + right) / 2;
-        
-        if (*reinterpret_cast<const uint64_t*>(arr + mid) < state.uint64[0]) 
+        if (arr[mid] < state.uint128)
             left = mid + 1;
-        else 
+        else
             right = mid;
     }
-
-//    for (J = left; J <= right; J++) {
-//        if (arr[J] == state.uint128) return 1;
-//    }
 
     for (J = left; J + 3 <= right; J += 4) {
         if (arr[J] == state) {  return 1; }
@@ -73,16 +70,15 @@ int ZBasisInterp::search(const state_t& state, idx_t& J) const {
 void ZBasisInterp::find_bounds(){
     bounds.clear();
     for (idx_t J = 0; J < dim(); J++) {
-        uint64_t state_hi = states[J].uint64[1];
-        auto it = bounds.find(state_hi);
+        uint64_t key = states[J].uint64[1] & hi_mask;
+        auto it = bounds.find(key);
         if (it != bounds.end()) {
             it->second.second = J;
         } else {
-            bounds[state_hi].first  = J;
-            bounds[state_hi].second = J;
+            bounds[key].first  = J;
+            bounds[key].second = J;
         }
     }
-    
 }
 
 

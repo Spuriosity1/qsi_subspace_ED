@@ -34,7 +34,7 @@ using json = nlohmann::json;
 
 
 int main(int argc, char* argv[]){
-    
+
 	argparse::ArgumentParser prog(argv[0]);
 	prog.add_argument("lattice_file");
     prog.add_argument("--basis_file", "-b")
@@ -52,6 +52,11 @@ int main(int argc, char* argv[]){
     prog.add_argument("--notrim")
         .default_value(false)
         .implicit_value(true);
+
+    prog.add_argument("--interp-bits")
+        .help("For interp basis: number of high bits of uint64[1] to use as bounds-map key (1-64, default: 64)")
+        .default_value(64)
+        .scan<'i', int>();
 //    prog.add_argument("--rebalance")
 //        .default_value(false)
 //        .implicit_value(true);
@@ -67,12 +72,16 @@ int main(int argc, char* argv[]){
 
 
     unsigned int seed = prog.get<unsigned int>("--seed");
-    
+
+    int interp_bits = prog.get<int>("--interp-bits");
+    uint64_t interp_hi_mask = (interp_bits >= 64) ? ~0ULL : (~0ULL << (64 - interp_bits));
+
     MPI_Init(NULL, NULL);
 
 
 	ZBasisBST_HashMPI     basis_loc;
     ZBasisBSTFast_HashMPI basis_fast_loc;
+    ZBasisInterp_HashMPI  basis_interp_loc;
     ZBasisBST basis_st;
    
 	// Step 1: Load ring data from JSON
@@ -99,10 +108,14 @@ int main(int argc, char* argv[]){
     }
 
     // Step 2: load raw slab, trim, then redistribute to hash-correct ranks
+    basis_interp_loc.set_hi_mask(interp_hi_mask);
+
     std::cout<<"[MPI_BST]  Loading basis..."<<std::endl;
     load_basis_raw(basis_loc, prog);
     std::cout<<"[MPI_fast] Loading basis..."<<std::endl;
     load_basis_raw(basis_fast_loc, prog);
+    std::cout<<"[MPI_interp] Loading basis..."<<std::endl;
+    load_basis_raw(basis_interp_loc, prog);
     std::cout<<"[BST]  Loading basis..."<<std::endl;
     load_basis(basis_st, prog);
 
@@ -113,13 +126,16 @@ int main(int argc, char* argv[]){
         basis_st.remove_null_states(H_sym);
         basis_loc.remove_null_states(H_sym);
         basis_fast_loc.remove_null_states(H_sym);
+        basis_interp_loc.remove_null_states(H_sym);
     }
 
     basis_loc.redistribute();
-    std::cout<<"[MPI_BST]  Done! Basis dim="<<basis_loc.dim()<<std::endl;
+    std::cout<<"[MPI_BST]    Done! Basis dim="<<basis_loc.dim()<<std::endl;
     basis_fast_loc.redistribute();
-    std::cout<<"[MPI_fast] Done! Basis dim="<<basis_fast_loc.dim()<<std::endl;
-    std::cout<<"[BST]  Done! Basis dim="<<basis_st.dim()<<std::endl;
+    std::cout<<"[MPI_fast]   Done! Basis dim="<<basis_fast_loc.dim()<<std::endl;
+    basis_interp_loc.redistribute();
+    std::cout<<"[MPI_interp] Done! Basis dim="<<basis_interp_loc.dim()<<std::endl;
+    std::cout<<"[BST]        Done! Basis dim="<<basis_st.dim()<<std::endl;
 
     std::cout<<"[MPI_BST] Checking applyState consistency..."<<std::endl;
 
@@ -142,9 +158,10 @@ int main(int argc, char* argv[]){
     ctx.log<<"[Symbolic ham construction done.]"<<std::endl;
  
     ctx.log<<"[op construct]"<<std::endl;
-    auto H_mpi  = MPILazyOpSum(basis_loc,      H_sym, ctx);
-    auto H_fast = MPILazyOpSum(basis_fast_loc, H_sym, ctx);
-    auto H_st   = LazyOpSum(basis_st, H_sym);
+    auto H_mpi    = MPILazyOpSum(basis_loc,        H_sym, ctx);
+    auto H_fast   = MPILazyOpSum(basis_fast_loc,   H_sym, ctx);
+    auto H_interp = MPILazyOpSum(basis_interp_loc, H_sym, ctx);
+    auto H_st     = LazyOpSum(basis_st, H_sym);
 
 
 //    if (prog.get<bool>("--rebalance")){
@@ -156,13 +173,15 @@ int main(int argc, char* argv[]){
     ctx.log<<"[allocate temporaries]"<<std::endl;
     H_mpi.allocate_temporaries();
     H_fast.allocate_temporaries();
+    H_interp.allocate_temporaries();
 
-    std::vector<double> v_global, v_local, u_global, u1_local, u2_local;
+    std::vector<double> v_global, v_local, u_global, u1_local, u2_local, u3_local;
     v_global.resize(basis_st.dim());
     u_global.resize(basis_st.dim());
 
     u1_local.resize(basis_loc.dim());
     u2_local.resize(basis_fast_loc.dim());
+    u3_local.resize(basis_interp_loc.dim());
 
 
     std::mt19937 rng(seed);
@@ -182,15 +201,19 @@ int main(int argc, char* argv[]){
     std::fill(u_global.begin(), u_global.end(), 0);
     std::fill(u1_local.begin(), u1_local.end(), 0);
     std::fill(u2_local.begin(), u2_local.end(), 0);
+    std::fill(u3_local.begin(), u3_local.end(), 0);
 
-    std::cout<<"[BST "<<ctx.my_rank<<"]  Apply..."<<std::endl;
-    TIMEIT("[BST]      u += Av", H_st.evaluate_add(v_global.data(), u_global.data());)
+    std::cout<<"[BST "<<ctx.my_rank<<"]       Apply..."<<std::endl;
+    TIMEIT("[BST]        u += Av", H_st.evaluate_add(v_global.data(), u_global.data());)
 
-    std::cout<<"[BST_MPI "<<ctx.my_rank<<"]  Apply..."<<std::endl;
-    TIMEIT("[MPI_BST]  u += Av", H_mpi.evaluate_add(v_local.data(), u1_local.data());)
+    std::cout<<"[BST_MPI "<<ctx.my_rank<<"]   Apply..."<<std::endl;
+    TIMEIT("[MPI_BST]    u += Av", H_mpi.evaluate_add(v_local.data(), u1_local.data());)
 
-    std::cout<<"[fast_MPI "<<ctx.my_rank<<"] Apply..."<<std::endl;
-    TIMEIT("[MPI_fast] u += Av", H_fast.evaluate_add(v_local.data(), u2_local.data());)
+    std::cout<<"[fast_MPI "<<ctx.my_rank<<"]  Apply..."<<std::endl;
+    TIMEIT("[MPI_fast]   u += Av", H_fast.evaluate_add(v_local.data(), u2_local.data());)
+
+    std::cout<<"[interp_MPI "<<ctx.my_rank<<"] Apply..."<<std::endl;
+    TIMEIT("[MPI_interp] u += Av", H_interp.evaluate_add(v_local.data(), u3_local.data());)
 
     double tol = 1e-9;
     bool ok = true;
@@ -212,8 +235,9 @@ int main(int argc, char* argv[]){
         }
     };
 
-    check("[MPI_BST] ", u1_local);
-    check("[MPI_fast]", u2_local);
+    check("[MPI_BST]   ", u1_local);
+    check("[MPI_fast]  ", u2_local);
+    check("[MPI_interp]", u3_local);
 
     MPI_Finalize();
     return ok ? 0 : 1;

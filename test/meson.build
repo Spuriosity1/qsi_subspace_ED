@@ -128,3 +128,19 @@ test('uint128_edge_cases', test_uint128,
 
 test('test_lanczos', test_lanczos)
 #test('Krylov operations', test_ftlm_ops)
+
+mpiexec = find_program('mpiexec', 'mpirun', required: false)
+if mpiexec.found()
+  lattice_files_dir = meson.project_source_root() / '../lattice_files'
+  test('test_apply_mpi',
+    mpiexec,
+    args: [
+      '-n', '4',
+      test_apply_mpi.full_path(),
+      lattice_files_dir / 'pyro_2,0,0_0,3,0_0,0,3.json',
+      '--sector', 'basis_s8.10.9.9',
+    ],
+    timeout: 600,
+    is_parallel: false,
+  )
+endif
