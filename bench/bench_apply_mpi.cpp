@@ -60,6 +60,12 @@ int main(int argc, char* argv[]){
         .default_value(64)
         .scan<'i', int>();
 
+    prog.add_argument("--batch-size")
+        .help("Number of operators per MPI communication round for batched apply (-1 = all, uses pipeline if not set). "
+              "Triggers allocate_temporaries() and the batched code path.")
+        .default_value(-1)
+        .scan<'i', int>();
+
     try {
         prog.parse_args(argc, argv);
     } catch (const std::runtime_error& err) {
@@ -83,6 +89,8 @@ int main(int argc, char* argv[]){
     // Top-N-bit mask: 0xFFFF...FF00...00 with N high bits set
     uint64_t interp_hi_mask = (interp_bits >= 64) ? ~0ULL : (~0ULL << (64 - interp_bits));
 
+    bool use_batched = prog.is_used("--batch-size");
+    int batch_size = prog.get<int>("--batch-size");
     unsigned int seed = prog.get<unsigned int>("--seed");
 
     MPI_Init(NULL, NULL);
@@ -138,7 +146,8 @@ int main(int argc, char* argv[]){
         if (ctx.my_rank == 0) std::cout << "\n";
 
         auto H = MPILazyOpSum(basis, H_sym, ctx);
-        H.allocate_temporaries();
+        if (use_batched)
+            H.allocate_temporaries(batch_size);
 
         std::vector<double> v(basis.dim()), u(basis.dim(), 0.0);
         std::mt19937 rng(seed);

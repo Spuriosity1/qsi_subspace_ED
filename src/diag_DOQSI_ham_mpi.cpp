@@ -57,6 +57,12 @@ int main(int argc, char* argv[]) {
         .default_value(false)
         .implicit_value(true);
 
+    prog.add_argument("--batch-size")
+        .help("Operators per MPI communication round for batched apply (-1 = all). "
+              "Omit to use the pipeline (default) path.")
+        .default_value(-1)
+        .scan<'i', int>();
+
     prog.add_argument("-o", "--output_dir")
         .required()
         .help("output directory");
@@ -151,7 +157,8 @@ int main(int argc, char* argv[]) {
     /// Build H
 
 	auto H = MPILazyOpSum(basis, H_sym, ctx);
-    H.allocate_temporaries();
+    if (prog.is_used("--batch-size"))
+        H.allocate_temporaries(prog.get<int>("--batch-size"));
 
     ////////////////////////////////////////
     // Do the diagonalisation

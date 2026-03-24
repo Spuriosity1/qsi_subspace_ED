@@ -608,261 +608,299 @@ void MPILazyOpSum<coeff_t, B>::evaluate_add_off_diag_pipeline(const coeff_t* x, 
 }
 
 
-/*
+// 4-pass LSB radix sort of (state, coeff) pairs by 128-bit state key.
+// Pass order: bits 0-31, 32-63, 64-95, 96-127.
+// states[] and coeffs[] are permuted identically.
+template <RealOrCplx coeff_t>
+static void radix_sort_pairs(
+        ZBasisBase::state_t* states, coeff_t* coeffs, int64_t N)
+{
+    if (N <= 1) return;
+    using state_t = ZBasisBase::state_t;
+
+    std::vector<state_t> tmp_states(N);
+    std::vector<coeff_t> tmp_coeffs(N);
+
+    // Use 16-bit radix: 8 passes, histogram size = 65536.
+    // (4 passes of 32-bit would need a 4 GB histogram — too large.)
+    constexpr int RADIX_BITS = 16;
+    constexpr int RADIX_SIZE = 1 << RADIX_BITS; // 65536
+    constexpr int RADIX_MASK = RADIX_SIZE - 1;
+    constexpr int N_PASSES   = 128 / RADIX_BITS; // 8 passes
+
+    std::vector<int64_t> hist(RADIX_SIZE);
+
+    state_t* src_s  = states;
+    coeff_t* src_c  = coeffs;
+    state_t* dst_s  = tmp_states.data();
+    coeff_t* dst_c  = tmp_coeffs.data();
+
+    for (int pass = 0; pass < N_PASSES; pass++) {
+        // Which 16-bit chunk of the 128-bit key?
+        // pass 0: bits 0-15 (uint64[0] low), pass 1: bits 16-31, ...
+        int word = (pass * RADIX_BITS) / 64;      // 0 or 1
+        int shift = (pass * RADIX_BITS) % 64;     // 0,16,32,48
+
+        // Build histogram
+        std::fill(hist.begin(), hist.end(), 0);
+        for (int64_t i = 0; i < N; i++) {
+            uint32_t key = (uint32_t)((src_s[i].uint64[word] >> shift) & RADIX_MASK);
+            hist[key]++;
+        }
+        // Prefix sum -> starting positions
+        int64_t sum = 0;
+        for (int b = 0; b < RADIX_SIZE; b++) {
+            int64_t cnt = hist[b];
+            hist[b] = sum;
+            sum += cnt;
+        }
+        // Scatter
+        for (int64_t i = 0; i < N; i++) {
+            uint32_t key = (uint32_t)((src_s[i].uint64[word] >> shift) & RADIX_MASK);
+            int64_t pos = hist[key]++;
+            dst_s[pos] = src_s[i];
+            dst_c[pos] = src_c[i];
+        }
+        std::swap(src_s, dst_s);
+        std::swap(src_c, dst_c);
+    }
+
+    // After N_PASSES (8, even) swaps src_s == states (original buffers).
+    // Data is already in the right place — no copy needed when N_PASSES is even.
+    static_assert(N_PASSES % 2 == 0, "N_PASSES must be even so result stays in original buffers");
+}
+
+// Walk sorted recv pairs + sorted basis simultaneously and accumulate y.
+template <RealOrCplx coeff_t, Basis B>
+static void linear_merge_update(
+        const ZBasisBase::state_t* recv_states, const coeff_t* recv_dy,
+        int64_t recv_total,
+        const B& basis, coeff_t* y)
+{
+    int64_t ri = 0;
+    ZBasisBase::idx_t bi = 0;
+    int64_t bdim = basis.dim();
+    while (ri < recv_total && bi < bdim) {
+        if (recv_states[ri] == basis[bi]) {
+            y[bi] += recv_dy[ri];
+            ri++;
+        } else if (recv_states[ri] < basis[bi]) {
+            // state not in local basis (hash collision artefact); skip
+            ri++;
+        } else {
+            bi++;
+        }
+    }
+}
+
 template <RealOrCplx coeff_t, Basis B>
 void MPILazyOpSum<coeff_t, B>::evaluate_add_off_diag_batched(const coeff_t* x, coeff_t* y) {
+    assert(!send_counts.empty() && "allocate_temporaries() must be called first");
 
-    assert(send_dy.size() != 0);
-    assert(send_state.size() == send_dy.size());
+    using state_t = ZBasisBase::state_t;
+    int N       = ctx.world_size;
+    int my_rank = ctx.my_rank;
+    int N_ops   = (int)ops.off_diag_terms.size();
+    int bs      = (batch_size <= 0) ? N_ops : std::min(batch_size, N_ops);
 
-    Timer initial_apply_timer("[initial apply]", ctx.my_rank);
-//    Timer sort_vectors_timer("[sort]", ctx.my_rank);
-    Timer loc_apply_timer("[local apply]", ctx.my_rank);
-    Timer remx_wait_timer("[waiting for data]", ctx.my_rank);
-    Timer rem_apply_timer("[remote apply]", ctx.my_rank);
+    Timer loc_apply_timer("[batched local apply]",    my_rank);
+    Timer self_update_timer("[batched self update]",  my_rank);
+    Timer alltoallv_timer("[batched mpi alltoallv]",  my_rank);
+    Timer radix_sort_timer("[batched radix sort]",    my_rank);
+    Timer remote_up_timer("[batched remote update]",  my_rank);
 
-    std::vector<const Timer*> timers{&initial_apply_timer,
-        &loc_apply_timer, &remx_wait_timer, &rem_apply_timer};
+    std::vector<const Timer*> timers{&loc_apply_timer, &self_update_timer,
+        &alltoallv_timer, &radix_sort_timer, &remote_up_timer};
 
+    // Per-batch MPI count arrays (int for standard MPI_Alltoallv API)
+    std::vector<int> batch_sc(N), batch_rc(N);
 
-    // current positions in the send arrays
-    std::vector<MPI_Count> send_cursors = send_displs;                 
-    std::vector<MPI_Count> send_counts_no_self = send_counts;
-    std::vector<MPI_Count> recv_counts_no_self = recv_counts;
-    send_counts_no_self[ctx.my_rank] = 0; // handle this separately
-    recv_counts_no_self[ctx.my_rank] = 0; // handle this separately
- 
+    // Recv buffer for one batch (reused each round).
+    // Worst case = recv_counts total (sized in allocate_temporaries).
+    // Threshold: use sort+merge when recv data > 2× local basis size
+    // This means we prefer sort+merge when the batch is large enough.
+    const int64_t sort_merge_threshold = 2LL * (int64_t)basis.dim() * (int64_t)sizeof(state_t);
 
-//    // thread local storage
-//    const int nthreads = omp_get_max_threads();
-//    std::vector<std::vector<ZBasisBase::state_t>> tls_send_state(nthreads);
-//    std::vector<std::vector<coeff_t>> tls_send_dy(nthreads);
+    for (int batch_start = 0; batch_start < N_ops; batch_start += bs) {
+        int batch_end = std::min(batch_start + bs, N_ops);
 
-    auto N = send_state.size();
-    send_state.resize(N+1); // need space for one past the end
-    send_dy.resize(N+1);
-    // apply to all local basis vectors, il = local state index
-    BENCH_TIMER_TIMEIT(initial_apply_timer,
+        // --- LOCAL APPLY PASS ---
+        // Reset send cursors to the start of each rank's slot in the flat buffer.
+        std::vector<MPI_Count> cursors(send_displs.begin(), send_displs.end());
 
-    for ( const auto& [c, op] : ops.off_diag_terms ){
-        for (ZBasisBase::idx_t il = 0; il < basis.dim(); ++il) {
-            ZBasisBase::state_t og_state = basis[il];
-            auto state = og_state;
-            auto sign = op.applyState(state);
+        BENCH_TIMER_TIMEIT(loc_apply_timer,
+        int op_idx = 0;
+        for (const auto& [c, op] : ops.off_diag_terms) {
+            if (op_idx < batch_start) { op_idx++; continue; }
+            if (op_idx >= batch_end)  break;
+            op_idx++;
 
-            assert(sign == 0 || sign == 1 || sign == -1);
-           // if (sign == 0) continue;
-            
-            auto target_rank = ctx.rank_of_state(state);
-            auto dy = c*x[il]*sign;
+            for (ZBasisBase::idx_t il = 0; il < basis.dim(); ++il) {
+                state_t state = basis[il];
+                auto sign = op.applyState(state);
+                if (sign == 0) continue;
 
-//            if (target_rank == ctx.my_rank){
-//                // immediately apply
-//                ZBasisBase::idx_t local_idx;
-//                ASSERT_STATE_FOUND("local",
-//                    state,
-//                    basis.search(state, local_idx)
-//                    );
-//                y[local_idx] += dy;
-//            }
-    
-            MPI_Count& pos = send_cursors[target_rank];
-            send_state[pos] = state;
-            send_dy[pos] = dy;
+                int r = (int)ctx.rank_of_state(state);
+                coeff_t dy = c * x[il] * (coeff_t)sign;
 
-            pos += (sign !=0); // overwrite if not needed
-            assert(static_cast<size_t>(pos) < send_state.size());
-            assert(static_cast<size_t>(pos) < send_dy.size());
-         }
-    }
-    );
-
-    send_state.resize(N); // need space for one past the end
-    send_dy.resize(N);
-
-
-    std::vector<MPI_Request> send_reqs;
-    std::vector<MPI_Request> recv_reqs;
-
-
-    const int STATE_REQ = 0x10000;
-    const int COEFF_REQ = 0x20000;
-
-    for (int r=0; r<ctx.world_size; r++){
-        // make sure we did this correctly -- negligible cost
-        assert(send_cursors[r] == send_displs[r] + send_counts[r]);
-
-        // these don't need sending or receiving
-        if (r==ctx.my_rank) continue; 
-
-        if (recv_counts[r] > 0){
-            MPI_Request req_state, req_dy;
-            MPI_Irecv(recv_state.data() + recv_displs[r], recv_counts[r], 
-                    get_mpi_type<ZBasisBST::state_t>(), r, STATE_REQ, 
-                    MPI_COMM_WORLD, &req_state); 
-            MPI_Irecv(recv_dy.data() + recv_displs[r], recv_counts[r], 
-                    get_mpi_type<coeff_t>(), r, COEFF_REQ, 
-                    MPI_COMM_WORLD, &req_dy); 
-
-            recv_reqs.emplace_back(req_state);
-            recv_reqs.emplace_back(req_dy);
+                if (r == my_rank) {
+                    // Self-contribution: apply immediately (handled below)
+                    send_state[cursors[r]] = state;
+                    send_dy[cursors[r]]    = dy;
+                } else {
+                    send_state[cursors[r]] = state;
+                    send_dy[cursors[r]]    = dy;
+                }
+                cursors[r]++;
+            }
         }
+        ) // BENCH_TIMER_TIMEIT
 
-        if (send_counts[r] > 0){
-            MPI_Request req_state, req_dy;
-            MPI_Isend(send_state.data() + send_displs[r], send_counts[r],
-                    get_mpi_type<ZBasisBST::state_t>(), r, STATE_REQ, 
-                    MPI_COMM_WORLD, &req_state); 
-            MPI_Isend(send_dy.data() + send_displs[r], send_counts[r],
-                    get_mpi_type<coeff_t>(), r, COEFF_REQ, 
-                    MPI_COMM_WORLD, &req_dy);
-            send_reqs.emplace_back(req_state);
-            send_reqs.emplace_back(req_dy);
+        // Compute actual per-rank send counts for this batch
+        for (int r = 0; r < N; r++)
+            batch_sc[r] = (int)(cursors[r] - send_displs[r]);
+
+        // --- SELF-UPDATE ---
+        BENCH_TIMER_TIMEIT(self_update_timer,
+        {
+            int cnt = batch_sc[my_rank];
+            MPI_Count base = send_displs[my_rank];
+            for (int i = 0; i < cnt; i++) {
+                ZBasisBase::idx_t local_idx;
+                ASSERT_STATE_FOUND("batched self",
+                    send_state[base + i],
+                    basis.search(send_state[base + i], local_idx));
+                y[local_idx] += send_dy[base + i];
+            }
         }
-        
-    }
+        ) // BENCH_TIMER_TIMEIT
 
+        // --- ONE COMMUNICATION ROUND ---
+        // Exchange counts
+        MPI_Alltoall(batch_sc.data(), 1, MPI_INT, batch_rc.data(), 1, MPI_INT, MPI_COMM_WORLD);
 
-    assert(send_counts[ctx.my_rank] == recv_counts[ctx.my_rank]);
-    const auto loc_send_offset = send_displs[ctx.my_rank];
+        // Compute send/recv displacements for this batch.
+        // Send side: each rank's slot starts at send_displs[r] in the flat buffer.
+        // Recv side: pack contiguously (excluding self) so update loop has no gaps.
+        std::vector<int> alltoallv_sd(N), alltoallv_rd(N);
+        for (int r = 0; r < N; r++)
+            alltoallv_sd[r] = (int)send_displs[r];
 
-    BENCH_TIMER_TIMEIT(loc_apply_timer,
-    for (int i=loc_send_offset; 
-            i<loc_send_offset+send_counts[ctx.my_rank]; i++){
-        ZBasisBase::idx_t local_idx;
-        ASSERT_STATE_FOUND("local",
-            send_state[i],
-            basis.search(send_state[i], local_idx)
-            );
-        y[local_idx] += send_dy[i];
-    }
-    );
+        // Packed recv displacements — skip my_rank slot so buffer has no gap.
+        alltoallv_rd[0] = 0;
+        for (int r = 1; r < N; r++)
+            alltoallv_rd[r] = alltoallv_rd[r-1] + (r-1 != my_rank ? batch_rc[r-1] : 0);
+        int64_t batch_recv_total = 0;
+        for (int r = 0; r < N; r++)
+            if (r != my_rank) batch_recv_total += batch_rc[r];
 
-    #ifdef SUBSPACE_ED_BENCHMARK_OPERATIONS
-        int num_send_neighbors = 0, num_recv_neighbors = 0;
-        for (int r = 0; r < ctx.world_size; r++) {
-            if (r != ctx.my_rank && send_counts[r] > 0) num_send_neighbors++;
-            if (r != ctx.my_rank && recv_counts[r] > 0) num_recv_neighbors++;
+        // Zero self counts so Alltoallv skips the self slot entirely.
+        batch_sc[my_rank] = 0;
+        batch_rc[my_rank] = 0;
+
+        BENCH_TIMER_TIMEIT(alltoallv_timer,
+        MPI_Alltoallv(
+            send_state.data(), batch_sc.data(), alltoallv_sd.data(), get_mpi_type<state_t>(),
+            recv_state.data(), batch_rc.data(), alltoallv_rd.data(), get_mpi_type<state_t>(),
+            MPI_COMM_WORLD);
+        MPI_Alltoallv(
+            send_dy.data(), batch_sc.data(), alltoallv_sd.data(), get_mpi_type<coeff_t>(),
+            recv_dy.data(), batch_rc.data(), alltoallv_rd.data(), get_mpi_type<coeff_t>(),
+            MPI_COMM_WORLD);
+        ) // BENCH_TIMER_TIMEIT
+
+        // --- REMOTE UPDATE ---
+        bool use_sort_merge = (batch_recv_total * (int64_t)(sizeof(state_t) + sizeof(coeff_t))
+                               > sort_merge_threshold);
+
+        if (use_sort_merge && batch_recv_total > 0) {
+            BENCH_TIMER_TIMEIT(radix_sort_timer,
+            radix_sort_pairs(recv_state.data(), recv_dy.data(), batch_recv_total);
+            ) // BENCH_TIMER_TIMEIT
+
+            BENCH_TIMER_TIMEIT(remote_up_timer,
+            linear_merge_update(recv_state.data(), recv_dy.data(),
+                                batch_recv_total, basis, y);
+            ) // BENCH_TIMER_TIMEIT
+        } else {
+            BENCH_TIMER_TIMEIT(remote_up_timer,
+            for (int64_t i = 0; i < batch_recv_total; i++) {
+                ZBasisBase::idx_t local_idx;
+                ASSERT_STATE_FOUND("batched remote",
+                    recv_state[i],
+                    basis.search(recv_state[i], local_idx));
+                y[local_idx] += recv_dy[i];
+            }
+            ) // BENCH_TIMER_TIMEIT
         }
-        
-        ctx.log << "[ rank "<<ctx.my_rank<<" ] " << num_send_neighbors << " send neighbors, "
-                  << num_recv_neighbors << " recv neighbors" << std::endl;
-        
-    #endif
-
-    // synchronise
-    BENCH_TIMER_TIMEIT(remx_wait_timer,
-    MPI_Waitall(recv_reqs.size(), recv_reqs.data(), MPI_STATUSES_IGNORE);
-    MPI_Waitall(send_reqs.size(), send_reqs.data(), MPI_STATUSES_IGNORE);
-    );
-    
-
-    BENCH_TIMER_TIMEIT(rem_apply_timer,
-    // Applying rank-local updates we received remotely
-    for (int r=0; r<ctx.world_size; r++){
-        const auto rem_displs = recv_displs[r];
-        for (int i = rem_displs; 
-                i < rem_displs + recv_counts_no_self[r]; ++i) {
-            ZBasisBase::idx_t local_idx;
-            ASSERT_STATE_FOUND("remote",
-                recv_state[i],
-                basis.search(recv_state[i], local_idx)
-            );
-            y[local_idx] += recv_dy[i];
-        }
-    }
-    );
-    
+    } // end batch loop
 
 #ifdef SUBSPACE_ED_BENCHMARK_OPERATIONS
-    for (auto t : timers){
+    for (auto t : timers)
         t->print_summary(ctx.log);
-    }
 #endif
-
 }
-*/
 
 
 
 
 template <RealOrCplx coeff_t, Basis basis_t>
-void MPILazyOpSum<coeff_t, basis_t>::allocate_temporaries() {
-    return; // do nothing
-}
-/*
-    // runs through the current local basis applying op to everything.
-    // We cound how many we want to send to each rank, then exchange synchronously.
-    // We can then resize recv_states_bufs appropriately.
-    send_counts.resize(ctx.world_size);
-    send_displs.resize(ctx.world_size);
+void MPILazyOpSum<coeff_t, basis_t>::allocate_temporaries(int B) {
+    using state_t = ZBasisBase::state_t;
+    int N = ctx.world_size;
+    int N_ops = (int)ops.off_diag_terms.size();
+    batch_size = (B == -1) ? N_ops : B;
 
-    recv_counts.resize(ctx.world_size);
-    recv_displs.resize(ctx.world_size);
+    send_counts.assign(N, 0);
+    recv_counts.resize(N);
+    send_displs.resize(N);
+    recv_displs.resize(N);
 
-    std::fill(send_counts.begin(), send_counts.end(), 0);
-    std::fill(recv_counts.begin(), recv_counts.end(), 0);
-    std::fill(send_displs.begin(), send_displs.end(), 0);
-    std::fill(recv_displs.begin(), recv_displs.end(), 0);
-
-
-    // set up the real send_counts
-    // TODO this should be computable just from known information
+    // Dry-run: count total sends per rank across ALL operators.
+    // applyState(state) modifies state in-place to the flipped state.
     for (ZBasisBase::idx_t il = 0; il < basis.dim(); ++il) {
-        for (auto& [c, op] : ops.off_diag_terms ) {
-            ZBasisBase::state_t state = basis[il];
+        for (const auto& [c, op] : ops.off_diag_terms) {
+            state_t state = basis[il];
             auto sign = op.applyState(state);
             if (sign == 0) continue;
-            
-            auto target_rank = ctx.rank_of_state(state);
-            send_counts[target_rank]++;
+            send_counts[ctx.rank_of_state(state)]++;
         }
     }
 
+    // Exchange counts (int exchange; MPI_Count stored in member for indexing)
+    std::vector<int> sc_int(N), rc_int(N);
+    for (int r = 0; r < N; r++) sc_int[r] = (int)send_counts[r];
+    MPI_Alltoall(sc_int.data(), 1, MPI_INT, rc_int.data(), 1, MPI_INT, MPI_COMM_WORLD);
+    for (int r = 0; r < N; r++) recv_counts[r] = rc_int[r];
 
-    // allocate auxiliary arrays
-
-    MPI_Alltoall(send_counts.data(), 1, get_mpi_type<MPI_Count>(),
-            recv_counts.data(), 1, get_mpi_type<MPI_Count>(), MPI_COMM_WORLD);
-
-    const int total_send =
-        std::accumulate(send_counts.begin(), send_counts.end(), 0);
-
-    const int total_recv =
-        std::accumulate(recv_counts.begin(), recv_counts.end(), 0);
-
-
-    // one past the end for all (spacer needed)
-    for (int r=1; r<ctx.world_size; r++){
-        send_displs[r] = send_counts[r-1] + send_displs[r-1] + 1;
-        recv_displs[r] = recv_counts[r-1] + recv_displs[r-1];
+    // Prefix sums for flat buffer offsets
+    send_displs[0] = recv_displs[0] = 0;
+    for (int r = 1; r < N; r++) {
+        send_displs[r] = send_displs[r-1] + send_counts[r-1];
+        recv_displs[r] = recv_displs[r-1] + recv_counts[r-1];
     }
-    send_state.resize(total_send + ctx.world_size);
-    send_dy.resize(total_send + ctx.world_size);
+    MPI_Count total_send = (N > 0) ? send_displs[N-1] + send_counts[N-1] : 0;
+    MPI_Count total_recv = (N > 0) ? recv_displs[N-1] + recv_counts[N-1] : 0;
 
+    // Overflow guard
+    for (int r = 0; r < N; r++) {
+        if (send_counts[r] > INT_MAX || recv_counts[r] > INT_MAX)
+            throw std::runtime_error("allocate_temporaries: MPI count overflow (exceeds INT_MAX)");
+    }
+
+    send_state.resize(total_send);
+    send_dy.resize(total_send);
     recv_state.resize(total_recv);
     recv_dy.resize(total_recv);
 
-
-
-    // logging
-    ctx.log <<"[alloc] Send Sizes: ";
-    for (auto d : send_counts) ctx.log << d <<", ";
-    ctx.log<<"\n\ttotal:"<<total_send<<std::endl;
-
-    ctx.log <<"[alloc] Send Displacements: ";
-    for (auto d : send_displs) ctx.log << d <<", ";
-    ctx.log<<std::endl;
-
-    // check that things fit into int
-    for (int r = 0; r < ctx.world_size; r++) {
-        if (send_counts[r] > INT_MAX || recv_counts[r] > INT_MAX) {
-            throw std::runtime_error("MPI count overflow: message size exceeds INT_MAX");
-        }
-    }
-
+    constexpr size_t record_bytes = sizeof(state_t) + sizeof(coeff_t);
+    ctx.log << "[alloc r" << ctx.my_rank << "]"
+            << " total_send=" << total_send
+            << " (" << total_send * record_bytes / (1 << 20) << " MiB)"
+            << " total_recv=" << total_recv
+            << " (" << total_recv * record_bytes / (1 << 20) << " MiB)"
+            << " batch_size=" << batch_size << "/" << N_ops << "\n";
 }
-*/
 
 
 // explicit template instantiations: generate symbols to link with

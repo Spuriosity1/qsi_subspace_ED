@@ -57,6 +57,11 @@ int main(int argc, char* argv[]){
         .help("For interp basis: number of high bits of uint64[1] to use as bounds-map key (1-64, default: 64)")
         .default_value(64)
         .scan<'i', int>();
+
+    prog.add_argument("--batch-size")
+        .help("Operators per MPI communication round (-1 = all). Uses pipeline if omitted.")
+        .default_value(-1)
+        .scan<'i', int>();
 //    prog.add_argument("--rebalance")
 //        .default_value(false)
 //        .implicit_value(true);
@@ -171,9 +176,17 @@ int main(int argc, char* argv[]){
 //        basis.exchange_local_states(wisdom, ctx);
 //    }
     ctx.log<<"[allocate temporaries]"<<std::endl;
-    H_mpi.allocate_temporaries();
-    H_fast.allocate_temporaries();
-    H_interp.allocate_temporaries();
+    bool use_batched = prog.is_used("--batch-size");
+    int batch_size   = prog.get<int>("--batch-size");
+    if (use_batched) {
+        H_mpi.allocate_temporaries(batch_size);
+        H_fast.allocate_temporaries(batch_size);
+        H_interp.allocate_temporaries(batch_size);
+    } else {
+        H_mpi.allocate_temporaries();
+        H_fast.allocate_temporaries();
+        H_interp.allocate_temporaries();
+    }
 
     std::vector<double> v_global, v_local, u_global, u1_local, u2_local, u3_local;
     v_global.resize(basis_st.dim());

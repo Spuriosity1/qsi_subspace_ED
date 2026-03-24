@@ -43,8 +43,7 @@ struct MPILazyOpSum {
     explicit MPILazyOpSum(
             const B& local_basis_, const SymbolicOpSum<coeff_t>& ops_,
             MPIctx& context_
-            ) : basis(local_basis_), ops(ops_), ctx(context_),
-    send_dy(ctx.world_size), send_state(ctx.world_size) {
+            ) : basis(local_basis_), ops(ops_), ctx(context_) {
     }
 
     MPILazyOpSum operator=(const MPILazyOpSum& other) = delete;
@@ -57,26 +56,31 @@ struct MPILazyOpSum {
         this->evaluate_add(x, y);
 	}
 
-    // allocates send/receive buffers for MPI alltoall
-    // based on current matrix structure
-    void allocate_temporaries();
+    // allocates send/receive buffers for batched MPI alltoallv.
+    // batch_size: number of operators per communication round (-1 = all).
+    // If not called, evaluate_add falls back to the pipeline implementation.
+    void allocate_temporaries(int batch_size = -1);
+
+    void set_batch_size(int b) { batch_size = b; }
 
     // Does y += A*x, where y[i] and x[i] are both indexed from the start of the local block
-	void evaluate_add(const coeff_t* x, coeff_t* y); 
+	void evaluate_add(const coeff_t* x, coeff_t* y);
 
 protected:
     void evaluate_add_diagonal(const coeff_t* x, coeff_t* y) const;
 //    void evaluate_add_off_diag_sync(const coeff_t* x, coeff_t* y) const;
     void evaluate_add_off_diag_pipeline(const coeff_t* x, coeff_t* y) const;
-//    void evaluate_add_off_diag_batched(const coeff_t* x, coeff_t* y);
+    void evaluate_add_off_diag_batched(const coeff_t* x, coeff_t* y);
 
 	const B& basis;
 	const SymbolicOpSum<coeff_t> ops;
     MPIctx& ctx;
 
-    // metadata
-    std::vector<coeff_t> send_dy; // contiguous buffer
-    std::vector<ZBasisBST::state_t> send_state; 
+    int batch_size = -1; // -1 = all operators in one round
+
+    // flat contiguous buffers; allocated by allocate_temporaries()
+    std::vector<coeff_t> send_dy;
+    std::vector<ZBasisBST::state_t> send_state;
     std::vector<MPI_Count> send_displs;
     std::vector<MPI_Count> send_counts;
 
@@ -101,9 +105,10 @@ private:
 template <RealOrCplx coeff_t, Basis basis_t>
 void MPILazyOpSum<coeff_t, basis_t>::evaluate_add(const coeff_t* x, coeff_t* y) {
     evaluate_add_diagonal(x, y);
-    evaluate_add_off_diag_pipeline(x, y);
-
-    //evaluate_add_off_diag_batched(x, y);
+    if (!send_counts.empty())
+        evaluate_add_off_diag_batched(x, y);
+    else
+        evaluate_add_off_diag_pipeline(x, y);
 }
 
 
