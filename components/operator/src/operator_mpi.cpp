@@ -698,10 +698,10 @@ void MPILazyOpSum<coeff_t, B>::evaluate_add_off_diag_batched(const coeff_t* x, c
     assert(!send_counts.empty() && "allocate_temporaries() must be called first");
 
     using state_t = ZBasisBase::state_t;
-    int N       = ctx.world_size;
-    int my_rank = ctx.my_rank;
-    int N_ops   = (int)ops.off_diag_terms.size();
-    int bs      = (batch_size <= 0) ? N_ops : std::min(batch_size, N_ops);
+    int N        = ctx.world_size;
+    int my_rank  = ctx.my_rank;
+    int64_t dim  = (int64_t)basis.dim();
+    int64_t bs   = (batch_size <= 0) ? dim : std::min((int64_t)batch_size, dim);
 
     Timer loc_apply_timer("[batched local apply]",    my_rank);
     Timer self_update_timer("[batched self update]",  my_rank);
@@ -719,23 +719,18 @@ void MPILazyOpSum<coeff_t, B>::evaluate_add_off_diag_batched(const coeff_t* x, c
     // Worst case = recv_counts total (sized in allocate_temporaries).
     // Threshold: use sort+merge when recv data > 2× local basis size
     // This means we prefer sort+merge when the batch is large enough.
-    const int64_t sort_merge_threshold = 2LL * (int64_t)basis.dim() * (int64_t)sizeof(state_t);
+    const int64_t sort_merge_threshold = 2LL * dim * (int64_t)sizeof(state_t);
 
-    for (int batch_start = 0; batch_start < N_ops; batch_start += bs) {
-        int batch_end = std::min(batch_start + bs, N_ops);
+    for (int64_t state_start = 0; state_start < dim; state_start += bs) {
+        int64_t state_end = std::min(state_start + bs, dim);
 
         // --- LOCAL APPLY PASS ---
         // Reset send cursors to the start of each rank's slot in the flat buffer.
         std::vector<MPI_Count> cursors(send_displs.begin(), send_displs.end());
 
         BENCH_TIMER_TIMEIT(loc_apply_timer,
-        int op_idx = 0;
-        for (const auto& [c, op] : ops.off_diag_terms) {
-            if (op_idx < batch_start) { op_idx++; continue; }
-            if (op_idx >= batch_end)  break;
-            op_idx++;
-
-            for (ZBasisBase::idx_t il = 0; il < basis.dim(); ++il) {
+        for (int64_t il = state_start; il < state_end; ++il) {
+            for (const auto& [c, op] : ops.off_diag_terms) {
                 state_t state = basis[il];
                 auto sign = op.applyState(state);
                 if (sign == 0) continue;
@@ -743,14 +738,8 @@ void MPILazyOpSum<coeff_t, B>::evaluate_add_off_diag_batched(const coeff_t* x, c
                 int r = (int)ctx.rank_of_state(state);
                 coeff_t dy = c * x[il] * (coeff_t)sign;
 
-                if (r == my_rank) {
-                    // Self-contribution: apply immediately (handled below)
-                    send_state[cursors[r]] = state;
-                    send_dy[cursors[r]]    = dy;
-                } else {
-                    send_state[cursors[r]] = state;
-                    send_dy[cursors[r]]    = dy;
-                }
+                send_state[cursors[r]] = state;
+                send_dy[cursors[r]]    = dy;
                 cursors[r]++;
             }
         }
@@ -848,26 +837,37 @@ template <RealOrCplx coeff_t, Basis basis_t>
 void MPILazyOpSum<coeff_t, basis_t>::allocate_temporaries(int B) {
     using state_t = ZBasisBase::state_t;
     int N = ctx.world_size;
-    int N_ops = (int)ops.off_diag_terms.size();
-    batch_size = (B == -1) ? N_ops : B;
+    int64_t local_dim = (int64_t)basis.dim();
+    batch_size = (B <= 0) ? (int)local_dim : std::min(B, (int)local_dim);
 
     send_counts.assign(N, 0);
     recv_counts.resize(N);
     send_displs.resize(N);
     recv_displs.resize(N);
 
-    // Dry-run: count total sends per rank across ALL operators.
+    // Dry-run: find the max per-rank send count for any window of batch_size states.
+    // Buffers only need to hold one batch worth of data, so we size to the worst-case
+    // window rather than the total across all batches.
     // applyState(state) modifies state in-place to the flipped state.
-    for (ZBasisBase::idx_t il = 0; il < basis.dim(); ++il) {
+    std::vector<MPI_Count> window_counts(N, 0);
+    for (int64_t il = 0; il < local_dim; ++il) {
         for (const auto& [c, op] : ops.off_diag_terms) {
             state_t state = basis[il];
             auto sign = op.applyState(state);
             if (sign == 0) continue;
-            send_counts[ctx.rank_of_state(state)]++;
+            window_counts[ctx.rank_of_state(state)]++;
+        }
+        // At the end of each window, record max and reset for next window.
+        if ((il + 1) % batch_size == 0 || il + 1 == local_dim) {
+            for (int r = 0; r < N; r++) {
+                send_counts[r] = std::max(send_counts[r], window_counts[r]);
+                window_counts[r] = 0;
+            }
         }
     }
 
-    // Exchange counts (int exchange; MPI_Count stored in member for indexing)
+    // Exchange max-per-batch send counts so each rank knows the most it will
+    // ever receive from any other rank in a single communication round.
     std::vector<int> sc_int(N), rc_int(N);
     for (int r = 0; r < N; r++) sc_int[r] = (int)send_counts[r];
     MPI_Alltoall(sc_int.data(), 1, MPI_INT, rc_int.data(), 1, MPI_INT, MPI_COMM_WORLD);
@@ -899,7 +899,7 @@ void MPILazyOpSum<coeff_t, basis_t>::allocate_temporaries(int B) {
             << " (" << total_send * record_bytes / (1 << 20) << " MiB)"
             << " total_recv=" << total_recv
             << " (" << total_recv * record_bytes / (1 << 20) << " MiB)"
-            << " batch_size=" << batch_size << "/" << N_ops << "\n";
+            << " batch_size=" << batch_size << "/" << local_dim << " states\n";
 }
 
 

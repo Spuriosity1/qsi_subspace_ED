@@ -57,7 +57,7 @@ struct MPILazyOpSum {
 	}
 
     // allocates send/receive buffers for batched MPI alltoallv.
-    // batch_size: number of operators per communication round (-1 = all).
+    // batch_size: number of local basis states per communication round (-1 = all).
     // If not called, evaluate_add falls back to the pipeline implementation.
     void allocate_temporaries(int batch_size = -1);
 
@@ -76,7 +76,7 @@ protected:
 	const SymbolicOpSum<coeff_t> ops;
     MPIctx& ctx;
 
-    int batch_size = -1; // -1 = all operators in one round
+    int batch_size = -1; // -1 = all states in one round
 
     // flat contiguous buffers; allocated by allocate_temporaries()
     std::vector<coeff_t> send_dy;
