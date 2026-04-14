@@ -217,7 +217,7 @@ endif
 
 
 
-json_dep = dependency('nlohmann_json', required: true)
+json_dep = dependency('nlohmann_json', required: true).as_system()
 
 eigen_dep = dependency('Eigen3', method: 'cmake',  modules: ['Eigen3::Eigen'], required: true).as_system()
 
