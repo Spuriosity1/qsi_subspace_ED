@@ -6,7 +6,6 @@ project('projected_ed', ['cpp', 'c'],
 
 cmake = import('cmake')
 
-# add_project_arguments(['
 add_project_link_arguments(['-pthread','-lstdc++fs', '-lgomp'], language: 'cpp' )
 
 # Compiler flags for 128-bit integer support
@@ -147,7 +146,6 @@ hdf5_root = get_option('hdf5_root')
 mpi_root = get_option('mpi_root')
 
 
-#<<<<<<< HEAD
 #if hdf5_raw_dep.found()
 #
 #  hdf5_is_parallel = false
@@ -180,7 +178,7 @@ mpi_root = get_option('mpi_root')
 #    dependencies: h5_dep_dep
 #    )
 # endif
-#=======
+#
 if mpi_root != ''
   message('Using custom MPI root: ' + mpi_root)
 
