@@ -14,7 +14,8 @@ basis_common_mpi_src = files([
 partition_basis = executable('partition_basis', files('partition_basis.cpp'),
     dependencies: [common_dep, mpi_dep],
     include_directories: basis_inc,
-    cpp_args: target_args
+    cpp_args: target_args,
+    install: true
     )
 
 

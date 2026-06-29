@@ -219,7 +219,14 @@ json_dep = dependency('nlohmann_json', required: true)
 
 eigen_dep = dependency('Eigen3', method: 'cmake',  modules: ['Eigen3::Eigen'], required: true).as_system()
 
-spectra_dep = dependency('spectra', method: 'cmake')
+spectra_dep = dependency('Spectra',
+  method: 'cmake',
+  modules: ['Spectra::Spectra'],
+  required: false
+)
+if not spectra_dep.found()
+  spectra_dep = dependency('spectra', fallback: ['spectra', 'spectra_dep'])
+endif
 
 omp_dep = dependency('OpenMP', required: true)
 
