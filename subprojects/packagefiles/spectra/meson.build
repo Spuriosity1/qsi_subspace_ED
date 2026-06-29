@@ -1,5 +1,5 @@
 project('spectra', 'cpp',
-  version: '0.9.0',
+  version: '1.2.0',
   meson_version: '>= 0.54.0'
 )
 
