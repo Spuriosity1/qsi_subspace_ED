@@ -99,9 +99,9 @@ elif blas_backend == 'mkl'
       error('MKL requested but MKLROOT not set')
     endif
   endif
-  blas_dep = mkl_dep
-  lapack_dep = mkl_dep
-  
+  blas_dep = declare_dependency(compile_args: ['-DUSE_MKL'], dependencies: [mkl_dep])
+  lapack_dep = blas_dep
+
 elif blas_backend == 'openblas'
   # OpenBLAS (usually has cblas built-in)
   blas_dep = dependency('openblas', required: true)
