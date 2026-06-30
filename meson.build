@@ -6,7 +6,6 @@ project('projected_ed', ['cpp', 'c'],
 
 cmake = import('cmake')
 
-# add_project_arguments(['
 add_project_link_arguments(['-pthread','-lstdc++fs', '-lgomp'], language: 'cpp' )
 
 # Compiler flags for 128-bit integer support
@@ -100,9 +99,9 @@ elif blas_backend == 'mkl'
       error('MKL requested but MKLROOT not set')
     endif
   endif
-  blas_dep = mkl_dep
-  lapack_dep = mkl_dep
-  
+  blas_dep = declare_dependency(compile_args: ['-DUSE_MKL'], dependencies: [mkl_dep])
+  lapack_dep = blas_dep
+
 elif blas_backend == 'openblas'
   # OpenBLAS (usually has cblas built-in)
   blas_dep = dependency('openblas', required: true)
@@ -147,7 +146,6 @@ hdf5_root = get_option('hdf5_root')
 mpi_root = get_option('mpi_root')
 
 
-#<<<<<<< HEAD
 #if hdf5_raw_dep.found()
 #
 #  hdf5_is_parallel = false
@@ -180,7 +178,7 @@ mpi_root = get_option('mpi_root')
 #    dependencies: h5_dep_dep
 #    )
 # endif
-#=======
+#
 if mpi_root != ''
   message('Using custom MPI root: ' + mpi_root)
 
@@ -221,7 +219,14 @@ json_dep = dependency('nlohmann_json', required: true)
 
 eigen_dep = dependency('Eigen3', method: 'cmake',  modules: ['Eigen3::Eigen'], required: true).as_system()
 
-spectra_dep = dependency('spectra', method: 'cmake')
+spectra_dep = dependency('Spectra',
+  method: 'cmake',
+  modules: ['Spectra::Spectra'],
+  required: false
+)
+if not spectra_dep.found()
+  spectra_dep = dependency('spectra', fallback: ['spectra', 'spectra_dep'])
+endif
 
 omp_dep = dependency('OpenMP', required: true)
 

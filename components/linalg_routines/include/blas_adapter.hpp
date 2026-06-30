@@ -6,6 +6,8 @@
 #ifdef USE_APPLE_ACCELERATE
 	#include <version>
 	#include <Accelerate/Accelerate.h>
+#elif defined(USE_MKL)
+	#include <mkl_cblas.h>
 #else
 extern "C" {
 	#include <cblas.h>
