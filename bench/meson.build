@@ -1,5 +1,8 @@
 
 # Benchmark test (if you want performance testing)
+
+bench_bindir=join_paths(get_option('bindir'), 'bench')
+
 benchmark_uint128 = executable('benchmark_uint128',
                               'benchmark_uint128.cpp',
                               include_directories: common_inc,
@@ -10,7 +13,8 @@ bench_apply = executable('bench_apply',
   include_directories: [inc],
   dependencies: [operator_dep, linalg_routines_dep, common_dep],
   link_with: expectation_eval,
-  install: false
+  install: true,
+  install_dir: bench_bindir
   )
 
 
@@ -19,7 +23,8 @@ bench_permutations = executable('bench_permutations',
   include_directories: [inc],
   dependencies: [common_dep],
   cpp_args: target_args,
-  install: false
+  install: true,
+  install_dir: bench_bindir
   )
 
 
@@ -28,7 +33,8 @@ bench_apply_mpi = executable('bench_apply_mpi',
   include_directories: [inc, operator_inc],
   dependencies: [common_dep, eigen_dep,  linalg_routines_dep, mpi_dep],
   link_with: [bench_operator_mpi_lib],
-  install: false
+  install: true,
+  install_dir: bench_bindir
   )
 
 bench_apply_mpi = executable('bench_apply_mpi_omp',
@@ -36,7 +42,8 @@ bench_apply_mpi = executable('bench_apply_mpi_omp',
   include_directories: [inc, operator_inc],
   dependencies: [common_dep, eigen_dep, linalg_routines_dep, mpi_dep, omp_dep],
   link_with: [bench_operator_mpi_lib],
-  install: false
+  install: true,
+  install_dir: bench_bindir
   )
   
 
@@ -45,7 +52,8 @@ bench_lanczos = executable('bench_lanczos',
   include_directories: [inc],
   dependencies: [operator_dep, linalg_routines_dep, common_dep],
   link_with: expectation_eval,
-  install: false
+  install: true,
+  install_dir: bench_bindir
   )
 
 #bench_lanczos_mpi = executable('bench_lanczos_mpi',

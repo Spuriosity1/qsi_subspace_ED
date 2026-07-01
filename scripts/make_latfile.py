@@ -1,3 +1,5 @@
+#!/bin/env python3
+
 from lattice import Lattice
 import pyrochlore
 import sys

@@ -1,0 +1,9 @@
+[wrap-file]
+directory = spectra-1.2.0
+source_url = https://github.com/yixuan/spectra/archive/refs/tags/v1.2.0.tar.gz
+source_filename = spectra-1.2.0.tar.gz
+source_hash = fdfccacba1c77d9b4ffefae7258c760c99e3c8a2823ca87ea5b11a50d297a73b
+patch_directory = spectra
+
+[provide]
+spectra = spectra_dep
