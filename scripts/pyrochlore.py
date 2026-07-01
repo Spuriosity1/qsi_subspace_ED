@@ -126,6 +126,7 @@ def get_ringflips(lat: lattice.Lattice, sl=None, include_partial=False):
             spin_members = []
             signs = []
             sign = 1
+            
             for x in plaqt[mu]:
                 sign *= -1
                 J = lat.as_linear_idx(plaq_pos + x)
@@ -133,11 +134,22 @@ def get_ringflips(lat: lattice.Lattice, sl=None, include_partial=False):
                     spin_members.append(J)
                     signs.append(sign)
 
+
+
             rr = Ring(plaq_pos, mu, spin_members, signs)
             if include_partial:
                 retval.append(rr)
             elif len(rr.members) == 6:
                 retval.append(rr)
+
+    for ring_id, ring in enumerate(retval):
+        for spin_id in ring.member_spin_idx:
+            a=lat.atoms[spin_id]
+            if hasattr(a, "member_ring_idx"):
+                a.member_ring_idx.append(ring_id)
+            else:
+                a.member_ring_idx = [ring_id]
+
 
     return retval
 

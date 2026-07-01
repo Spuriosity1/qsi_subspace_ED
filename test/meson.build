@@ -126,6 +126,11 @@ test('uint128_edge_cases', test_uint128,
      suite : ['unit', 'edge_cases'])
 
 
+test('test_permutations', test_permutations,
+  timeout: 30,
+  suite: ['unit', 'permute']
+  )
+
 test('test_lanczos', test_lanczos)
 #test('Krylov operations', test_ftlm_ops)
 
