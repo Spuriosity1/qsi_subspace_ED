@@ -21,5 +21,6 @@ subprojects/mr3smp
 subprojects/pthash
 subprojects/nlohmann_json-*
 subprojects/packagecache
+subprojects/spectra-*
 test/lattice_files/*.basis.csv
 test/lattice_files/*.basis.h5
