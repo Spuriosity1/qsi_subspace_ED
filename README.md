@@ -15,7 +15,35 @@ git clone https://github.com/Spuriosity1/qsi_subspace_ED.git
 cd qsi_subspace_ED
 meson setup build --prefix `pwd` # or your choice of install location
 ninja -C build install
-ninja -C build test # optional
+meson test -C build # optional
+```
+
+Note: the `test_apply_mpi` integration test is only registered when the
+external `../lattice_files` directory (with pre-generated bases) exists next
+to the repository, as on the HPC.
+
+## Repository layout
+
+```
+components/
+  common/           Uint128 bit tools, basis HDF5/CSV IO, lattice graph
+                    parsing (tetra_graph_io), MPI context + state->rank hash
+  build_basis/      ice-state enumeration (DFS over constraint tree, serial
+                    and MPI), shard sorting/merging, basis partitioning
+  operator/         symbolic PMR operators, basis search structures
+                    (ZBasisBST / ZBasisInterp / ZBasisBSTFast), matrix-free
+                    apply: LazyOpSum (operator_matrix) and MPILazyOpSum
+                    (operator_mpi: pipeline + batched alltoallv paths)
+  linalg_routines/  Lanczos (serial and MPI), BLAS/LAPACK adapters
+include/            app-level glue headers (hamiltonian_setup, CLI bits,
+                    physics/ ring-exchange definitions)
+src/                application executables (meson targets live here)
+test/               unit + integration tests (meson test)
+bench/              performance benchmarks (-Dbuild_benchmarks=true)
+scripts/            python drivers, plotting, lattice-file generation
+driver/, hpc_driver/  batch/SLURM job scripts
+jl/                 Julia post-processing (FTLM thermodynamics)
+vendor/, subprojects/ third-party headers and meson wraps
 ```
 
 ### Benchmarking
@@ -37,16 +65,13 @@ The pipeline is as follows:
 ![](https://raw.githubusercontent.com/Spuriosity1/qsi_subspace_ED/refs/heads/main/projected%20ED.drawio.svg)
 
 
-Executables:
-```
-build_hamiltonian
-diag_DOQSI_ham
-eval_dsf
-eval_observables
-gen_projected_basis
-gen_spinon_basis
-partition_basis
-```
+Executables (basis generation): `gen_spinon_basis`, `sbsearch`, `sbsearch_mpi`,
+`sort_shard`, `merge_shards`, `merge_sorted_shards`, `partition_shard`,
+`partition_basis`, `polyring_basis`, `polyring_basis_mpi`.
+
+Executables (diagonalisation / evaluation): `diag_DOQSI_ham`,
+`diag_DOQSI_ham_mpi`, `eval_observables`, `eval_observables_mpi`,
+`ring_normed`.
 
 
 
@@ -114,26 +139,6 @@ Optional arguments:
 
 
 
-
-### `build_hamiltonian` 
-```
-Usage: build_ham [--help] [--version] [--sector VAR] [[--B VAR...]|[--g VAR...]] [--Jpm VAR] --output_dir VAR [--n_spinons VAR] lattice_file
-
-Positional arguments:
-  lattice_file      
-
-Optional arguments:
-  -h, --help        shows help message and exits 
-  -v, --version     prints version information and exits 
-  -s, --sector      
-  --B               magnetic field, units of Jzz [nargs: 3] 
-  --g               raw ring exchange, units of Jzz [nargs: 4] 
-  --Jpm             Jom, units of Jzz 
-  -o, --output_dir  output directory [required]
-  --n_spinons       [nargs=0..1] [default: 0]
-```
-
-Thsi utility generates a ham.mtx file in the sparse MatrixMarket format, to be used by the Julia FTLM code.
 
 ## Basic description of the algorithm
 The C++ part is designed to efficiently enumerate ice states. 

@@ -68,7 +68,6 @@ struct MPILazyOpSum {
 
 protected:
     void evaluate_add_diagonal(const coeff_t* x, coeff_t* y) const;
-//    void evaluate_add_off_diag_sync(const coeff_t* x, coeff_t* y) const;
     void evaluate_add_off_diag_pipeline(const coeff_t* x, coeff_t* y) const;
     void evaluate_add_off_diag_batched(const coeff_t* x, coeff_t* y);
 
@@ -88,17 +87,6 @@ protected:
     std::vector<ZBasisBST::state_t> recv_state;
     std::vector<MPI_Count> recv_displs;
     std::vector<MPI_Count> recv_counts;
-private:
-    static constexpr double APPLY_TOL=1e-15;
-
-    void inplace_bucket_sort(std::vector<ZBasisBase::state_t>& states,
-        std::vector<coeff_t>& c,
-        std::vector<int>& bucket_sizes,
-        std::vector<int>& bucket_starts
-        ) const;
-
-//    void rebalance_work(std::vector<int>& cost_per_rank);
-
 };
 
 

@@ -243,84 +243,6 @@ void ZBasisMPI<B>::tfer_states_to_correct_ranks(MPIHashContext& ctx){
             static_cast<ZBasisBase::idx_t>(0));
 }
 
-/*
-MPIctx ZBasisBST_MPI::load_from_file(const fs::path& bfile, const std::string& dataset){
-     // MPI setup
-    MPIctx ctx;
-//    int rank = ctx.world_rank;
-//    int size = ctx.world_size;
-
-    std::cerr << "Loading basis from file " << bfile <<"\n";
-    if (bfile.stem().extension() == ".partitioned"){
-        assert(bfile.extension() == ".h5");
-        states = read_basis_hdf5(ctx, bfile, dataset.c_str());
-    } else if (bfile.extension() == ".h5"){
-        assert(dataset=="basis");
-        states = read_basis_hdf5(ctx, bfile, "basis"); 
-    } else {
-        throw std::runtime_error(
-                "Bad basis format: file must end with .csv or .h5");
-    }
-
-    std::cerr << "Done!" <<"\n";
-    return ctx;
-}
-*/
-
-//void MPI_ZBasisBST::load_state(std::vector<double>& psi, const fs::path& eig_file){
-//    
-//}
-
-
-template<RealOrCplx coeff_t, Basis B >
-void MPILazyOpSum<coeff_t, B>::inplace_bucket_sort(std::vector<ZBasisBase::state_t>& states,
-        std::vector<coeff_t>& c,
-        std::vector<int>& bucket_sizes,
-        std::vector<int>& bucket_starts
-        ) const {
-    size_t n = states.size();
-    assert(c.size() == n);
-
-    bucket_sizes.resize(ctx.world_size);
-    bucket_starts.resize(ctx.world_size);
-    std::fill(bucket_sizes.begin(), bucket_sizes.end(), 0);
-
-
-     // Step 1: Count elements per bucket
-//    std::vector<size_t> bucket_sizes(context.world_size, 0);
-    for (const auto& s : states) {
-        ++bucket_sizes[ctx.rank_of_state(s)];
-    }
-
-    // Step 2: Compute bucket start indices
-//    std::vector<size_t> bucket_starts(context.world_size, 0);
-    bucket_starts[0]=0;
-    for (int i = 1; i < ctx.world_size; ++i) {
-        bucket_starts[i] = bucket_starts[i - 1] + bucket_sizes[i - 1];
-    }
-
-     // Step 3: Rearrange
-    std::vector<coeff_t> _scratch_coeff;
-    std::vector<ZBasisBase::state_t> _scratch_states;
-    _scratch_states.resize(n);
-    _scratch_coeff.resize(n);
-    std::vector<int> bucket_next = bucket_starts; // Next free slot in each bucket
-
-     for (size_t i = 0; i < n; ++i) {
-        int target_bucket = ctx.rank_of_state(states[i]);
-        size_t target_index = bucket_next[target_bucket]++;
-        _scratch_states[target_index] = states[i];
-        _scratch_coeff[target_index] = c[i];
-    }
-
-     states = std::move(_scratch_states);
-     c = std::move(_scratch_coeff);
-
-}
-
-
-
-
 template <RealOrCplx coeff_t, Basis B>
 void MPILazyOpSum<coeff_t, B>::evaluate_add_diagonal(const coeff_t* x, coeff_t* y) const {
     for (const auto& term : ops.diagonal_terms) {
@@ -386,10 +308,8 @@ void MPILazyOpSum<coeff_t, B>::evaluate_add_off_diag_pipeline(const coeff_t* x, 
     Timer countx_wait_timer_2("[count exchange wait 2]", ctx.my_rank);
     Timer remx_wait_timer("[remote exchange wait]", ctx.my_rank);
 
-    std::vector<const Timer*> timers{&loc_apply_timer, &loc_up_timer, &rem_up_timer, &countx_wait_timer, &remx_wait_timer};
-
-    std::vector<std::chrono::duration<double, std::milli>> loc_apply_times;
-
+    std::vector<const Timer*> timers{&loc_apply_timer, &loc_up_timer, &rem_up_timer,
+        &countx_wait_timer, &countx_wait_timer_2, &remx_wait_timer};
 
     OperatorCommState prev_op_comm;
     OperatorCommState curr_op_comm;
@@ -399,6 +319,61 @@ void MPILazyOpSum<coeff_t, B>::evaluate_add_off_diag_pipeline(const coeff_t* x, 
     curr_op_comm.resize(ctx.world_size);
 
     bool has_prev_op = false;
+
+    // Post receives for operator prev_index's data into comm, wait for all of
+    // its communication to finish, then apply the received updates to y.
+    // Called once per iteration for the previous operator, and once after the
+    // loop for the final operator.
+    auto process_receives = [&](OperatorCommState& comm, int prev_index) {
+        BENCH_TIMER_TIMEIT(countx_wait_timer,
+        // Wait for the count exchange if not done
+        // (should already be complete; this is just for safety)
+        if (!comm.count_exchange_done) {
+            MPI_Wait(&comm.count_exchange_req, MPI_STATUS_IGNORE);
+            comm.count_exchange_done = true;
+        }
+        )
+
+        DEBUG_PRINT_VEC(">> recv ", prev_index, comm.recvcounts, ctx)
+
+        // Every rank sends to every rank: recv buf per source is just recvcounts[source]
+        for (int source = 0; source < ctx.world_size; ++source) {
+            if (source == ctx.my_rank) continue;
+            int cnt = comm.recvcounts[source];
+            comm.recv_states_bufs[source].resize(cnt);
+            comm.recv_dy_bufs[source].resize(cnt);
+            if (cnt == 0) continue;
+
+            comm.requests.push_back(MPI_Request{});
+            MPI_Irecv(comm.recv_states_bufs[source].data(),
+                     cnt, get_mpi_type<ZBasisBase::state_t>(),
+                     source, 10*prev_index + 1, MPI_COMM_WORLD, &comm.requests.back());
+
+            comm.requests.push_back(MPI_Request{});
+            MPI_Irecv(comm.recv_dy_bufs[source].data(),
+                     cnt, get_mpi_type<coeff_t>(),
+                     source, 10*prev_index + 2, MPI_COMM_WORLD, &comm.requests.back());
+        }
+
+        BENCH_TIMER_TIMEIT(remx_wait_timer,
+        if (!comm.requests.empty()) {
+            MPI_Waitall(comm.requests.size(), comm.requests.data(),
+                       MPI_STATUSES_IGNORE);
+        }
+        )
+
+        BENCH_TIMER_TIMEIT(rem_up_timer,
+        for (int source = 0; source < ctx.world_size; ++source) {
+            if (source == ctx.my_rank) continue;
+            for (size_t j = 0; j < comm.recv_states_bufs[source].size(); ++j) {
+                ZBasisBase::idx_t local_idx;
+                ASSERT_STATE_FOUND("remote", comm.recv_states_bufs[source][j],
+                        basis.search(comm.recv_states_bufs[source][j], local_idx));
+                y[local_idx] += comm.recv_dy_bufs[source][j];
+            }
+        }
+        )
+    };
 
     int op_index = 0;
     for ( const auto& [c, op] : ops.off_diag_terms ){
@@ -454,57 +429,7 @@ void MPILazyOpSum<coeff_t, B>::evaluate_add_off_diag_pipeline(const coeff_t* x, 
 
         // === PROCESS PREVIOUS OPERATOR'S RECEIVES ===
         if (has_prev_op) {
-            BENCH_TIMER_TIMEIT(countx_wait_timer,
-            // Wait for previous operator's count exchange if not done
-            // this if statement is probably always true, it's just for safety
-            if (!prev_op_comm.count_exchange_done) { 
-                MPI_Wait(&prev_op_comm.count_exchange_req, MPI_STATUS_IGNORE);
-                prev_op_comm.count_exchange_done = true;
-            }
-            )
-
-            DEBUG_PRINT_VEC(">> recv ", op_index-1, prev_op_comm.recvcounts, ctx)
-
-            // Every rank sends to every rank: recv buf per source is just recvcounts[source]
-            for (int source = 0; source < ctx.world_size; ++source) {
-                if (source == ctx.my_rank) continue;
-                int cnt = prev_op_comm.recvcounts[source];
-                prev_op_comm.recv_states_bufs[source].resize(cnt);
-                prev_op_comm.recv_dy_bufs[source].resize(cnt);
-                if (cnt == 0) continue;
-
-                prev_op_comm.requests.push_back(MPI_Request{});
-                MPI_Irecv(prev_op_comm.recv_states_bufs[source].data(), 
-                         cnt, get_mpi_type<ZBasisBase::state_t>(),
-                         source, 10*(op_index-1) +1, MPI_COMM_WORLD, &prev_op_comm.requests.back());
-                
-                prev_op_comm.requests.push_back(MPI_Request{});
-                MPI_Irecv(prev_op_comm.recv_dy_bufs[source].data(),
-                         cnt, get_mpi_type<coeff_t>(),
-                         source, 10*(op_index-1) +2, MPI_COMM_WORLD, &prev_op_comm.requests.back());
-            }
-            
-            
-            BENCH_TIMER_TIMEIT(remx_wait_timer,
-            // Wait for previous operator's communication to complete
-            if (!prev_op_comm.requests.empty()) {
-                MPI_Waitall(prev_op_comm.requests.size(), prev_op_comm.requests.data(), 
-                           MPI_STATUSES_IGNORE);
-            }
-            )
-            
-            BENCH_TIMER_TIMEIT(rem_up_timer,
-            // Process previous operator's received updates
-            for (int source = 0; source < ctx.world_size; ++source) {
-                if (source == ctx.my_rank) continue;
-                for (size_t j = 0; j < prev_op_comm.recv_states_bufs[source].size(); ++j) {
-                    ZBasisBase::idx_t local_idx;
-                    ASSERT_STATE_FOUND("remote", prev_op_comm.recv_states_bufs[source][j],
-                            basis.search(prev_op_comm.recv_states_bufs[source][j], local_idx));
-                    y[local_idx] += prev_op_comm.recv_dy_bufs[source][j];
-                }
-            }
-            )
+            process_receives(prev_op_comm, op_index - 1);
         }
 
         // === DATA SENDS FOR CURRENT OPERATOR ===
@@ -543,57 +468,7 @@ void MPILazyOpSum<coeff_t, B>::evaluate_add_off_diag_pipeline(const coeff_t* x, 
 
     // === PROCESS FINAL OPERATOR'S RECEIVES ===
     if (has_prev_op) {
-        BENCH_TIMER_TIMEIT(countx_wait_timer,
-        // Wait for previous operator's count exchange if not done
-        // this if statement is probably always true, it's just for safety
-        if (!prev_op_comm.count_exchange_done) { 
-            MPI_Wait(&prev_op_comm.count_exchange_req, MPI_STATUS_IGNORE);
-            prev_op_comm.count_exchange_done = true;
-        }
-        )
-
-        DEBUG_PRINT_VEC(">> recv ", op_index-1, prev_op_comm.recvcounts, ctx)
-
-        // Every rank sends to every rank: recv buf per source is just recvcounts[source]
-        for (int source = 0; source < ctx.world_size; ++source) {
-            if (source == ctx.my_rank) continue;
-            int cnt = prev_op_comm.recvcounts[source];
-            prev_op_comm.recv_states_bufs[source].resize(cnt);
-            prev_op_comm.recv_dy_bufs[source].resize(cnt);
-            if (cnt == 0) continue;
-
-            prev_op_comm.requests.push_back(MPI_Request{});
-            MPI_Irecv(prev_op_comm.recv_states_bufs[source].data(), 
-                     cnt, get_mpi_type<ZBasisBase::state_t>(),
-                     source, 10*(op_index-1) +1, MPI_COMM_WORLD, &prev_op_comm.requests.back());
-            
-            prev_op_comm.requests.push_back(MPI_Request{});
-            MPI_Irecv(prev_op_comm.recv_dy_bufs[source].data(),
-                     cnt, get_mpi_type<coeff_t>(),
-                     source, 10*(op_index-1) +2, MPI_COMM_WORLD, &prev_op_comm.requests.back());
-        }
-        
-        
-        BENCH_TIMER_TIMEIT(remx_wait_timer,
-        // Wait for previous operator's communication to complete
-        if (!prev_op_comm.requests.empty()) {
-            MPI_Waitall(prev_op_comm.requests.size(), prev_op_comm.requests.data(), 
-                       MPI_STATUSES_IGNORE);
-        }
-        )
-        
-        BENCH_TIMER_TIMEIT(rem_up_timer,
-        // Process previous operator's received updates
-        for (int source = 0; source < ctx.world_size; ++source) {
-            if (source == ctx.my_rank) continue;
-            for (size_t j = 0; j < prev_op_comm.recv_states_bufs[source].size(); ++j) {
-                ZBasisBase::idx_t local_idx;
-                ASSERT_STATE_FOUND("remote", prev_op_comm.recv_states_bufs[source][j],
-                        basis.search(prev_op_comm.recv_states_bufs[source][j], local_idx));
-                y[local_idx] += prev_op_comm.recv_dy_bufs[source][j];
-            }
-        }
-        )
+        process_receives(prev_op_comm, op_index - 1);
     }
 
 

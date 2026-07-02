@@ -14,15 +14,11 @@
 #define EIGEN_DISABLE_NEON
 #endif
 
-//#include <pthash.hpp>
-
 #include <basis_io.hpp>
 #include <filesystem> // C++17
 #include <unordered_map>
-#include "operator.hpp"
 #include <algorithm>
 
-					  
 namespace fs = std::filesystem;
 
 
@@ -64,54 +60,7 @@ opstring: %zu, spin_ids: %zu", opstring.size(), spin_ids.size());
 	}
 };
 
-//
-//struct UInt128map {
-//	using state_t = Uint128; // type which stores the computational basis state
-//	using idx_t = uint64_t;  // the type to use for the indices themselves
-//                            
-//    // strategy: Use a configurable num. of MSB to place concrete brackets
-//    UInt128map(){};
-//    
-//    void initialise(const std::vector<state_t>& states, int n_spins, int num_radix=10);
-//
-//protected:
-//    int n_spins; // the index of the highest set bit in states
-//                 // e.g. 100100 -> 5, as in (psi >> 5) & 0x1
-//    int n_radix;
-//    
-//    // Given psi, define a topl-level index a = (psi.uin64[1] & hi_mask) >> hi_shift
-//    // bounds[] gives 
-//    // such that psi (if present) is in [states[a], states[b]).
-//    std::vector<idx_t> bounds;
-//
-//    int hi_shift;
-//    uint64_t hi_mask;
-//
-//
-//    void initialise_lt64(const std::vector<state_t>& states);
-//    void initialise_gt64(const std::vector<state_t>& states);
-//};
-//
-
 struct SymbolicPMROperator;
-
-/*
-struct cust_xxhash_128 {
-    typedef pthash::hash128 hash_type;
-
-    static inline pthash::hash128 hash(const Uint128& val, uint64_t seed) {
-        return XXH128(reinterpret_cast<char const*>(&val), sizeof(val), seed);
-        //return pthash::hash128(val.uint64[0], val.uint64[1]);
-    }
-};
-
-
-typedef pthash::dense_partitioned_phf<cust_xxhash_128,    // base hasher
-                              pthash::opt_bucketer,  // bucketer
-                              pthash::R_int,         // encoder type
-                              true>          // minimal
-    pthash_type;
-*/
 
 template<typename coeff_t>
 struct SymbolicOpSum;

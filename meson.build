@@ -145,40 +145,6 @@ message('Using BLAS backend: @0@'.format(blas_backend))
 hdf5_root = get_option('hdf5_root')
 mpi_root = get_option('mpi_root')
 
-
-#if hdf5_raw_dep.found()
-#
-#  hdf5_is_parallel = false
-#  # Check if h5pcc exists and supports parallel
-#  
-#  # Check for parallel support
-#  cpp = meson.get_compiler('cpp')
-#  parallel_test = '''
-#  #include <H5pubconf.h>
-#  #ifndef H5_HAVE_PARALLEL
-#  #error "No parallel"
-#  #endif
-#  int main() { return 0;
-#    }
-#  '''
-#
-#  hdf5_is_parallel = cpp.compiles(parallel_test, 
-#    dependencies: hdf5_raw_dep,
-#    name: 'HDF5 parallel support')
-#
-#  h5_dep_dep = [hdf5_raw_dep]
-#  if hdf5_is_parallel
-#    message('HDF5 has parallel support')
-#    h5_dep_dep += mpi_dep
-#  else
-#    error('HDF5 does not have parallel support')
-#  endif
-#
-#  hdf5_dep = declare_dependency(
-#    dependencies: h5_dep_dep
-#    )
-# endif
-#
 if mpi_root != ''
   message('Using custom MPI root: ' + mpi_root)
 
@@ -228,8 +194,6 @@ if not spectra_dep.found()
   spectra_dep = dependency('spectra', fallback: ['spectra', 'spectra_dep'])
 endif
 
-omp_dep = dependency('OpenMP', required: true)
-
 
 cmake_opts = cmake.subproject_options()
 cmake_opts.add_cmake_defines({
@@ -252,96 +216,6 @@ g_deps = [
 
 subdir('components')
 subdir('src')
-
-
-polyring_basis = executable('polyring_basis', files('src/polyring_basis.cpp'), 
-  dependencies: [common_dep, eigen_dep, operator_dep],
-  include_directories:basis_inc,
-  cpp_args: target_args,
-  install: true
-  )
-
-polyring_basis_mpi = executable('polyring_basis_mpi', files('src/polyring_basis_mpi.cpp'), 
-  dependencies: [common_dep, eigen_dep, operator_dep, mpi_dep],
-  include_directories:basis_inc,
-  cpp_args: target_args,
-  install: true
-  )
-
-expectation_eval = static_library('expectation_eval', 'src/expectation_eval.cpp',
-  include_directories: inc,
-  dependencies: [operator_dep, linalg_routines_dep, g_deps])
-
-
-diag_DOQSI_ham = executable('diag_DOQSI_ham',
-  files(['src/diag_DOQSI_ham.cpp']),
-  dependencies: [g_deps, eigen_dep, operator_dep, linalg_routines_dep, spectra_dep],
-  include_directories: inc,
-  link_with: expectation_eval,
-  cpp_args: target_args,
-  install: true
-  )
-
-diag_DOQSI_ham_mpi = executable('diag_DOQSI_ham_mpi',
-  files(['src/diag_DOQSI_ham_mpi.cpp']),
-  dependencies: [g_deps, eigen_dep, operator_mpi_dep, linalg_routines_mpi_dep],
-  include_directories: inc,
-  link_with: [expectation_eval],
-  cpp_args: target_args,
-  install: true
-  )
-
-
-#build_hamiltonian = executable('build_hamiltonian',
-#  files(['src/build_hamiltonian.cpp', 'src/expectation_eval.cpp']),
-#  dependencies: [g_deps, eigen_dep, spectra_dep],
-#  include_directories: inc,
-#  link_with: expectation_eval,
-#  cpp_args: target_args
-#  )
-
-#ftlm_DOQSI_ham = executable('ftlm_DOQSI_ham',
-#  files(['src/ftlm_DOQSI_ham.cpp', 'src/expectation_eval.cpp','src/ftlm.cpp']),
-#  dependencies: [g_deps, eigen_dep, spectra_dep],
-#  include_directories: inc,
-#  cpp_args: target_args
-#  )
-
-
-eval_observables = executable('eval_observables',
-  files(['src/eval_observables.cpp', 'src/expectation_eval.cpp']),
-  dependencies: [g_deps, eigen_dep, omp_dep, operator_dep, linalg_routines_dep, spectra_dep],
-  include_directories: inc,
-  link_with: expectation_eval,
-  cpp_args: target_args
-  )
-
-ring_normed = executable('ring_normed',
-  files(['src/ring_normed.cpp', 'src/expectation_eval.cpp']),
-  dependencies: [g_deps, eigen_dep, omp_dep, operator_dep, linalg_routines_dep, spectra_dep],
-  include_directories: inc,
-  link_with: expectation_eval,
-  cpp_args: target_args
-  )
-
-
-eval_observables_mpi = executable('eval_observables_mpi',
-  files(['src/eval_observables_mpi.cpp', 'src/expectation_eval.cpp']),
-  dependencies: [g_deps, eigen_dep, omp_dep, operator_mpi_dep, linalg_routines_dep],
-  include_directories: inc,
-  link_with: expectation_eval,
-  cpp_args: target_args
-  )
-#
-#
-#eval_dsf = executable('eval_dsf',
-#  files(['src/eval_dsf.cpp', 'src/expectation_eval.cpp']),
-#  dependencies: [g_deps, eigen_dep, spectra_dep],
-#  include_directories: inc,
-#  link_with: expectation_eval,
-#  cpp_args: target_args
-#  )
-
 
 if get_option('build_tests')
   subdir('test')

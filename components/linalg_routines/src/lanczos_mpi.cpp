@@ -98,11 +98,17 @@ Result lanczos_iterate(ApplyFn evaluate_add,
 
 
     for (size_t j = 0; j < settings.max_iterations; j++) {
-       // optional accumulation of Ritz combination
-        if (eigvec && ritz && j < (size_t)ritz->size()) {
-            axpy(*eigvec, v, (*ritz)[j]); // eigvec += ritz[j] * v
-        } 
-        
+       // optional accumulation of Ritz combination (eigenvector pass)
+        if (eigvec && ritz) {
+            if (j < (size_t)ritz->size()) {
+                axpy(*eigvec, v, (*ritz)[j]); // eigvec += ritz[j] * v
+            } else {
+                // all Ritz coefficients consumed: reconstruction complete
+                retval.eigvec_converged = true;
+                break;
+            }
+        }
+
         if (j > 0) {
             // u = - beta_{j-1} * v_{j-1} (note: after swap, u holds v_{j-1})
             //sub(u, v, beta);
@@ -144,7 +150,7 @@ Result lanczos_iterate(ApplyFn evaluate_add,
         betas.push_back(beta);
 
          // Convergence test: compute current eigenvalue estimate
-        if (j >= settings.min_iterations) {
+        if (!ritz && j >= settings.min_iterations) {
             if (settings.ctx.my_rank ==0) {
                 check_lanczos_convergence<_S>(alphas, betas, eigval, j, settings, retval);
                 if (settings.verbosity > 0) {
@@ -287,9 +293,15 @@ Result lanczos_iterate_checkpoint(ApplyFn evaluate_add,
             return retval;
         }
         
-        // Optional accumulation of Ritz combination
-        if (eigvec && ritz && j < (size_t)ritz->size()) {
-            axpy(*eigvec, v, (*ritz)[j]);
+        // Optional accumulation of Ritz combination (eigenvector pass)
+        if (eigvec && ritz) {
+            if (j < (size_t)ritz->size()) {
+                axpy(*eigvec, v, (*ritz)[j]);
+            } else {
+                // all Ritz coefficients consumed: reconstruction complete
+                retval.eigvec_converged = true;
+                break;
+            }
         }
         
         if (j > 0) {
@@ -330,7 +342,7 @@ Result lanczos_iterate_checkpoint(ApplyFn evaluate_add,
         betas.push_back(beta);
 
         // Convergence check
-        if (j >= settings.min_iterations) {
+        if (!ritz && j >= settings.min_iterations) {
             if (settings.ctx.my_rank == 0) {
                 check_lanczos_convergence<_S>(alphas, betas, eigval, j, settings, retval);
                 if (settings.verbosity > 0) {
@@ -346,7 +358,6 @@ Result lanczos_iterate_checkpoint(ApplyFn evaluate_add,
             retval.eigval_converged = (converged_flag == 1);
 
             if (retval.eigval_converged) {
-                if (ritz) retval.eigvec_converged = true;
                 break;
             }
         }
@@ -416,10 +427,15 @@ Result eigval0_impl(ApplyFn apply_add, double& eigval,
     // Second pass: reconstruct eigenvector
     // ----------------------------
     std::vector<_S> evector(dim);
-    
-    res = lanczos_iterate(apply_add, v, alphas, betas, settings,
+
+    Result res2 = lanczos_iterate(apply_add, v, alphas, betas, settings,
             &ritz, &evector
             );
+    // Keep the eigenvalue pass's convergence report; take the
+    // eigenvector-specific fields from the reconstruction pass.
+    res.eigvec_converged = res2.eigvec_converged;
+    res.eigvec_error = res2.eigvec_error;
+
     std::swap(evector, v);
     return res;
 }

@@ -61,15 +61,7 @@ class CheckpointWriter {
 
 volatile extern sig_atomic_t GLOBAL_SHUTDOWN_REQUEST;
 
-//#pragma pack(push,1)
-//struct packet {
-//    vtree_node_t state;
-//    int32_t available;
-//};
-
 MPI_Datatype create_vtree_node_type();
-
-//MPI_Datatype create_packet_type();
 
 template<typename T>
 //requires std::derived_from<T, lat_container>

@@ -211,8 +211,9 @@ int main(int argc, char* argv[]) {
         std::swap(evector, local_v0);
 
 
-        // If we hit checkpoint and exited early, clean exit
-        if (!res.eigval_converged) {
+        // If we hit checkpoint and exited early (eigenvector not fully
+        // reconstructed), clean exit
+        if (!res.eigvec_converged) {
             if (ctx.my_rank == 0) {
             std::cout << "[Main] Exited second iteration at n="<<
                 res.n_iterations<<" due to time limit. Restart to continue.\n";

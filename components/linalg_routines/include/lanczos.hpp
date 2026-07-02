@@ -21,11 +21,11 @@ struct Settings {
 
 
 struct Result {
-    bool eigval_converged;
-    bool eigvec_converged;
-    size_t n_iterations;
-    double eigval_error;
-    double eigvec_error;
+    bool eigval_converged = false;
+    bool eigvec_converged = false;
+    size_t n_iterations = 0;
+    double eigval_error = 0.0;
+    double eigvec_error = 0.0;
 };
 
 

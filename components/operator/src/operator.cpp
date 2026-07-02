@@ -2,9 +2,6 @@
 #include <cassert>
 
 int ZBasisBST::search(const state_t& state, idx_t& J) const {
-//    auto it = std::lower_bound(states.begin(), states.end(), state);
-//    return it;
-
     const __uint128_t* arr = reinterpret_cast<const __uint128_t*>(states.data());
     int64_t left = 0, right = states.size() - 1;
 
@@ -15,10 +12,6 @@ int ZBasisBST::search(const state_t& state, idx_t& J) const {
         if (arr[mid] < state.uint128) left = mid + 1;
         else right = mid;
     }
-
-//    for (J = left; J <= right; J++) {
-//        if (arr[J] == state.uint128) return 1;
-//    }
 
     // manual unroll BS (actually saves noticeable time???)
     for (J = left; J + 3 <= right; J += 4) {

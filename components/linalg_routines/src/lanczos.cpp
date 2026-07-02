@@ -109,11 +109,17 @@ Result lanczos_iterate(ApplyFn evaluate_add,
 
     auto&iter_no = retval.n_iterations;
     for (iter_no = 0; iter_no < settings.max_iterations; iter_no++) {
-       // optional accumulation of Ritz combination
-        if (eigvec && ritz && iter_no < (size_t)ritz->size()) {
-            axpy(*eigvec, v, (*ritz)[iter_no]); // eigvec += ritz[j] * v
-        } 
-        
+       // optional accumulation of Ritz combination (eigenvector pass)
+        if (eigvec && ritz) {
+            if (iter_no < (size_t)ritz->size()) {
+                axpy(*eigvec, v, (*ritz)[iter_no]); // eigvec += ritz[j] * v
+            } else {
+                // all Ritz coefficients consumed: reconstruction complete
+                retval.eigvec_converged = true;
+                break;
+            }
+        }
+
         if (iter_no > 0) {
             // u = - beta_{j-1} * v_{j-1} (note: after swap, u holds v_{j-1})
             //sub(u, v, beta);
@@ -145,17 +151,15 @@ Result lanczos_iterate(ApplyFn evaluate_add,
         alphas.push_back(alpha);
         betas.push_back(beta);
 
-         // Convergence test: compute current eigenvalue estimate
-        if (iter_no >= settings.min_iterations) {
+         // Convergence test (eigenvalue pass only): compute current estimate.
+        // The eigenvector pass terminates via Ritz-coefficient exhaustion above.
+        if (!ritz && iter_no >= settings.min_iterations) {
             check_lanczos_convergence<_S>(alphas, betas, eigval, iter_no, settings, retval);
             if (settings.verbosity > 0) {
                 std::cout << "Iter "<< iter_no << " eigval error " << retval.eigval_error << "\n";
             }
 
-            if (retval.eigval_converged && ritz ) {
-                retval.eigvec_converged = true;
-                break;
-            }
+            if (retval.eigval_converged) break;
         }
     }
 
@@ -217,10 +221,14 @@ Result eigval0_impl(ApplyFn apply_add, double& eigval,
     // Second pass: reconstruct eigenvector
     // ----------------------------
     std::vector<_S> evector(dim);
-    
-    res = lanczos_iterate(apply_add, v, alphas, betas, settings,
+
+    Result res2 = lanczos_iterate(apply_add, v, alphas, betas, settings,
             &ritz, &evector
             );
+    // Keep the eigenvalue pass's convergence report; take the
+    // eigenvector-specific fields from the reconstruction pass.
+    res.eigvec_converged = res2.eigvec_converged;
+    res.eigvec_error = res2.eigvec_error;
 
     std::swap(evector, v);
     return res;
