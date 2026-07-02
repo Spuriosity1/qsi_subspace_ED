@@ -596,8 +596,11 @@ void MPILazyOpSum<coeff_t, B>::evaluate_add_off_diag_batched(const coeff_t* x, c
     // This means we prefer sort+merge when the batch is large enough.
     const int64_t sort_merge_threshold = 2LL * dim * (int64_t)sizeof(state_t);
 
-    for (int64_t state_start = 0; state_start < dim; state_start += bs) {
-        int64_t state_end = std::min(state_start + bs, dim);
+    for (int64_t bidx = 0; bidx < n_batches; bidx++) {
+        // Ranks whose dim is exhausted still run the round with empty ranges
+        // so the collectives below stay matched across all ranks.
+        int64_t state_start = std::min(bidx * bs, dim);
+        int64_t state_end   = std::min(state_start + bs, dim);
 
         // --- LOCAL APPLY PASS ---
         // Reset send cursors to the start of each rank's slot in the flat buffer.
@@ -715,6 +718,12 @@ void MPILazyOpSum<coeff_t, basis_t>::allocate_temporaries(int B) {
     int64_t local_dim = (int64_t)basis.dim();
     batch_size = (B <= 0) ? (int)local_dim : std::min(B, (int)local_dim);
 
+    // Every rank must join every collective round, but local dims (and thus
+    // batch counts) differ: take the global max as the shared round count.
+    int64_t nb_local = (batch_size > 0)
+        ? (local_dim + batch_size - 1) / batch_size : 0;
+    MPI_Allreduce(&nb_local, &n_batches, 1, MPI_INT64_T, MPI_MAX, MPI_COMM_WORLD);
+
     send_counts.assign(N, 0);
     recv_counts.resize(N);
     send_displs.resize(N);
@@ -775,6 +784,260 @@ void MPILazyOpSum<coeff_t, basis_t>::allocate_temporaries(int B) {
             << " total_recv=" << total_recv
             << " (" << total_recv * record_bytes / (1 << 20) << " MiB)"
             << " batch_size=" << batch_size << "/" << local_dim << " states\n";
+}
+
+
+// ---------------------------------------------------------------------------
+// Static apply plan
+//
+// The basis, the Hamiltonian and the batch boundaries are invariant across
+// Lanczos iterations, so the entire communication/update graph of the batched
+// apply can be computed once:
+//   - per-(batch, rank) send/recv counts are frozen (no count exchange),
+//   - the local index of every incoming record is resolved by a single
+//     setup-time state exchange + search and stored as uint32 (records arrive
+//     in a deterministic order because the send side scatters in (state, op)
+//     order and Alltoallv preserves per-pair ordering),
+//   - likewise for self-update records.
+// Steady state then ships only dy (8 B/record instead of 24) in one Alltoallv
+// and applies y[idx[i]] += dy[i] — independent stores with full memory-level
+// parallelism instead of dependent-miss binary-search chains.
+// ---------------------------------------------------------------------------
+
+template <RealOrCplx coeff_t, Basis B>
+size_t MPILazyOpSum<coeff_t, B>::plan_bytes() const {
+    return plan_sc.capacity() * sizeof(int)
+         + plan_rc.capacity() * sizeof(int)
+         + plan_tgt.capacity() * sizeof(uint32_t)
+         + plan_self.capacity() * sizeof(uint32_t)
+         + plan_tgt_offs.capacity() * sizeof(int64_t)
+         + plan_self_offs.capacity() * sizeof(int64_t);
+}
+
+template <RealOrCplx coeff_t, Basis B>
+void MPILazyOpSum<coeff_t, B>::release_state_buffers() {
+    { std::vector<ZBasisBase::state_t> tmp; std::swap(tmp, send_state); }
+    { std::vector<ZBasisBase::state_t> tmp; std::swap(tmp, recv_state); }
+}
+
+template <RealOrCplx coeff_t, Basis basis_t>
+void MPILazyOpSum<coeff_t, basis_t>::build_plan(int B, size_t mem_cap_bytes) {
+    using state_t = ZBasisBase::state_t;
+    const int N = ctx.world_size;
+    const int my_rank = ctx.my_rank;
+
+    if (send_counts.empty())
+        allocate_temporaries(B);
+
+    const int64_t dim = (int64_t)basis.dim();
+    if ((uint64_t)dim > UINT32_MAX)
+        throw std::runtime_error("build_plan: local dim exceeds uint32 index range");
+
+    plan_bs = std::max<int64_t>((int64_t)batch_size, 1);
+    const int64_t NB = n_batches;
+
+    // --- Pass 1: exact per-(batch, destination) send counts ---------------
+    // Rank-major layout so a single Alltoall (NB ints per rank pair) turns
+    // send counts into recv counts.
+    std::vector<int> sc_rm((size_t)N * NB, 0);
+    for (int64_t il = 0; il < dim; ++il) {
+        const int64_t b = il / plan_bs;
+        for (const auto& [c, op] : ops.off_diag_terms) {
+            (void)c;
+            state_t state = basis[il];
+            if (op.applyState(state) == 0) continue;
+            sc_rm[(size_t)ctx.rank_of_state(state) * NB + b]++;
+        }
+    }
+    std::vector<int> rc_rm((size_t)N * NB);
+    MPI_Alltoall(sc_rm.data(), (int)NB, MPI_INT,
+                 rc_rm.data(), (int)NB, MPI_INT, MPI_COMM_WORLD);
+
+    // Batch-major copies for the steady-state loop; recv self slot zeroed
+    // (self records never cross MPI).
+    plan_sc.resize((size_t)NB * N);
+    plan_rc.resize((size_t)NB * N);
+    plan_tgt_offs.assign(NB + 1, 0);
+    plan_self_offs.assign(NB + 1, 0);
+    for (int64_t b = 0; b < NB; b++) {
+        int64_t recv_total = 0;
+        for (int r = 0; r < N; r++) {
+            plan_sc[b*N + r] = sc_rm[(size_t)r * NB + b];
+            int rc = (r == my_rank) ? 0 : rc_rm[(size_t)r * NB + b];
+            plan_rc[b*N + r] = rc;
+            recv_total += rc;
+        }
+        plan_tgt_offs[b+1]  = plan_tgt_offs[b] + recv_total;
+        plan_self_offs[b+1] = plan_self_offs[b] + plan_sc[b*N + my_rank];
+    }
+    const int64_t tgt_total  = plan_tgt_offs[NB];
+    const int64_t self_total = plan_self_offs[NB];
+
+    // --- Memory-cap safety valve (collective decision) --------------------
+    size_t projected = (size_t)(tgt_total + self_total) * sizeof(uint32_t)
+                     + (size_t)2 * NB * N * sizeof(int)
+                     + (size_t)2 * (NB + 1) * sizeof(int64_t);
+    size_t projected_max = projected;
+    MPI_Allreduce(&projected, &projected_max, 1, get_mpi_type<size_t>(),
+                  MPI_MAX, MPI_COMM_WORLD);
+    if (mem_cap_bytes > 0 && projected_max > mem_cap_bytes) {
+        if (my_rank == 0)
+            std::cout << "[plan] refused: worst rank needs "
+                      << projected_max / (1<<20) << " MiB > cap "
+                      << mem_cap_bytes / (1<<20) << " MiB; "
+                      << "falling back to search path\n";
+        plan_sc.clear(); plan_sc.shrink_to_fit();
+        plan_rc.clear(); plan_rc.shrink_to_fit();
+        plan_tgt_offs.clear(); plan_self_offs.clear();
+        return;
+    }
+    plan_tgt.resize(tgt_total);
+    plan_self.resize(self_total);
+
+    // --- Pass 2: exchange states once and resolve every record's index ----
+    std::vector<int> batch_sc(N), batch_rc(N), sd(N), rd(N);
+    for (int r = 0; r < N; r++) sd[r] = (int)send_displs[r];
+
+    for (int64_t b = 0; b < NB; b++) {
+        const int64_t s0 = std::min(b * plan_bs, dim);
+        const int64_t s1 = std::min(s0 + plan_bs, dim);
+
+        std::vector<MPI_Count> cursors(send_displs.begin(), send_displs.end());
+        for (int64_t il = s0; il < s1; ++il) {
+            for (const auto& [c, op] : ops.off_diag_terms) {
+                (void)c;
+                state_t state = basis[il];
+                if (op.applyState(state) == 0) continue;
+                send_state[cursors[ctx.rank_of_state(state)]++] = state;
+            }
+        }
+
+        // Self-update indices, in send (= generation) order.
+        {
+            const int cnt = plan_sc[b*N + my_rank];
+            const MPI_Count base = send_displs[my_rank];
+            uint32_t* out = plan_self.data() + plan_self_offs[b];
+            for (int i = 0; i < cnt; i++) {
+                ZBasisBase::idx_t idx;
+                if (!basis.search(send_state[base + i], idx))
+                    throw std::logic_error("build_plan: self state not in local basis");
+                out[i] = (uint32_t)idx;
+            }
+        }
+
+        for (int r = 0; r < N; r++) {
+            batch_sc[r] = (r == my_rank) ? 0 : plan_sc[b*N + r];
+            batch_rc[r] = plan_rc[b*N + r];
+        }
+        rd[0] = 0;
+        for (int r = 1; r < N; r++) rd[r] = rd[r-1] + batch_rc[r-1];
+
+        MPI_Alltoallv(
+            send_state.data(), batch_sc.data(), sd.data(), get_mpi_type<state_t>(),
+            recv_state.data(), batch_rc.data(), rd.data(), get_mpi_type<state_t>(),
+            MPI_COMM_WORLD);
+
+        // Remote-update indices, in packed recv-buffer (= arrival) order.
+        const int64_t recv_total = plan_tgt_offs[b+1] - plan_tgt_offs[b];
+        uint32_t* out = plan_tgt.data() + plan_tgt_offs[b];
+        for (int64_t i = 0; i < recv_total; i++) {
+            ZBasisBase::idx_t idx;
+            if (!basis.search(recv_state[i], idx))
+                throw std::logic_error("build_plan: received state not in local basis");
+            out[i] = (uint32_t)idx;
+        }
+    }
+
+    plan_built = true;
+    ctx.log << "[plan r" << my_rank << "]"
+            << " batches=" << NB
+            << " self_records=" << self_total
+            << " recv_records=" << tgt_total
+            << " plan_MiB=" << plan_bytes() / (1<<20) << "\n";
+}
+
+template <RealOrCplx coeff_t, Basis B>
+void MPILazyOpSum<coeff_t, B>::evaluate_add_off_diag_planned(const coeff_t* x, coeff_t* y) {
+    assert(plan_built && "build_plan() must be called first");
+    const int N = ctx.world_size;
+    const int my_rank = ctx.my_rank;
+    const int64_t dim = (int64_t)basis.dim();
+
+    Timer loc_apply_timer("[planned local apply]",   my_rank);
+    Timer self_update_timer("[planned self update]", my_rank);
+    Timer alltoallv_timer("[planned mpi alltoallv]", my_rank);
+    Timer remote_up_timer("[planned remote update]", my_rank);
+    std::vector<const Timer*> timers{&loc_apply_timer, &self_update_timer,
+        &alltoallv_timer, &remote_up_timer};
+
+    std::vector<int> batch_sc(N), batch_rc(N), sd(N), rd(N);
+    for (int r = 0; r < N; r++) sd[r] = (int)send_displs[r];
+    std::vector<MPI_Count> cursors(N);
+
+    for (int64_t b = 0; b < n_batches; b++) {
+        const int64_t s0 = std::min(b * plan_bs, dim);
+        const int64_t s1 = std::min(s0 + plan_bs, dim);
+        const int* sc = &plan_sc[b * N];
+
+        // --- LOCAL APPLY: recompute applyState + hash, ship only dy ---
+        std::copy(send_displs.begin(), send_displs.end(), cursors.begin());
+        BENCH_TIMER_TIMEIT(loc_apply_timer,
+        for (int64_t il = s0; il < s1; ++il) {
+            for (const auto& [c, op] : ops.off_diag_terms) {
+                ZBasisBase::state_t state = basis[il];
+                auto sign = op.applyState(state);
+                if (sign == 0) continue;
+                send_dy[cursors[ctx.rank_of_state(state)]++] = c * x[il] * (coeff_t)sign;
+            }
+        }
+        ) // BENCH_TIMER_TIMEIT
+#ifndef NDEBUG
+        for (int r = 0; r < N; r++)
+            assert(cursors[r] - send_displs[r] == sc[r] &&
+                   "plan out of date: send counts changed since build_plan()");
+#endif
+
+        // --- SELF-UPDATE via precomputed indices ---
+        BENCH_TIMER_TIMEIT(self_update_timer,
+        {
+            const int cnt = sc[my_rank];
+            const coeff_t* dy = send_dy.data() + send_displs[my_rank];
+            const uint32_t* idx = plan_self.data() + plan_self_offs[b];
+            for (int i = 0; i < cnt; i++)
+                y[idx[i]] += dy[i];
+        }
+        ) // BENCH_TIMER_TIMEIT
+
+        // --- SINGLE dy EXCHANGE with frozen counts ---
+        for (int r = 0; r < N; r++) {
+            batch_sc[r] = (r == my_rank) ? 0 : sc[r];
+            batch_rc[r] = plan_rc[b * N + r];
+        }
+        rd[0] = 0;
+        for (int r = 1; r < N; r++) rd[r] = rd[r-1] + batch_rc[r-1];
+
+        BENCH_TIMER_TIMEIT(alltoallv_timer,
+        MPI_Alltoallv(
+            send_dy.data(), batch_sc.data(), sd.data(), get_mpi_type<coeff_t>(),
+            recv_dy.data(), batch_rc.data(), rd.data(), get_mpi_type<coeff_t>(),
+            MPI_COMM_WORLD);
+        ) // BENCH_TIMER_TIMEIT
+
+        // --- REMOTE UPDATE: streaming indexed scatter, no search ---
+        BENCH_TIMER_TIMEIT(remote_up_timer,
+        {
+            const int64_t recv_total = plan_tgt_offs[b+1] - plan_tgt_offs[b];
+            const uint32_t* idx = plan_tgt.data() + plan_tgt_offs[b];
+            for (int64_t i = 0; i < recv_total; i++)
+                y[idx[i]] += recv_dy[i];
+        }
+        ) // BENCH_TIMER_TIMEIT
+    }
+
+#ifdef SUBSPACE_ED_BENCHMARK_OPERATIONS
+    for (auto t : timers)
+        t->print_summary(ctx.log);
+#endif
 }
 
 

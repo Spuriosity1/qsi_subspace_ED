@@ -63,6 +63,13 @@ int main(int argc, char* argv[]) {
         .default_value(-1)
         .scan<'i', int>();
 
+    prog.add_argument("--plan")
+        .help("Precompute a static apply plan (frozen comm counts + target "
+              "index lists). Fastest per-iteration path; costs ~4 B per "
+              "off-diagonal nonzero of the local slab.")
+        .default_value(false)
+        .implicit_value(true);
+
     prog.add_argument("-o", "--output_dir")
         .required()
         .help("output directory");
@@ -159,6 +166,10 @@ int main(int argc, char* argv[]) {
 	auto H = MPILazyOpSum(basis, H_sym, ctx);
     if (prog.is_used("--batch-size"))
         H.allocate_temporaries(prog.get<int>("--batch-size"));
+    if (prog.get<bool>("--plan")) {
+        H.build_plan(prog.get<int>("--batch-size"));
+        H.release_state_buffers();
+    }
 
     ////////////////////////////////////////
     // Do the diagonalisation

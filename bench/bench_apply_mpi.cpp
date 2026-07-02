@@ -66,6 +66,24 @@ int main(int argc, char* argv[]){
         .default_value(-1)
         .scan<'i', int>();
 
+    prog.add_argument("--repeats")
+        .help("Number of timed apply repetitions. With N>1 the first repeat is "
+              "treated as warm-up and excluded from the min/avg summary.")
+        .default_value(1)
+        .scan<'i', int>();
+
+    prog.add_argument("--plan")
+        .help("Build a static apply plan (frozen comm counts + precomputed "
+              "target index lists) and benchmark the planned path.")
+        .default_value(false)
+        .implicit_value(true);
+
+    prog.add_argument("--plan-memory-cap")
+        .help("Refuse to build the plan if any rank would need more than this "
+              "many GiB for it (0 = no cap).")
+        .default_value(0.0)
+        .scan<'g', double>();
+
     try {
         prog.parse_args(argc, argv);
     } catch (const std::runtime_error& err) {
@@ -92,6 +110,9 @@ int main(int argc, char* argv[]){
     bool use_batched = prog.is_used("--batch-size");
     int batch_size = prog.get<int>("--batch-size");
     unsigned int seed = prog.get<unsigned int>("--seed");
+    int repeats = std::max(1, prog.get<int>("--repeats"));
+    bool use_plan = prog.get<bool>("--plan");
+    size_t plan_mem_cap = (size_t)(prog.get<double>("--plan-memory-cap") * (1ull << 30));
 
     MPI_Init(NULL, NULL);
 
@@ -148,14 +169,46 @@ int main(int argc, char* argv[]){
         auto H = MPILazyOpSum(basis, H_sym, ctx);
         if (use_batched)
             H.allocate_temporaries(batch_size);
+        if (use_plan) {
+            TIMEIT((std::string("[") + tag + "] build plan").c_str(),
+                   H.build_plan(batch_size, plan_mem_cap);)
+            if (H.has_plan())
+                H.release_state_buffers();
+            else if (ctx.my_rank == 0)
+                std::cout << "[" << tag << "] plan refused; timing the search path instead\n";
+            print_mem(ctx, (std::string(tag) + " after plan build").c_str());
+        }
 
         std::vector<double> v(basis.dim()), u(basis.dim(), 0.0);
         std::mt19937 rng(seed);
         projED::set_random_unit_mpi(v, rng);
         print_mem(ctx, (std::string(tag) + " before apply (vecs allocated)").c_str());
 
-        TIMEIT((std::string("[") + tag + "] u += Av").c_str(),
-               H.evaluate_add(v.data(), u.data());)
+        // Per-repeat wall time = slowest rank (barrier-synchronised entry).
+        double t_min = 0, t_sum = 0;
+        int n_counted = 0;
+        for (int rep = 0; rep < repeats; rep++) {
+            std::fill(u.begin(), u.end(), 0.0);
+            MPI_Barrier(MPI_COMM_WORLD);
+            double t0 = MPI_Wtime();
+            H.evaluate_add(v.data(), u.data());
+            double dt = MPI_Wtime() - t0, dt_max = 0;
+            MPI_Reduce(&dt, &dt_max, 1, MPI_DOUBLE, MPI_MAX, 0, MPI_COMM_WORLD);
+
+            bool warmup = (repeats > 1 && rep == 0);
+            if (ctx.my_rank == 0)
+                std::cout << "[" << tag << "] u += Av rep " << rep << ": "
+                          << dt_max * 1e3 << " ms" << (warmup ? " (warm-up)" : "") << "\n";
+            if (!warmup) {
+                t_min = (n_counted == 0) ? dt_max : std::min(t_min, dt_max);
+                t_sum += dt_max;
+                n_counted++;
+            }
+        }
+        if (ctx.my_rank == 0 && n_counted > 1)
+            std::cout << "[" << tag << "] u += Av summary over " << n_counted
+                      << " repeats: min=" << t_min * 1e3
+                      << " ms  avg=" << t_sum / n_counted * 1e3 << " ms\n";
         print_mem(ctx, (std::string(tag) + " after apply").c_str());
     };
 

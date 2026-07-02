@@ -44,6 +44,13 @@ test_apply = executable('test_apply',
   install: false
   )
 
+test_num_nonvanishing = executable('test_num_nonvanishing', 
+  'test_num_nonvanishing.cpp', 
+  include_directories: inc,
+  dependencies: [operator_dep, linalg_routines_dep, common_dep],
+  install: false
+  )
+
 test_apply_mpi = executable('test_apply_mpi',
   'test_apply_mpi.cpp',
   include_directories: inc,
@@ -105,6 +112,24 @@ if mpiexec.found()
     args: ['-n', '2', test_mpi_alignment.full_path()],
     timeout: 60,
     suite: ['unit', 'mpi'],
+    is_parallel: false,
+  )
+
+  # Local variant: uses the small in-repo basis, exercises all apply paths
+  # (pipeline reference, batched, planned) with a batch size chosen to give
+  # several unequal communication rounds across the 2 ranks.
+  local_lattice_dir = meson.current_source_dir() / 'lattice_files'
+  test('test_apply_mpi_local',
+    mpiexec,
+    args: [
+      '-n', '2',
+      test_apply_mpi.full_path(),
+      local_lattice_dir / 'pyro_2_2_3x0,4,4b4,0,4b4,4,0b1.json',
+      '-b', local_lattice_dir / 'pyro_2_2_3x0,4,4b4,0,4b4,4,0b1.0test.h5',
+      '--batch-size', '10000',
+    ],
+    timeout: 300,
+    suite: ['mpi'],
     is_parallel: false,
   )
 

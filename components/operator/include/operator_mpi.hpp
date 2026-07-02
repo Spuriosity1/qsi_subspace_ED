@@ -63,6 +63,25 @@ struct MPILazyOpSum {
 
     void set_batch_size(int b) { batch_size = b; }
 
+    // Build a static apply plan: the basis, Hamiltonian and batch boundaries
+    // never change between applies, so freeze the per-batch communication
+    // counts and precompute the local target index of every record this rank
+    // will receive (plus every self-update record). Steady-state applies then
+    // ship only dy (one Alltoallv, 8 B/record) and scatter through the index
+    // lists — no search, no sort, no count exchange.
+    // Costs ~4 B per off-diagonal nonzero of the local slab; if mem_cap_bytes
+    // is nonzero and any rank would exceed it, the plan is not built (check
+    // has_plan()) and evaluate_add keeps using the batched/pipeline path.
+    // Calls allocate_temporaries(batch_size) if buffers are not yet sized.
+    void build_plan(int batch_size = -1, size_t mem_cap_bytes = 0);
+    bool has_plan() const { return plan_built; }
+    size_t plan_bytes() const;
+
+    // Free the state-record send/recv buffers once a plan is built; only dy
+    // buffers are needed thereafter. The batched/pipeline paths become
+    // unusable until allocate_temporaries() is called again.
+    void release_state_buffers();
+
     // Does y += A*x, where y[i] and x[i] are both indexed from the start of the local block
 	void evaluate_add(const coeff_t* x, coeff_t* y);
 
@@ -70,12 +89,18 @@ protected:
     void evaluate_add_diagonal(const coeff_t* x, coeff_t* y) const;
     void evaluate_add_off_diag_pipeline(const coeff_t* x, coeff_t* y) const;
     void evaluate_add_off_diag_batched(const coeff_t* x, coeff_t* y);
+    void evaluate_add_off_diag_planned(const coeff_t* x, coeff_t* y);
 
 	const B& basis;
 	const SymbolicOpSum<coeff_t> ops;
     MPIctx& ctx;
 
     int batch_size = -1; // -1 = all states in one round
+
+    // Global number of communication rounds per apply. Local dims (and thus
+    // ceil(dim/batch_size)) differ across ranks, but every rank must take part
+    // in every collective round; set by allocate_temporaries via an Allreduce.
+    int64_t n_batches = 0;
 
     // flat contiguous buffers; allocated by allocate_temporaries()
     std::vector<coeff_t> send_dy;
@@ -87,13 +112,25 @@ protected:
     std::vector<ZBasisBST::state_t> recv_state;
     std::vector<MPI_Count> recv_displs;
     std::vector<MPI_Count> recv_counts;
+
+    // --- static apply plan (build_plan / evaluate_add_off_diag_planned) ---
+    bool plan_built = false;
+    int64_t plan_bs = 0;                  // local batch size the plan was built with
+    std::vector<int> plan_sc;             // [b*N + r] frozen send counts (self slot kept)
+    std::vector<int> plan_rc;             // [b*N + r] frozen recv counts (self slot zeroed)
+    std::vector<uint32_t> plan_tgt;       // local target index per received record
+    std::vector<int64_t>  plan_tgt_offs;  // [n_batches+1] offsets into plan_tgt
+    std::vector<uint32_t> plan_self;      // local target index per self-update record
+    std::vector<int64_t>  plan_self_offs; // [n_batches+1] offsets into plan_self
 };
 
 
 template <RealOrCplx coeff_t, Basis basis_t>
 void MPILazyOpSum<coeff_t, basis_t>::evaluate_add(const coeff_t* x, coeff_t* y) {
     evaluate_add_diagonal(x, y);
-    if (!send_counts.empty())
+    if (plan_built)
+        evaluate_add_off_diag_planned(x, y);
+    else if (!send_counts.empty())
         evaluate_add_off_diag_batched(x, y);
     else
         evaluate_add_off_diag_pipeline(x, y);
