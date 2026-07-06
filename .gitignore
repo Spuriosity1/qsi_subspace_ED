@@ -19,6 +19,7 @@ basis_partitions
 driver/rundata
 driver/*.plan
 subprojects/mr3smp
+subprojects/.wraplock
 subprojects/pthash
 subprojects/nlohmann_json-*
 subprojects/packagecache
