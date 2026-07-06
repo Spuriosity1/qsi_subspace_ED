@@ -39,6 +39,17 @@ diag_DOQSI_ham_mpi = executable('diag_DOQSI_ham_mpi',
   install: true
   )
 
+# Fused basis generation + diagonalisation: enumerates the basis into RAM
+# (no basis file on disk), trims, redistributes and runs Lanczos.
+diag_DOQSI_fused_mpi = executable('diag_DOQSI_fused_mpi',
+  [files(['diag_DOQSI_fused_mpi.cpp']), basis_common_mpi_src],
+  dependencies: [g_deps, eigen_dep, common_dep, operator_mpi_dep, linalg_routines_mpi_dep],
+  include_directories: [inc, basis_inc],
+  link_with: [expectation_eval],
+  cpp_args: target_args,
+  install: true
+  )
+
 eval_observables = executable('eval_observables',
   files(['eval_observables.cpp']),
   dependencies: [g_deps, eigen_dep, omp_dep, operator_dep, linalg_routines_dep, spectra_dep],

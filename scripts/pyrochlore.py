@@ -143,7 +143,7 @@ def get_ringflips(lat: lattice.Lattice, sl=None, include_partial=False):
                 retval.append(rr)
 
     for ring_id, ring in enumerate(retval):
-        for spin_id in ring.member_spin_idx:
+        for spin_id in ring.members:
             a=lat.atoms[spin_id]
             if hasattr(a, "member_ring_idx"):
                 a.member_ring_idx.append(ring_id)

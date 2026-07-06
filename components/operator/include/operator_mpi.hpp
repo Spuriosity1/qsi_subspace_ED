@@ -22,6 +22,12 @@ struct ZBasisMPI : public LocalBasis {
     // Redistribute states to their hash-correct ranks, then rebuild search
     // structures and populate global_dim / dim_of_rank metadata.
     void redistribute();
+    // Adopt an already-generated slab of states (any distribution across
+    // ranks, need not be sorted). Follow with remove_null_states (optional)
+    // then redistribute() to finish setup.
+    void adopt_states(std::vector<ZBasisBase::state_t>&& s) {
+        this->states = std::move(s);
+    }
     ZBasisBase::idx_t global_dim() const { return _global_dim; }
     ZBasisBase::idx_t dim_of_rank(int r) const { return _all_rank_dims[r]; }
     private:

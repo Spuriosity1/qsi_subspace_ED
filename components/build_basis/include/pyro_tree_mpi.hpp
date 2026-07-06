@@ -63,7 +63,7 @@ volatile extern sig_atomic_t GLOBAL_SHUTDOWN_REQUEST;
 
 MPI_Datatype create_vtree_node_type();
 
-template<typename T>
+template<typename T, typename Sink = ShardWriter>
 //requires std::derived_from<T, lat_container>
 class mpi_par_searcher : public T {
 //    static mpi_par_searcher<T>* global_self;
@@ -99,7 +99,7 @@ class mpi_par_searcher : public T {
 
     static constexpr unsigned SPINID_RANK_EMPTY = std::numeric_limits<unsigned>::max();
 
-    ShardWriter shard;
+    Sink shard;
     CheckpointWriter checkpoint;
 
     lat_container::cust_stack my_job_stack;
@@ -185,6 +185,8 @@ mpi_par_searcher(const lattice& lat, unsigned num_spinon_pairs,
 
     void build_state_tree();
     void build_state_tree_allgather();
+
+    Sink& sink() { return shard; }
 
     void finalise_shards(){
         shard.finalize(true);
