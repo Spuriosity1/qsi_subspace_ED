@@ -18,6 +18,7 @@
 
 using json = nlohmann::json;
 using namespace projED;
+using basis_t = ZBasisBSTFast_HashMPI;
 
 // Fused pipeline: gen_spinon_basis/sbsearch_mpi + merge_shards +
 // diag_DOQSI_ham_mpi in one process, with the basis held in RAM throughout
@@ -176,6 +177,8 @@ int main(int argc, char* argv[]) {
     MPIctx ctx;
 
 	using coeff_t=double;
+    bool calc_partial_vol = true;
+
 	SymbolicOpSum<coeff_t> H_sym;
 
     char outfilename_buf[1024];
@@ -271,7 +274,7 @@ int main(int argc, char* argv[]) {
 
 	// Step 3: redistribute to hash-correct ranks (states already trimmed
 	// block-wise inside build_basis_states)
-    ZBasisBSTFast_HashMPI basis;
+    basis_t basis;
     basis.adopt_states(std::move(my_states));
     basis.redistribute();
     std::cout<<"[MPI_BST]  Done! local basis dim="<<basis.dim()<<std::endl;
@@ -375,6 +378,7 @@ int main(int argc, char* argv[]) {
     std::vector<double> expect_O(n_operators); // < O >
     std::vector<double> expect_O_O(n_operators); // < O_0' O_j >
     std::vector<double> expect_F(n_operators); // < O'_j O_j >
+    std::array<std::vector<double>, 4> partial_vol; // < O O O > around missing plaq
 
     {
         if (ctx.my_rank == 0)
@@ -387,7 +391,7 @@ int main(int argc, char* argv[]) {
             if (ctx.my_rank == 0) std::cout<<opi<<" " <<std::flush;
             // Constructed per iteration so the bounded comm buffers of each
             // operator are freed again before the next one.
-            MPILazyOpSum<double, ZBasisBSTFast_HashMPI> op(basis, ringL[opi], ctx);
+            MPILazyOpSum<double, basis_t> op(basis, ringL[opi], ctx);
             op.allocate_temporaries(batch_size);
             op.evaluate(evector.data(), chi.data());
             if (opi == 0){
@@ -417,41 +421,78 @@ int main(int argc, char* argv[]) {
             }
         }
 
-        if (ctx.my_rank == 0){
-            hid_t out_fid =
-                H5Fcreate(out_filename.c_str(),
-                        H5F_ACC_TRUNC, H5P_DEFAULT, H5P_DEFAULT);
-            if (out_fid < 0)
-                throw std::runtime_error("Failed to create HDF5 file");
-            std::cout << "Done!" << std::endl;
-
-            // write out the data
-
-            write_string_to_hdf5(out_fid, "latfile_json", lattice_file);
-            // basis_io::make_sector_string requires exactly 4 entries;
-            // build the tag by hand so an empty --sector is also valid
-            std::string sector_str = "basis";
-            if (!target_sector.empty()){
-                sector_str += "_s";
-                char delim = 0;
-                for (int sv : target_sector){
-                    if (delim) sector_str += delim;
-                    sector_str += std::to_string(sv);
-                    delim = '.';
+        // partial volume operators
+        if (calc_partial_vol){
+            if (ctx.my_rank == 0) std::cout<<"Compute <OOO>... "<<std::flush;
+            // computing expectation values of the incomplete volumes
+            for (int sl=0; sl<4; sl++){
+                auto par_vol_operators = get_partial_vol_ops(jdata, ringL, sl);
+                partial_vol[sl].resize(par_vol_operators.size(), 0.0);
+                for (size_t opi=0; opi<par_vol_operators.size(); opi++){
+                    if (ctx.my_rank == 0) std::cout<<opi<<" "<<std::flush;
+                    // Per-iteration construction with bounded batches, as in
+                    // the ring loop: the default allocate_temporaries() (-1 =
+                    // whole slab in one round) would size the send/recv
+                    // buffers at up to 6 records/state for these 6-term
+                    // opsums -- far more than the basis itself.
+                    MPILazyOpSum<double, basis_t> op(basis, par_vol_operators[opi], ctx);
+                    op.allocate_temporaries(batch_size);
+                    op.evaluate(evector.data(), chi.data());
+                    double res = 0;
+                    double res_local = projED::inner(chi, evector);
+                    MPI_Reduce(&res_local, &res, 1, MPI_DOUBLE, MPI_SUM, 0, MPI_COMM_WORLD);
+                    // res contains the goods (root only)
+                    if (ctx.my_rank == 0){
+                        partial_vol[sl][opi] = res;
+                    }
                 }
             }
-            write_string_to_hdf5(out_fid, "sector", sector_str);
 
-            write_expectation_vals_h5(out_fid, "ring", expect_O, ringL.size(), 1);
-            write_expectation_vals_h5(out_fid, "flippability", expect_F, ringL.size(), 1);
-            write_expectation_vals_h5(out_fid, "ring_2", expect_O_O, ringL.size(), 1);
-
-            hsize_t dims[1]={1};
-            write_dataset(out_fid, "eigenvalues", eigvals.data(), dims, 1);
-
-            H5Fclose(out_fid);
+            if (ctx.my_rank == 0)
+                std::cout<<"\nCompute <OOO> complete "<<std::endl;
         }
+
+
     }
+
+
+
+    if (ctx.my_rank == 0){
+        hid_t out_fid =
+            H5Fcreate(out_filename.c_str(),
+                    H5F_ACC_TRUNC, H5P_DEFAULT, H5P_DEFAULT);
+        if (out_fid < 0)
+            throw std::runtime_error("Failed to create HDF5 file");
+        std::cout << "Done!" << std::endl;
+
+        // write out the data
+        write_string_to_hdf5(out_fid, "latfile_json", lattice_file);
+
+        std::string sector_str = target_sector.empty() ? 
+            "basis" : basis_io::make_sector_string(target_sector);
+
+        write_string_to_hdf5(out_fid, "sector", sector_str);
+
+        write_expectation_vals_h5(out_fid, "ring", expect_O, ringL.size(), 1);
+        write_expectation_vals_h5(out_fid, "flippability", expect_F, ringL.size(), 1);
+        write_expectation_vals_h5(out_fid, "ring_2", expect_O_O, ringL.size(), 1);
+
+        hsize_t dims[1]={1};
+        write_dataset(out_fid, "eigenvalues", eigvals.data(), dims, 1);
+
+
+        if (calc_partial_vol){
+            // save the incomplete vol operators (each sl)
+            for (size_t sl = 0; sl < partial_vol.size(); ++sl) {
+                const auto& vec = partial_vol[sl];
+                std::string name = "partial_vol_sl" + std::to_string(sl);
+                write_expectation_vals_h5(out_fid, name.c_str(), vec, vec.size(), 1);
+            }
+        }
+
+        H5Fclose(out_fid);
+    }
+
 
     MPI_Finalize();
 
