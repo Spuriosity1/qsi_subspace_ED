@@ -283,6 +283,50 @@ int main(int argc, char* argv[]) {
                   << " (trimmed " << raw_global - basis.global_dim() << ")\n";
     }
 
+    // Estimate the steady-state RAM of the diagonalisation before committing to
+    // it, summed over ranks. Three contributions dominate:
+    //   (i)   the Uint128 basis states themselves;
+    //   (ii)  the three length-dim double vectors the Lanczos eigenvector pass
+    //         keeps live simultaneously (current v = local_v0, the scratch/
+    //         previous vector u inside the iterator, and the accumulated
+    //         eigenvector); the eigenvalue-only pass peaks at two of these;
+    //   (iii) the operator apply plan's index cache, which stores one uint32
+    //         local target index per off-diagonal nonzero (~4 B each). We count
+    //         the local nonvanishing off-diagonal records exactly here (one
+    //         applyState pass, cheap next to Lanczos); this is an upper bound on
+    //         the plan, since records whose target is not in the basis are
+    //         dropped when the plan is built.
+    {
+        const size_t local_dim = basis.dim();
+        size_t local_offdiag_nnz = 0;
+        for (size_t i = 0; i < local_dim; ++i) {
+            for (const auto& [c, op] : H_sym.off_diag_terms) {
+                (void)c;
+                Uint128 s = basis[i];
+                if (op.applyState(s) != 0) ++local_offdiag_nnz;
+            }
+        }
+
+        size_t local[3] = {
+            local_dim * sizeof(Uint128),          // (i)   basis states
+            3 * local_dim * sizeof(double),       // (ii)  Lanczos vectors
+            local_offdiag_nnz * sizeof(uint32_t), // (iii) operator index cache
+        };
+        size_t g[3] = {0, 0, 0};
+        MPI_Allreduce(local, g, 3, get_mpi_type<size_t>(), MPI_SUM, MPI_COMM_WORLD);
+
+        if (ctx.my_rank == 0) {
+            const double MiB = 1.0 / (1 << 20);
+            std::cout << "[Search] Estimated steady-state memory (global):\n"
+                      << "    basis (Uint128)        : " << g[0] * MiB << " MiB\n"
+                      << "    Lanczos vectors (3x)   : " << g[1] * MiB << " MiB\n"
+                      << "    operator index cache   : " << g[2] * MiB
+                      << " MiB (~4 B x off-diag nonzeros)\n"
+                      << "    total                  : "
+                      << (g[0] + g[1] + g[2]) * MiB << " MiB\n";
+        }
+    }
+
     ////////////////////////////////////////
     // Do the diagonalisation
     lanczos_mpi::Settings settings(ctx);
