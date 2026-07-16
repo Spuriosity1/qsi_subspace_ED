@@ -28,7 +28,7 @@ class CheckpointWriter {
 
     public:
     CheckpointWriter(const std::filesystem::path& file) : ckpt_file(file) {
-        std::cout<<"Initialised checkpoint: "<<ckpt_file<<std::endl;
+        logging::log(logging::DEBUG)<<"Initialised checkpoint: "<<ckpt_file<<std::endl;
     }
 
     inline void save_stack(const lat_container::cust_stack& stack) {
@@ -44,7 +44,7 @@ class CheckpointWriter {
     inline void load_stack(lat_container::cust_stack& stack) {
         FILE* f = fopen(ckpt_file.c_str(), "rb");
         if (!f) return; // No restart available = start normally.
-        std::cout <<"reading checkpoint data: "<<ckpt_file<<"\n";
+        logging::log(logging::DEBUG) <<"reading checkpoint data: "<<ckpt_file<<"\n";
 
         size_t n;
         fread(&n, sizeof(n), 1, f);
@@ -78,7 +78,7 @@ class mpi_par_searcher : public T {
 
     static constexpr unsigned INITIAL_DEPTH_FACTOR = 5;
     size_t CHECK_INTERVAL = 100000;
-    size_t PRINT_INTERVAL = 50; // print this many checks
+    size_t PRINT_INTERVAL = 5000; // print this many checks
     size_t MIN_CHUNK_SIZE = 3; // miimum stack size before steals are accepted
                         
     // MPI message tags
@@ -158,7 +158,7 @@ mpi_par_searcher(const lattice& lat, unsigned num_spinon_pairs,
     perm(perm_),
     shard( workdir / ("shard-" + job_tag + "-" + std::to_string(my_rank) + ".bin"), buf_entries ),
     checkpoint( workdir / ("checkpoint-" + job_tag + "-" + std::to_string(my_rank) + ".bin") ),
-    db_log(my_rank)
+    db_log(my_rank, logging::TRACE)
     {
         GLOBAL_SHUTDOWN_REQUEST=0;
         signal(SIGINT, sig_handler);
@@ -173,7 +173,7 @@ mpi_par_searcher(const lattice& lat, unsigned num_spinon_pairs,
 
     void set_iter_opts(
     int check_interval = 100000,
-    int print_interval = 50, // print this many checks
+    int print_interval = 5000, // print this many checks
     int min_chunk_size = 3 // miimum stack size before steals are accepted
         ) {
         this->CHECK_INTERVAL = check_interval;

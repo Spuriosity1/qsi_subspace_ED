@@ -6,6 +6,7 @@
 #include "operator_mpi.hpp"
 #include "lanczos_mpi.hpp"
 #include "lanczos_cli.hpp"
+#include "logging_cli.hpp"
 #include "expectation_eval.hpp"
 #include <fstream>
 #include <filesystem>
@@ -75,6 +76,7 @@ int main(int argc, char* argv[]) {
         .help("output directory");
 
     provide_lanczos_options(prog);
+    provide_logging_options(prog);
     prog.add_argument("--n_spinons")
         .default_value(0)
         .scan<'i', int>();
@@ -106,6 +108,7 @@ int main(int argc, char* argv[]) {
 	jfile >> jdata;
 
     MPIctx ctx;
+    configure_logging(prog, ctx.my_rank);
 
 	using coeff_t=double;
 	SymbolicOpSum<coeff_t> H_sym;
@@ -149,16 +152,16 @@ int main(int argc, char* argv[]) {
     }
 
     if (ctx.my_rank == 0) {
-        std::cout << "[Main] Checkpoint file: " << checkpoint_file << "\n";
+        logging::log(logging::INFO) << "[Main] Checkpoint file: " << checkpoint_file << "\n";
     }
 
 	// Step 2: Load raw slab, trim locally, then redistribute to hash-correct ranks
     ZBasisBSTFast_HashMPI basis;
-    std::cout<<"[MPI_BST]  Loading basis..."<<std::endl;
+    logging::log(logging::INFO)<<"[MPI_BST]  Loading basis..."<<std::endl;
     load_basis_raw(basis, prog);
     if (!prog.get<bool>("--notrim")) basis.remove_null_states(H_sym);
     basis.redistribute();
-    std::cout<<"[MPI_BST]  Done! local basis dim="<<basis.dim()<<std::endl;
+    logging::log(logging::DEBUG)<<"[MPI_BST]  Done! local basis dim="<<basis.dim()<<std::endl;
 
     //////////////////////////////////
     /// Build H
@@ -175,6 +178,7 @@ int main(int argc, char* argv[]) {
     // Do the diagonalisation
     lanczos_mpi::Settings settings(ctx);
     parse_lanczos_settings(prog, settings);
+    settings.verbosity = prog.get<int>("--verbosity");
 
     RealApplyFn evadd = [&H](const coeff_t* x_local, coeff_t* y_local){
         H.evaluate_add(x_local, y_local);
@@ -187,15 +191,15 @@ int main(int argc, char* argv[]) {
 
     std::vector<double> alphas, betas;
 
-    std::cout << "[Lanczos] finding lowest eigenvalue\n";
+    logging::log(logging::INFO) << "[Lanczos] finding lowest eigenvalue\n";
     auto res=  lanczos_mpi::lanczos_iterate_checkpoint(evadd, local_v0, alphas, betas, settings, checkpoint_file);
 
-    std::cout<<"[rank "<<ctx.my_rank<<"] "<<res;
+    logging::log(logging::DEBUG)<<"[rank "<<ctx.my_rank<<"] "<<res;
 
     // If we hit checkpoint and exited early, clean exit
     if (!res.eigval_converged) {
         if (ctx.my_rank == 0) {
-            std::cout << "[Main] Exited initial iteration at n="<<
+            logging::log(logging::INFO) << "[Main] Exited initial iteration at n="<<
                 res.n_iterations<<" due to time limit. Restart to continue.\n";
         }
         MPI_Finalize();
@@ -203,14 +207,14 @@ int main(int argc, char* argv[]) {
     }
 
     // If converged, compute final eigenvalue and eigenvector
-    std::cout << "[Lanczos] tridiagonalising in Krylov space\n";
+    logging::log(logging::INFO) << "[Lanczos] tridiagonalising in Krylov space\n";
     std::vector<double> ritz;
     std::vector tmp_alphas(alphas);
     std::vector tmp_betas(betas);
     tridiagonalise_one(tmp_alphas, tmp_betas, eigval, ritz);
 
     if(settings.calc_eigenvector) {
-        std::cout << "[Lanczos] iterating to determine eigenvector\n";
+        logging::log(logging::INFO) << "[Lanczos] iterating to determine eigenvector\n";
         std::vector<double> evector(basis.dim());
         
         // Second pass for eigenvector 
@@ -226,7 +230,7 @@ int main(int argc, char* argv[]) {
         // reconstructed), clean exit
         if (!res.eigvec_converged) {
             if (ctx.my_rank == 0) {
-            std::cout << "[Main] Exited second iteration at n="<<
+            logging::log(logging::INFO) << "[Main] Exited second iteration at n="<<
                 res.n_iterations<<" due to time limit. Restart to continue.\n";
             }
             MPI_Finalize();
@@ -236,8 +240,10 @@ int main(int argc, char* argv[]) {
 
     std::string filename = s.str()+".eigs.h5";
 
-    std::cout << "Eigenvalues:\n" << eigval << "\n\n";
-	std::cout << "Writing to\n"<<filename<<std::endl;
+    if (ctx.my_rank == 0){
+        logging::log(logging::INFO) << "Eigenvalues:\n" << eigval << "\n\n";
+        logging::log(logging::INFO) << "Writing to\n"<<filename<<std::endl;
+    }
 
     // Create parallel file access property list
     hid_t plist_id = H5Pcreate(H5P_FILE_ACCESS);

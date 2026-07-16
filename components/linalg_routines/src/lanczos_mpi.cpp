@@ -35,7 +35,7 @@ void check_lanczos_convergence(
     double rel_change = res.eigval_error / std::max(std::abs(eigval), 1e-10);
     
     if (settings.verbosity > 1) {
-        std::cout << "  Convergence check at iter " << iteration 
+        settings.ctx.log(logging::DEBUG) << "  Convergence check at iter " << iteration 
                   << ": eigval=" << eigval 
                   << ", change=" << res.eigval_error 
                   << ", rel_change=" << rel_change << "\n";
@@ -44,7 +44,7 @@ void check_lanczos_convergence(
     // Check for convergence
     if (res.eigval_error < settings.abs_tol || rel_change < settings.rel_tol) {
         if (settings.verbosity > 0) {
-            std::cout << "[Lanczos] Converged at iteration " << iteration 
+            settings.ctx.log(logging::INFO) << "[Lanczos] Converged at iteration " << iteration 
                       << " with eigenvalue " << eigval << "\n";
         }
         res.eigval_converged= true;
@@ -131,7 +131,7 @@ Result lanczos_iterate(ApplyFn evaluate_add,
         beta = std::sqrt(beta);
         if (beta < settings.abs_tol) {
             if (settings.ctx.my_rank == 0 && settings.verbosity > 0){
-                std::cout << "Lanczos breakdown at iteration "<<j<<std::endl;
+                settings.ctx.log(logging::INFO) << "Lanczos breakdown at iteration "<<j<<std::endl;
             }
             break;
         }
@@ -143,7 +143,7 @@ Result lanczos_iterate(ApplyFn evaluate_add,
         mul(v, 1.0/beta); // local op, no need to sync
 
         if (settings.ctx.my_rank == 0 && settings.verbosity > 1) {
-            std::cout << "Iter "<< j << " a[j]="<<alpha<<" b[j]="<<beta << "\n";
+            settings.ctx.log(logging::DEBUG) << "Iter "<< j << " a[j]="<<alpha<<" b[j]="<<beta << "\n";
         }
 
         alphas.push_back(alpha);
@@ -154,7 +154,7 @@ Result lanczos_iterate(ApplyFn evaluate_add,
             if (settings.ctx.my_rank ==0) {
                 check_lanczos_convergence<_S>(alphas, betas, eigval, j, settings, retval);
                 if (settings.verbosity > 0) {
-                    std::cout << "Iter "<< j << " eigval error " << retval.eigval_error << "\n";
+                    settings.ctx.log(logging::DEBUG) << "Iter "<< j << " eigval error " << retval.eigval_error << "\n";
                 }
             }
 
@@ -184,7 +184,7 @@ Result lanczos_iterate(ApplyFn evaluate_add,
         double err2;
         MPI_Allreduce(&err2_local, &err2, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
         retval.eigvec_error = sqrt(err2);
-        std::cout << "[Lanczos] Local evector error rank "<<settings.ctx.my_rank<<
+        settings.ctx.log(logging::INFO) << "[Lanczos] Local evector error rank "<<settings.ctx.my_rank<<
             ": "<<sqrt(err2_local)<<
             "\n global evector error: " << retval.eigvec_error <<"\n";
     }
@@ -231,7 +231,7 @@ Result lanczos_iterate_checkpoint(ApplyFn evaluate_add,
     if (settings.ctx.my_rank == 0 && job_end_time > 0) {
         time_t now = std::time(nullptr);
         int remaining_mins = (job_end_time - now) / 60;
-        std::cout << "[Lanczos] SLURM job has ~" << remaining_mins 
+        settings.ctx.log(logging::INFO) << "[Lanczos] SLURM job has ~" << remaining_mins 
                   << " minutes remaining\n";
     }
 
@@ -250,7 +250,7 @@ Result lanczos_iterate_checkpoint(ApplyFn evaluate_add,
         eigval = ckpt_data.eigval;
         
         if (settings.ctx.my_rank == 0) {
-            std::cout << "[Lanczos] Resuming from iteration " << start_iter << "\n";
+            settings.ctx.log(logging::INFO) << "[Lanczos] Resuming from iteration " << start_iter << "\n";
         }
     } else {
         // Fresh start
@@ -282,9 +282,9 @@ Result lanczos_iterate_checkpoint(ApplyFn evaluate_add,
             if (settings.ctx.my_rank == 0) {
                 time_t now = std::time(nullptr);
                 int remaining_mins = (job_end_time - now) / 60;
-                std::cout << "[Lanczos] Checkpointed at iteration " << j 
+                settings.ctx.log(logging::INFO) << "[Lanczos] Checkpointed at iteration " << j 
                           << " with " << remaining_mins << " minutes remaining\n";
-                std::cout << "[Lanczos] Exiting early to allow job restart\n";
+                settings.ctx.log(logging::INFO) << "[Lanczos] Exiting early to allow job restart\n";
             }
             
             retval.eigval_converged = false;
@@ -325,7 +325,7 @@ Result lanczos_iterate_checkpoint(ApplyFn evaluate_add,
         
         if (beta < settings.abs_tol) {
             if (settings.ctx.my_rank == 0 && settings.verbosity > 0){
-                std::cout << "Lanczos breakdown at iteration "<<j<<std::endl;
+                settings.ctx.log(logging::INFO) << "Lanczos breakdown at iteration "<<j<<std::endl;
             }
             break;
         }
@@ -335,7 +335,7 @@ Result lanczos_iterate_checkpoint(ApplyFn evaluate_add,
         mul(v, 1.0/beta);
 
         if (settings.ctx.my_rank == 0 && settings.verbosity > 1) {
-            std::cout << "Iter "<< j << " a[j]="<<alpha<<" b[j]="<<beta << "\n";
+            settings.ctx.log(logging::DEBUG) << "Iter "<< j << " a[j]="<<alpha<<" b[j]="<<beta << "\n";
         }
 
         alphas.push_back(alpha);
@@ -346,7 +346,7 @@ Result lanczos_iterate_checkpoint(ApplyFn evaluate_add,
             if (settings.ctx.my_rank == 0) {
                 check_lanczos_convergence<_S>(alphas, betas, eigval, j, settings, retval);
                 if (settings.verbosity > 0) {
-                    std::cout << "Iter "<< j << " eigval error " << retval.eigval_error << "\n";
+                    settings.ctx.log(logging::DEBUG) << "Iter "<< j << " eigval error " << retval.eigval_error << "\n";
                 }
             }
 
@@ -396,7 +396,7 @@ Result eigval0_impl(ApplyFn apply_add, double& eigval,
         )
 {
     if (settings.verbosity >= 0){
-        std::cout << settings;
+        settings.ctx.log(logging::DEBUG) << settings;
     }
 
     if (v.size() == 0 ){
@@ -409,11 +409,11 @@ Result eigval0_impl(ApplyFn apply_add, double& eigval,
     std::vector<double> betas;
 
     if (settings.ctx.my_rank == 0){
-        std::cout << "[Lanczos Main] finding lowest eigenvalue\n";
+        settings.ctx.log(logging::INFO) << "[Lanczos Main] finding lowest eigenvalue\n";
     }
     Result res = lanczos_iterate(apply_add, v, alphas, betas, settings);
 
-    std::cout << "[Lanczos] tridiagonalising in Krylov space\n";
+    settings.ctx.log(logging::INFO) << "[Lanczos] tridiagonalising in Krylov space\n";
     std::vector<double> ritz;
 
     std::vector tmp_alphas(alphas);
@@ -422,7 +422,7 @@ Result eigval0_impl(ApplyFn apply_add, double& eigval,
 
     if(!settings.calc_eigenvector) return res;
                                     
-    std::cout << "[Lanczos] iterating to determine eigenvector\n";
+    settings.ctx.log(logging::INFO) << "[Lanczos] iterating to determine eigenvector\n";
     // ----------------------------
     // Second pass: reconstruct eigenvector
     // ----------------------------

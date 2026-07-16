@@ -8,6 +8,7 @@
 #include <random>
 #include <unordered_set>
 #include "bittools.hpp"
+#include "logging.hpp"
 #include <stdexcept>
 
 // Returns resident set size in bytes from /proc/self/status (Linux).
@@ -57,42 +58,24 @@ struct MPIHashContext {
         MPI_Comm_size(MPI_COMM_WORLD, &world_size);
         MPI_Comm_rank(MPI_COMM_WORLD, &my_rank);
 
-        char fname[100];
-        time_t now = time(nullptr);
-        struct tm* utc_time = gmtime(&now);
-        char timestamp[21];
-        strftime(timestamp, sizeof(timestamp), "%Y-%m-%dT%H-%M-%SZ", utc_time);
-        snprintf(fname, 100, "log_%s_n%d_r%d.log", timestamp, world_size, my_rank);
-        log.open(fname);
+        // Record our rank so logging is rank-aware even before the CLI verbosity
+        // is parsed. No log file is opened here (or anywhere): by default only
+        // rank 0 reports, straight to stdout. Verbosity/all-ranks are set later
+        // via logging::configure() (see configure_logging() in logging_cli.hpp).
+        logging::config().rank = my_rank;
     }
 
-    // destructor
-    ~MPIHashContext(){
-        log.close();
-    }
-
-    // Copy constructor
+    // Copy/move deleted: the context is always held by reference, never copied.
     MPIHashContext(const MPIHashContext&) = delete;
-    
-    // Copy assignment operator
     MPIHashContext& operator=(const MPIHashContext&) = delete;
-    
-    // Move constructor
-    MPIHashContext(MPIHashContext&& other) noexcept
-        : world_size(other.world_size),
-          my_rank(other.my_rank),
-          log(std::move(other.log)) {
-    }
-    
-    // Move assignment operator
-    MPIHashContext& operator=(MPIHashContext&& other) noexcept {
-        if (this != &other) {
-            log.close();
-            world_size = other.world_size;
-            my_rank = other.my_rank;
-            log = std::move(other.log);
-        }
-        return *this;
+    MPIHashContext(MPIHashContext&&) = delete;
+    MPIHashContext& operator=(MPIHashContext&&) = delete;
+
+    // Level-gated log stream: writes to stdout only when this rank should emit
+    // at `level` (see logging.hpp), otherwise discards. Const so it is usable
+    // through the const MPIctx& that lanczos_mpi::Settings holds.
+    std::ostream& log(int level = logging::INFO) const {
+        return logging::log(level);
     }
 
     idx_t rank_of_state(state_t psi) const noexcept {
@@ -113,8 +96,6 @@ struct MPIHashContext {
 
     int world_size;
     int my_rank;
-
-    std::ofstream log;
 
 protected:
     idx_t local_dimension;

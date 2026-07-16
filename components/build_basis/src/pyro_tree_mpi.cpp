@@ -9,7 +9,7 @@ volatile sig_atomic_t GLOBAL_SHUTDOWN_REQUEST=0;
 template<typename T, typename Sink>
 //requires std::derived_from<T, lat_container>
 void mpi_par_searcher<T, Sink>::distribute_initial_work(std::queue<vtree_node_t>& starting_nodes){
-    std::cout<<"Distributing initial work (clean run)";
+    logging::log(logging::DEBUG)<<"Distributing initial work (clean run)";
 
     std::vector<std::vector<vtree_node_t>> others_job_stacks(world_size);
 
@@ -18,7 +18,7 @@ void mpi_par_searcher<T, Sink>::distribute_initial_work(std::queue<vtree_node_t>
     while(!starting_nodes.empty()){
         others_job_stacks[r].push_back(starting_nodes.front());
         starting_nodes.pop();
-        print_node(std::cout<<"(for rank "<<r<<") ",others_job_stacks[r].back());
+        print_node(logging::log(logging::DEBUG)<<"(for rank "<<r<<") ",others_job_stacks[r].back());
         r = (r+1) % world_size;
     }
 
@@ -50,10 +50,10 @@ void mpi_par_searcher<T, Sink>::distribute_initial_work(std::queue<vtree_node_t>
             recvbuf.data(), my_count, vtree_node_type, 0, MPI_COMM_WORLD);
 
 
-    std::cout << "[rank "<<my_rank<<"] got "<<my_count<<" nodes\n";
+    logging::log(logging::DEBUG) << "[rank "<<my_rank<<"] got "<<my_count<<" nodes\n";
     // push received work to the local stack
     for (const auto& node : recvbuf) {
-        print_node(std::cout<<"[init] ", node);
+        print_node(logging::log(logging::TRACE)<<"[init] ", node);
         my_job_stack.push(node);
     }
 }
@@ -73,10 +73,10 @@ void mpi_par_searcher<T, Sink>::receive_initial_work(){
     MPI_Scatterv(nullptr, nullptr, nullptr, vtree_node_type,
             recvbuf.data(), my_count, vtree_node_type, 0, MPI_COMM_WORLD);
     
-    std::cout << "[rank "<<my_rank<<"] got "<<my_count<<" nodes:";
+    logging::log(logging::DEBUG) << "[rank "<<my_rank<<"] got "<<my_count<<" nodes:";
     // push received work to the local stack
     for (const auto& node : recvbuf) {
-        printHex(std::cout, node.state_thus_far) << node.curr_spin<<"\n";
+        printHex(logging::log(logging::TRACE), node.state_thus_far) << node.curr_spin<<"\n";
         my_job_stack.push(node);
     }
 }
@@ -92,7 +92,7 @@ void mpi_par_searcher<T, Sink>::state_tree_init(){
         // no checkpoint found: bootstrap needed
         // part one: node 0 builds some initial states
         if (my_rank == 0){
-            std::cout<<"Distributing initial work..."<<std::endl;
+            logging::log(logging::INFO)<<"Distributing initial work..."<<std::endl;
             std::queue<vtree_node_t> starting_nodes;
             starting_nodes.push(vtree_node_t({0,0,0}));
             _build_state_bfs(starting_nodes, world_size*INITIAL_DEPTH_FACTOR);
@@ -109,11 +109,11 @@ void mpi_par_searcher<T, Sink>::state_tree_init(){
         }
     }
     
-    std::cout<<"initial stack:";
+    logging::log(logging::DEBUG)<<"initial stack:";
     for (const auto& x : this->my_job_stack){
-        printHex(std::cout, x.state_thus_far)<<" ";
+        printHex(logging::log(logging::DEBUG), x.state_thus_far)<<" ";
     }
-    std::cout<<"\n";
+    logging::log(logging::DEBUG)<<"\n";
 }
 
 template<typename T, typename Sink>
@@ -219,7 +219,7 @@ bool mpi_par_searcher<T, Sink>::handle_shutdown_ring(bool& shutdown_continues){
                 MPI_COMM_WORLD, MPI_STATUS_IGNORE);
     if (!my_job_stack.empty()) {
         // cancel shutdown and continue
-        std::cout << "rank " << my_rank << " cancelling shutdown... "<<std::endl;
+        logging::log(logging::TRACE) << "rank " << my_rank << " cancelling shutdown... "<<std::endl;
         continue_exit = 0;
         shutdown_continues = false;
     } else {
@@ -236,12 +236,12 @@ bool mpi_par_searcher<T, Sink>::handle_shutdown_ring(bool& shutdown_continues){
     // condition to continue: either rank != 0, or 0 < continue_exit < world_size*(NUM_TERMINATE_LOOPS+1)
     bool terminate =false;
     if (continue_exit > world_size * NUM_TERMINATE_LOOPS){
-        std::cout << my_rank<<"] shutdown complete.\n";
-        std::cout <<  src_rank << " -> " << my_rank << " X " <<std::endl;
+        logging::log(logging::TRACE) << my_rank<<"] shutdown complete.\n";
+        logging::log(logging::TRACE) <<  src_rank << " -> " << my_rank << " X " <<std::endl;
         terminate = true;
     }
 
-    std::cout << continue_exit << " | " << src_rank << " -> " << my_rank << " -> " << dest_rank << std::endl;
+    logging::log(logging::TRACE) << continue_exit << " | " << src_rank << " -> " << my_rank << " -> " << dest_rank << std::endl;
     if (!((terminate || continue_exit==0 ) && my_rank == 0)){
         // stop forwarding here
         MPI_Send(&continue_exit, 1, MPI_INT, dest_rank, TAG_SHUTDOWN_RING, MPI_COMM_WORLD);
@@ -366,7 +366,7 @@ void mpi_par_searcher<T, Sink>::build_state_tree(){
         // give an update
         if ( num_checks++ > PRINT_INTERVAL && !my_job_stack.empty()){
             num_checks=0;
-            std::cout<<my_rank<<"] bottom job @ spin "<<my_job_stack[0].curr_spin<<std::endl;
+            logging::log(logging::DEBUG)<<my_rank<<"] bottom job @ spin "<<my_job_stack[0].curr_spin<<std::endl;
         }
     }
 
@@ -374,7 +374,8 @@ void mpi_par_searcher<T, Sink>::build_state_tree(){
     if (GLOBAL_SHUTDOWN_REQUEST) {
         // graceful exit mid-processing
 
-        printf("[rank %d] interrupted: processed %lu nodes\n", my_rank, local_processed);
+        logging::log(logging::INFO) << "[rank " << my_rank << "] interrupted: processed "
+                                    << local_processed << " nodes\n";
         shard.flush(true);
         checkpoint.save_stack(my_job_stack);
 
@@ -390,7 +391,8 @@ void mpi_par_searcher<T, Sink>::build_state_tree(){
                 "] About to terminate without clearing the stack"+
                 "-- something is terribly wrong!");
     } else {
-        printf("[rank %d] completed processing %lu nodes\n", my_rank, local_processed);
+        logging::log(logging::INFO) << "[rank " << my_rank << "] completed processing "
+                                    << local_processed << " nodes\n";
     }
 }
 
@@ -459,13 +461,13 @@ void mpi_par_searcher<T, Sink>::build_state_tree_allgather(){
                         sizeof(vtree_node_t), MPI_BYTE, receiver, 0, MPI_COMM_WORLD);
                 my_job_stack.erase(my_job_stack.begin());
 
-                std::cout<<my_rank<<"] donate -> "<<receiver<<std::endl;
+                logging::log(logging::TRACE)<<my_rank<<"] donate -> "<<receiver<<std::endl;
             } else if (my_rank == receiver) {
                 vtree_node_t received_node;
                 MPI_Recv(&received_node, sizeof(vtree_node_t),
                         MPI_BYTE, donor, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
 
-                std::cout<<my_rank<<"] recv <- "<<donor<<std::endl;
+                logging::log(logging::TRACE)<<my_rank<<"] recv <- "<<donor<<std::endl;
                 my_job_stack.push_back(received_node);
             }
             }
@@ -479,7 +481,7 @@ void mpi_par_searcher<T, Sink>::build_state_tree_allgather(){
         // give an update
         if ( num_checks++ > PRINT_INTERVAL && !my_job_stack.empty()){
             num_checks=0;
-            std::cout<<my_rank<<"] bottom job @ spin "<<my_job_stack[0].curr_spin<<std::endl;
+            logging::log(logging::DEBUG)<<my_rank<<"] bottom job @ spin "<<my_job_stack[0].curr_spin<<std::endl;
         }
 
     }
@@ -489,7 +491,8 @@ end_of_loop:
     if (GLOBAL_SHUTDOWN_REQUEST) {
         // graceful exit mid-processing
 
-        printf("[rank %d] interrupted: processed %lu nodes\n", my_rank, local_processed);
+        logging::log(logging::INFO) << "[rank " << my_rank << "] interrupted: processed "
+                                    << local_processed << " nodes\n";
         shard.flush(true);
         checkpoint.save_stack(my_job_stack);
 
@@ -505,7 +508,8 @@ end_of_loop:
                 "] About to terminate without clearing the stack"+
                 "-- something is terribly wrong!");
     } else {
-        printf("[rank %d] completed processing %lu nodes\n", my_rank, local_processed);
+        logging::log(logging::INFO) << "[rank " << my_rank << "] completed processing "
+                                    << local_processed << " nodes\n";
     }
 }
 

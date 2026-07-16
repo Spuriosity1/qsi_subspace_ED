@@ -127,7 +127,7 @@ int main(int argc, char* argv[]){
     MPIHashContext ctx;
 
     if (!prog.get<bool>("--notrim")){
-        ctx.log<<"[remove unneeded elements]"<<std::endl;
+        ctx.log(logging::DEBUG)<<"[remove unneeded elements]"<<std::endl;
         basis_st.remove_null_states(H_sym);
         basis_loc.remove_null_states(H_sym);
         basis_fast_loc.remove_null_states(H_sym);
@@ -160,9 +160,9 @@ int main(int argc, char* argv[]){
 
     std::cout<<"Done"<<std::endl;
 
-    ctx.log<<"[Symbolic ham construction done.]"<<std::endl;
+    ctx.log(logging::DEBUG)<<"[Symbolic ham construction done.]"<<std::endl;
  
-    ctx.log<<"[op construct]"<<std::endl;
+    ctx.log(logging::DEBUG)<<"[op construct]"<<std::endl;
     auto H_mpi    = MPILazyOpSum(basis_loc,        H_sym, ctx);
     auto H_fast   = MPILazyOpSum(basis_fast_loc,   H_sym, ctx);
     auto H_interp = MPILazyOpSum(basis_interp_loc, H_sym, ctx);
@@ -171,12 +171,12 @@ int main(int argc, char* argv[]){
 
 
 //    if (prog.get<bool>("--rebalance")){
-//        ctx.log<<"[calc basis wisdom]"<<std::endl;
+//        ctx.log(logging::DEBUG)<<"[calc basis wisdom]"<<std::endl;
 //        auto wisdom = H_mpi.find_optimal_basis_load();
-//        ctx.log<<"[basis reshuffle]"<<std::endl;
+//        ctx.log(logging::DEBUG)<<"[basis reshuffle]"<<std::endl;
 //        basis.exchange_local_states(wisdom, ctx);
 //    }
-    ctx.log<<"[allocate temporaries]"<<std::endl;
+    ctx.log(logging::DEBUG)<<"[allocate temporaries]"<<std::endl;
     bool use_batched = prog.is_used("--batch-size");
     int batch_size   = prog.get<int>("--batch-size");
     if (use_batched) {
@@ -188,7 +188,7 @@ int main(int argc, char* argv[]){
         H_fast.allocate_temporaries();
         H_interp.allocate_temporaries();
     }
-    ctx.log<<"[build plan]"<<std::endl;
+    ctx.log(logging::DEBUG)<<"[build plan]"<<std::endl;
     H_plan.build_plan(use_batched ? batch_size : -1);
     assert(H_plan.has_plan());
 

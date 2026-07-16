@@ -1,5 +1,6 @@
 #pragma once
 #include "bittools.hpp"
+#include "logging.hpp"
 #include <string>
 #include <vector>
 #include <stdexcept>
@@ -10,21 +11,25 @@
 #endif
 
 
+// Prefixes each message with "[rank N] " and routes it through the process-wide
+// logging config: emitted only when this rank should report at `level`
+// (see logging.hpp), otherwise silently discarded.
 class RankLogger {
     const int& rank;
+    int level;
 public:
-    RankLogger(const int& r) : rank(r) {}
+    RankLogger(const int& r, int lvl = logging::INFO) : rank(r), level(lvl) {}
 
     template<typename T>
-    auto& operator<<(const T& value) {
-        std::cout << "[rank " << rank << "] " << value;
-return std::cout;
+    std::ostream& operator<<(const T& value) {
+        std::ostream& os = logging::log(level);
+        os << "[rank " << rank << "] " << value;
+        return os;
     }
 
     // support std::endl and other manipulators
-    auto& operator<<(std::ostream& (*manip)(std::ostream&)) {
-        std::cout << manip;
-return std::cout;
+    std::ostream& operator<<(std::ostream& (*manip)(std::ostream&)) {
+        return logging::log(level) << manip;
     }
 };
 

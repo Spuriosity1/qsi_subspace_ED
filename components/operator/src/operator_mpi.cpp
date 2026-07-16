@@ -20,10 +20,10 @@
 
 #ifdef DEBUG
 #define DEBUG_PRINT_VEC(msg, op_index, vector, ctx) \
-            ctx.log << msg<<" (op "<<op_index<<") [node "<<ctx.my_rank<< "]\n";\
+            ctx.log(logging::DEBUG) << msg<<" (op "<<op_index<<") [node "<<ctx.my_rank<< "]\n";\
             for (int r=0; r<ctx.world_size; r++){\
-                if (r == ctx.my_rank) ctx.log<<"*";\
-                ctx.log << "\tvector["<<r<<"] -> "<<curr_op_comm.send_states[r].size() <<"\n";\
+                if (r == ctx.my_rank) ctx.log(logging::DEBUG)<<"*";\
+                ctx.log(logging::DEBUG) << "\tvector["<<r<<"] -> "<<curr_op_comm.send_states[r].size() <<"\n";\
             }
 #else
 #define DEBUG_PRINT_VEC(msg, op_index, vector, ctx)
@@ -105,7 +105,7 @@ inline std::vector<Uint128> read_basis_hdf5_MPI(
         }
 
         // Print diagnostics
-        std::cout<<"[r"<<my_rank<<"] Loaded basis chunk.\n";
+        logging::log(logging::DEBUG)<<"[r"<<my_rank<<"] Loaded basis chunk.\n";
 		
 		// Clean up
 		H5Sclose(dataspace_id);
@@ -127,7 +127,7 @@ inline std::vector<Uint128> read_basis_hdf5_MPI(
 
 template<typename B>
 void ZBasisMPI<B>::load_raw(const fs::path& bfile, const std::string& dataset){
-    std::cerr << "Loading basis from file " << bfile <<"\n";
+    logging::log(logging::INFO) << "Loading basis from file " << bfile <<"\n";
 
     if (bfile.stem().extension() == ".partitioned"){
         assert(bfile.extension() == ".h5");
@@ -144,9 +144,9 @@ void ZBasisMPI<B>::load_raw(const fs::path& bfile, const std::string& dataset){
 template<typename B>
 void ZBasisMPI<B>::redistribute(){
     MPIHashContext ctx;
-    std::cerr<<"[r"<<ctx.my_rank<<"] Transfer states to correct ranks...\n";
+    ctx.log(logging::DEBUG)<<"[r"<<ctx.my_rank<<"] Transfer states to correct ranks...\n";
     tfer_states_to_correct_ranks(ctx);
-    std::cerr << "Done!\n";
+    ctx.log(logging::DEBUG) << "Done!\n";
 }
 
 template<typename B>
@@ -163,7 +163,7 @@ void ZBasisMPI<B>::tfer_states_to_correct_ranks(MPIHashContext& ctx){
     constexpr size_t S = sizeof(ZBasisBase::state_t);
     auto log_mem = [&](const char* phase) {
         size_t rss = rss_bytes();
-        std::cerr << "[tfer r" << ctx.my_rank << " " << phase << "]"
+        ctx.log(logging::DEBUG) << "[tfer r" << ctx.my_rank << " " << phase << "]"
                   << "  n=" << this->size()
                   << "  cap=" << this->states.capacity()
                   << "  states_MiB=" << this->states.capacity() * S / (1<<20)
@@ -212,7 +212,7 @@ void ZBasisMPI<B>::tfer_states_to_correct_ranks(MPIHashContext& ctx){
     for (int r = 1; r < ctx.world_size; r++)
         recv_displs[r] = recv_displs[r-1] + recv_counts[r-1];
 
-    std::cerr << "[tfer r" << ctx.my_rank << " pre-alltoallv]"
+    ctx.log(logging::DEBUG) << "[tfer r" << ctx.my_rank << " pre-alltoallv]"
               << "  send_MiB=" << this->states.size() * S / (1<<20)
               << "  recv_MiB=" << recv_states.size() * S / (1<<20)
               << "  rss_MiB=" << rss_bytes() / (1<<20)
@@ -475,7 +475,7 @@ void MPILazyOpSum<coeff_t, B>::evaluate_add_off_diag_pipeline(const coeff_t* x, 
 // print diagnostics
 #ifdef SUBSPACE_ED_BENCHMARK_OPERATIONS
         for (auto t : timers){
-            t->print_summary(ctx.log);
+            t->print_summary(ctx.log(logging::DEBUG));
         }
 #endif
 
@@ -704,7 +704,7 @@ void MPILazyOpSum<coeff_t, B>::evaluate_add_off_diag_batched(const coeff_t* x, c
 
 #ifdef SUBSPACE_ED_BENCHMARK_OPERATIONS
     for (auto t : timers)
-        t->print_summary(ctx.log);
+        t->print_summary(ctx.log(logging::DEBUG));
 #endif
 }
 
@@ -778,7 +778,7 @@ void MPILazyOpSum<coeff_t, basis_t>::allocate_temporaries(int B) {
     recv_dy.resize(total_recv);
 
     constexpr size_t record_bytes = sizeof(state_t) + sizeof(coeff_t);
-    ctx.log << "[alloc r" << ctx.my_rank << "]"
+    ctx.log(logging::DEBUG) << "[alloc r" << ctx.my_rank << "]"
             << " total_send=" << total_send
             << " (" << total_send * record_bytes / (1 << 20) << " MiB)"
             << " total_recv=" << total_recv
@@ -881,8 +881,7 @@ void MPILazyOpSum<coeff_t, basis_t>::build_plan(int B, size_t mem_cap_bytes) {
     MPI_Allreduce(&projected, &projected_max, 1, get_mpi_type<size_t>(),
                   MPI_MAX, MPI_COMM_WORLD);
     if (mem_cap_bytes > 0 && projected_max > mem_cap_bytes) {
-        if (my_rank == 0)
-            std::cout << "[plan] refused: worst rank needs "
+        logging::log(logging::INFO) << "[plan] refused: worst rank needs "
                       << projected_max / (1<<20) << " MiB > cap "
                       << mem_cap_bytes / (1<<20) << " MiB; "
                       << "falling back to search path\n";
@@ -949,7 +948,7 @@ void MPILazyOpSum<coeff_t, basis_t>::build_plan(int B, size_t mem_cap_bytes) {
     }
 
     plan_built = true;
-    ctx.log << "[plan r" << my_rank << "]"
+    ctx.log(logging::DEBUG) << "[plan r" << my_rank << "]"
             << " batches=" << NB
             << " self_records=" << self_total
             << " recv_records=" << tgt_total
@@ -1036,7 +1035,7 @@ void MPILazyOpSum<coeff_t, B>::evaluate_add_off_diag_planned(const coeff_t* x, c
 
 #ifdef SUBSPACE_ED_BENCHMARK_OPERATIONS
     for (auto t : timers)
-        t->print_summary(ctx.log);
+        t->print_summary(ctx.log(logging::DEBUG));
 #endif
 }
 

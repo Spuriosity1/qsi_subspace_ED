@@ -14,6 +14,7 @@
 #include "operator_mpi.hpp"
 #include "lanczos_mpi.hpp"
 #include "lanczos_cli.hpp"
+#include "logging_cli.hpp"
 #include "expectation_eval.hpp"
 
 using json = nlohmann::json;
@@ -99,7 +100,7 @@ int main(int argc, char* argv[]) {
         .scan<'i', int>();
     prog.add_argument("--print_interval")
         .help("number of check cycles before printing debug info")
-        .default_value(50)
+        .default_value(5000)
         .scan<'i', int>();
     prog.add_argument("--chunk_size")
         .help("minimum size of a stack to permit sending to another rank")
@@ -153,6 +154,7 @@ int main(int argc, char* argv[]) {
         .help("output directory (also used for Lanczos checkpoints)");
 
     provide_lanczos_options(prog);
+    provide_logging_options(prog);
 
     try {
         prog.parse_args(argc, argv);
@@ -175,6 +177,7 @@ int main(int argc, char* argv[]) {
 	jfile >> jdata;
 
     MPIctx ctx;
+    configure_logging(prog, ctx.my_rank);
 
 	using coeff_t=double;
     bool calc_partial_vol = true;
@@ -219,7 +222,7 @@ int main(int argc, char* argv[]) {
     }
 
     if (ctx.my_rank == 0) {
-        std::cout << "[Main] Checkpoint file: " << checkpoint_file << "\n";
+        logging::log(logging::INFO) << "[Main] Checkpoint file: " << checkpoint_file << "\n";
     }
 
 	// Step 2: enumerate the basis directly into RAM
@@ -240,7 +243,7 @@ int main(int argc, char* argv[]) {
     std::string job_tag = "fused-" +
         std::filesystem::path(lattice_file).stem().string();
 
-    if (ctx.my_rank == 0) std::cout << "[Search] Building basis in memory...\n";
+    if (ctx.my_rank == 0) logging::log(logging::INFO) << "[Search] Building basis in memory...\n";
 
     size_t raw_local = 0;
     std::vector<Uint128> my_states;
@@ -258,7 +261,7 @@ int main(int argc, char* argv[]) {
     MPI_Allreduce(MPI_IN_PLACE, &interrupted, 1, MPI_INT, MPI_MAX, MPI_COMM_WORLD);
     if (interrupted) {
         if (ctx.my_rank == 0) {
-            std::cout << "[Main] Basis search was interrupted; the in-memory "
+            logging::log(logging::INFO) << "[Main] Basis search was interrupted; the in-memory "
                 "pipeline cannot resume a partial search. Exiting.\n";
         }
         MPI_Finalize();
@@ -269,7 +272,7 @@ int main(int argc, char* argv[]) {
     MPI_Allreduce(&raw_local, &raw_global, 1, get_mpi_type<size_t>(),
             MPI_SUM, MPI_COMM_WORLD);
     if (ctx.my_rank == 0) {
-        std::cout << "[Search] Done! raw basis dim=" << raw_global << "\n";
+        logging::log(logging::INFO) << "[Search] Done! raw basis dim=" << raw_global << "\n";
     }
 
 	// Step 3: redistribute to hash-correct ranks (states already trimmed
@@ -277,9 +280,9 @@ int main(int argc, char* argv[]) {
     basis_t basis;
     basis.adopt_states(std::move(my_states));
     basis.redistribute();
-    std::cout<<"[MPI_BST]  Done! local basis dim="<<basis.dim()<<std::endl;
+    logging::log(logging::DEBUG)<<"[MPI_BST]  Done! local basis dim="<<basis.dim()<<std::endl;
     if (ctx.my_rank == 0) {
-        std::cout << "[MPI_BST] global basis dim=" << basis.global_dim()
+        logging::log(logging::INFO) << "[MPI_BST] global basis dim=" << basis.global_dim()
                   << " (trimmed " << raw_global - basis.global_dim() << ")\n";
     }
 
@@ -317,7 +320,7 @@ int main(int argc, char* argv[]) {
 
         if (ctx.my_rank == 0) {
             const double MiB = 1.0 / (1 << 20);
-            std::cout << "[Search] Estimated steady-state memory (global):\n"
+            logging::log(logging::INFO) << "[Search] Estimated steady-state memory (global):\n"
                       << "    basis (Uint128)        : " << g[0] * MiB << " MiB\n"
                       << "    Lanczos vectors (3x)   : " << g[1] * MiB << " MiB\n"
                       << "    operator index cache   : " << g[2] * MiB
@@ -331,6 +334,7 @@ int main(int argc, char* argv[]) {
     // Do the diagonalisation
     lanczos_mpi::Settings settings(ctx);
     parse_lanczos_settings(prog, settings);
+    settings.verbosity = prog.get<int>("--verbosity");
     settings.calc_eigenvector = true;
 
     const int batch_size = prog.get<int>("--batch-size");
@@ -355,15 +359,15 @@ int main(int argc, char* argv[]) {
             H.evaluate_add(x_local, y_local);
         };
 
-        std::cout << "[Lanczos] finding lowest eigenvalue\n";
+        logging::log(logging::INFO) << "[Lanczos] finding lowest eigenvalue\n";
         auto res=  lanczos_mpi::lanczos_iterate_checkpoint(evadd, local_v0, alphas, betas, settings, checkpoint_file);
 
-        std::cout<<"[rank "<<ctx.my_rank<<"] "<<res;
+        logging::log(logging::DEBUG)<<"[rank "<<ctx.my_rank<<"] "<<res;
 
         // If we hit checkpoint and exited early, clean exit
         if (!res.eigval_converged) {
             if (ctx.my_rank == 0) {
-                std::cout << "[Main] Exited initial iteration at n="<<
+                logging::log(logging::INFO) << "[Main] Exited initial iteration at n="<<
                     res.n_iterations<<" due to time limit. Restart to continue.\n";
             }
             MPI_Finalize();
@@ -371,7 +375,7 @@ int main(int argc, char* argv[]) {
         }
 
         // If converged, compute final eigenvalue and eigenvector
-        std::cout << "[Lanczos] tridiagonalising in Krylov space\n";
+        logging::log(logging::INFO) << "[Lanczos] tridiagonalising in Krylov space\n";
         std::vector<double> ritz;
         {
             std::vector tmp_alphas(alphas);
@@ -379,7 +383,7 @@ int main(int argc, char* argv[]) {
             tridiagonalise_one(tmp_alphas, tmp_betas, eigval, ritz);
         }
 
-        std::cout << "[Lanczos] iterating to determine eigenvector\n";
+        logging::log(logging::INFO) << "[Lanczos] iterating to determine eigenvector\n";
         evector.resize(basis.dim());
 
         // Second pass for eigenvector
@@ -396,7 +400,7 @@ int main(int argc, char* argv[]) {
         // reconstructed), clean exit
         if (!res.eigvec_converged) {
             if (ctx.my_rank == 0) {
-            std::cout << "[Main] Exited second iteration at n="<<
+            logging::log(logging::INFO) << "[Main] Exited second iteration at n="<<
                 res.n_iterations<<" due to time limit. Restart to continue.\n";
             }
             MPI_Finalize();
@@ -408,8 +412,10 @@ int main(int argc, char* argv[]) {
     std::string out_filename = std::filesystem::path(s.str()+".eigs.h5")
         .replace_extension(".out.h5");
 
-    std::cout << "Eigenvalues:\n" << eigval << "\n\n";
-	std::cout << "Writing to\n"<<out_filename<<std::endl;
+    if (ctx.my_rank == 0){
+        logging::log(logging::INFO) << "Eigenvalues:\n" << eigval << "\n\n";
+        logging::log(logging::INFO) << "Writing to\n"<<out_filename<<std::endl;
+    }
 
     // dummy (here in case we calc more later
     std::vector<double> eigvals{eigval};
@@ -426,13 +432,13 @@ int main(int argc, char* argv[]) {
 
     {
         if (ctx.my_rank == 0)
-            std::cout<<"Compute <O>... "<<std::flush;
+            logging::log(logging::INFO)<<"Compute <O>... "<<std::flush;
 
         std::vector<double> chi(basis.dim()); // |chi> = O_j |psi>
         std::vector<double>& u = local_v0;    // recycled: |u> = O_0 |psi>
 
         for (int opi=0; opi<n_operators; opi++){
-            if (ctx.my_rank == 0) std::cout<<opi<<" " <<std::flush;
+            if (ctx.my_rank == 0) logging::log(logging::INFO)<<opi<<" " <<std::flush;
             // Constructed per iteration so the bounded comm buffers of each
             // operator are freed again before the next one.
             MPILazyOpSum<double, basis_t> op(basis, ringL[opi], ctx);
@@ -467,13 +473,13 @@ int main(int argc, char* argv[]) {
 
         // partial volume operators
         if (calc_partial_vol){
-            if (ctx.my_rank == 0) std::cout<<"Compute <OOO>... "<<std::flush;
+            if (ctx.my_rank == 0) logging::log(logging::INFO)<<"Compute <OOO>... "<<std::flush;
             // computing expectation values of the incomplete volumes
             for (int sl=0; sl<4; sl++){
                 auto par_vol_operators = get_partial_vol_ops(jdata, ringL, sl);
                 partial_vol[sl].resize(par_vol_operators.size(), 0.0);
                 for (size_t opi=0; opi<par_vol_operators.size(); opi++){
-                    if (ctx.my_rank == 0) std::cout<<opi<<" "<<std::flush;
+                    if (ctx.my_rank == 0) logging::log(logging::INFO)<<opi<<" "<<std::flush;
                     // Per-iteration construction with bounded batches, as in
                     // the ring loop: the default allocate_temporaries() (-1 =
                     // whole slab in one round) would size the send/recv
@@ -493,7 +499,7 @@ int main(int argc, char* argv[]) {
             }
 
             if (ctx.my_rank == 0)
-                std::cout<<"\nCompute <OOO> complete "<<std::endl;
+                logging::log(logging::INFO)<<"\nCompute <OOO> complete "<<std::endl;
         }
 
 
@@ -507,7 +513,7 @@ int main(int argc, char* argv[]) {
                     H5F_ACC_TRUNC, H5P_DEFAULT, H5P_DEFAULT);
         if (out_fid < 0)
             throw std::runtime_error("Failed to create HDF5 file");
-        std::cout << "Done!" << std::endl;
+        logging::log(logging::INFO) << "Done!" << std::endl;
 
         // write out the data
         write_string_to_hdf5(out_fid, "latfile_json", lattice_file);
