@@ -149,14 +149,19 @@ mpi_par_searcher(const lattice& lat, unsigned num_spinon_pairs,
         const std::vector<size_t>& perm_,
         const std::filesystem::path& workdir_,
         const std::string &job_tag_,
-        size_t buf_entries = 1<<20) :
+        size_t buf_entries = 1<<20,
+        const std::filesystem::path& shard_dir_ = {}) :
     T(lat, num_spinon_pairs),
     world_size(get_mpi_world_size()),
     my_rank(get_mpi_rank()),
     workdir(workdir_),
     job_tag(job_tag_),
     perm(perm_),
-    shard( workdir / ("shard-" + job_tag + "-" + std::to_string(my_rank) + ".bin"), buf_entries ),
+    // The shard lives on shard_dir_ when given (e.g. a rank-local /tmp) so a
+    // search that finds far more states than this rank will ultimately own does
+    // not blow up RAM; it falls back to workdir for the classic disk pipeline.
+    shard( (shard_dir_.empty() ? workdir : shard_dir_)
+            / ("shard-" + job_tag + "-" + std::to_string(my_rank) + ".bin"), buf_entries ),
     checkpoint( workdir / ("checkpoint-" + job_tag + "-" + std::to_string(my_rank) + ".bin") ),
     db_log(my_rank, logging::TRACE)
     {

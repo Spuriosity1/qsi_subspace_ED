@@ -1,6 +1,7 @@
 #include "operator_mpi.hpp"
 #include <mpi.h>
 #include <cassert>
+#include <fstream>
 #include "timeit.hpp"
 #include <numeric>
 
@@ -227,13 +228,20 @@ void ZBasisMPI<B>::tfer_states_to_correct_ranks(MPIHashContext& ctx){
     std::swap(recv_states, this->states);
     log_mem("post-alltoallv");  // send buffer freed, recv now in this->states
 
+    finalize_local_partition(ctx);
+    log_mem("post-finalize");  // sorted, bounds built, dims populated
+}
+
+// Sort the local partition, rebuild search-acceleration structures, and
+// populate global_dim / dim_of_rank metadata. Shared by redistribute() and
+// ingest_shard_streaming().
+template<typename B>
+void ZBasisMPI<B>::finalize_local_partition(MPIHashContext& ctx){
     std::sort(this->states.begin(), this->states.end());
-    log_mem("post-sort2");
 
     // Rebuild search-acceleration structures (bounds, sentinels, …) for
     // whichever LocalBasis is being used.
     this->on_states_changed();
-    log_mem("post-on_states_changed");  // bounds map / sentinels now built
 
     ZBasisBase::idx_t my_size = this->size();
     _all_rank_dims.resize(ctx.world_size);
@@ -241,6 +249,87 @@ void ZBasisMPI<B>::tfer_states_to_correct_ranks(MPIHashContext& ctx){
             _all_rank_dims.data(), 1, get_mpi_type<ZBasisBase::idx_t>(), MPI_COMM_WORLD);
     _global_dim = std::accumulate(_all_rank_dims.begin(), _all_rank_dims.end(),
             static_cast<ZBasisBase::idx_t>(0));
+}
+
+// Streaming hash-redistribution straight off a rank-local binary shard.
+// See the header for the memory rationale. Each round every rank reads one
+// block, filters it, hash-buckets it, and participates in a collective count
+// exchange + Alltoallv; owned states are appended to this->states. Rounds
+// continue until no rank read any records in a round (so a rank whose shard
+// drains early keeps taking part in empty rounds). The Alltoallv is collective,
+// so the loop trip count is identical on every rank by construction.
+template<typename B>
+void ZBasisMPI<B>::ingest_shard_streaming(const fs::path& shard_path,
+        size_t block_records, const StateFilter& filter){
+    using state_t = ZBasisBase::state_t;
+    MPIHashContext ctx;
+    if (block_records == 0) block_records = (1u << 20);
+
+    // ShardWriter always creates the file (even for a rank that found nothing),
+    // but be defensive: a missing shard is treated as an empty one.
+    std::ifstream in(shard_path, std::ios::binary);
+
+    std::vector<state_t> block;
+    std::vector<state_t> send_buf;
+    std::vector<int> send_counts(ctx.world_size), recv_counts(ctx.world_size);
+    std::vector<int> send_displs(ctx.world_size), recv_displs(ctx.world_size);
+
+    this->states.clear();
+
+    while (true) {
+        // Read up to block_records states; got == 0 means this shard is drained.
+        block.resize(block_records);
+        size_t got = 0;
+        if (in) {
+            in.read(reinterpret_cast<char*>(block.data()),
+                    block_records * sizeof(state_t));
+            got = static_cast<size_t>(in.gcount()) / sizeof(state_t);
+        }
+        block.resize(got);
+
+        if (filter && !block.empty()) filter(block);
+
+        // Hash-bucket the (possibly now-shorter) block by destination rank.
+        std::fill(send_counts.begin(), send_counts.end(), 0);
+        for (const auto& psi : block)
+            send_counts[ctx.rank_of_state(psi)]++;
+
+        send_displs[0] = 0;
+        for (int r = 1; r < ctx.world_size; r++)
+            send_displs[r] = send_displs[r-1] + send_counts[r-1];
+
+        send_buf.resize(block.size());
+        {
+            std::vector<int> counters(send_displs);
+            for (const auto& psi : block)
+                send_buf[counters[ctx.rank_of_state(psi)]++] = psi;
+        }
+
+        MPI_Alltoall(send_counts.data(), 1, get_mpi_type<int>(),
+                recv_counts.data(), 1, get_mpi_type<int>(), MPI_COMM_WORLD);
+
+        recv_displs[0] = 0;
+        for (int r = 1; r < ctx.world_size; r++)
+            recv_displs[r] = recv_displs[r-1] + recv_counts[r-1];
+        size_t recv_total = std::accumulate(recv_counts.begin(), recv_counts.end(), 0ull);
+
+        // Append received states directly onto this->states.
+        size_t old = this->states.size();
+        this->states.resize(old + recv_total);
+        MPI_Alltoallv(send_buf.data(), send_counts.data(), send_displs.data(),
+                get_mpi_type<state_t>(),
+                this->states.data() + old, recv_counts.data(), recv_displs.data(),
+                get_mpi_type<state_t>(), MPI_COMM_WORLD);
+
+        // Stop once no rank read anything this round.
+        int local_active = block.empty() ? 0 : 1;
+        int any_active = 0;
+        MPI_Allreduce(&local_active, &any_active, 1, get_mpi_type<int>(),
+                MPI_MAX, MPI_COMM_WORLD);
+        if (!any_active) break;
+    }
+
+    finalize_local_partition(ctx);
 }
 
 template <RealOrCplx coeff_t, Basis B>

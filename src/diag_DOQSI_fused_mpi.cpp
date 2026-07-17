@@ -22,14 +22,18 @@ using namespace projED;
 using basis_t = ZBasisBSTFast_HashMPI;
 
 // Fused pipeline: gen_spinon_basis/sbsearch_mpi + merge_shards +
-// diag_DOQSI_ham_mpi in one process, with the basis held in RAM throughout
-// (nothing basis-sized ever touches the filesystem). Per rank:
+// diag_DOQSI_ham_mpi in one process, without the basis ever landing on the
+// shared filesystem. Per rank:
 //   i)   enumerate the constrained basis (optionally within a fixed
 //        polarisation --sector) via the MPI work-stealing tree search,
-//        accumulating states in memory instead of disk shards;
-//   ii)  drop states annihilated by every term of H (--notrim to skip),
-//        redistribute states to their hash-correct ranks, and precompute the
-//        static apply plan (remote target indices; --noplan to skip);
+//        streaming the found states to a binary shard on a rank-local scratch
+//        disk (--scratch_dir, else $TMPDIR/tmp). A large search can find many
+//        more states on a rank than that rank will ultimately own, so spilling
+//        to local disk keeps the search-phase RAM bounded;
+//   ii)  stream the shard back in blocks, dropping states annihilated by every
+//        term of H (--notrim to skip), redistribute each block to its
+//        hash-correct rank, and precompute the static apply plan (remote target
+//        indices; --noplan to skip);
 //   iii) run the checkpointed Lanczos recurrence and write eigenpairs to HDF5.
 //
 // The tree-search stack checkpoint is NOT usable across runs here: states
@@ -37,15 +41,22 @@ using basis_t = ZBasisBSTFast_HashMPI;
 // silently yield an incomplete basis. Stale checkpoints are deleted and an
 // interrupted search aborts the run.
 
+// Enumerate the basis for this rank straight to a binary shard on scratchdir
+// (a rank-local disk such as /tmp) instead of accumulating it in RAM. On a very
+// large search a rank can *find* far more states than it will ultimately *own*
+// after the hash redistribution, so holding the whole found set in memory can
+// exhaust the node; streaming it to local disk caps the search-phase footprint
+// at the ShardWriter buffer. Returns the finalised shard path; the states are
+// read back and redistributed by ZBasisMPI::ingest_shard_streaming().
 template <typename LatC>
-static std::vector<Uint128> build_basis_states(
+static std::filesystem::path build_basis_shard(
         const lattice& lat, int num_spinon_pairs,
         const std::vector<size_t>& perm,
         const std::filesystem::path& workdir,
+        const std::filesystem::path& scratchdir,
         const std::string& job_tag,
         const argparse::ArgumentParser& prog,
         const std::vector<int>& sector,
-        const SymbolicOpSum<double>& H_sym,
         size_t& raw_count_local)
 {
 
@@ -53,8 +64,8 @@ static std::vector<Uint128> build_basis_states(
     std::filesystem::remove(workdir /
             ("checkpoint-" + job_tag + "-" + std::to_string(get_mpi_rank()) + ".bin"));
 
-    mpi_par_searcher<LatC, MemoryShard> L(lat, num_spinon_pairs, perm,
-            workdir, job_tag);
+    mpi_par_searcher<LatC, ShardWriter> L(lat, num_spinon_pairs, perm,
+            workdir, job_tag, (1u << 20), scratchdir);
     if constexpr (std::is_same_v<LatC, lat_container_with_sector>) {
         L.set_sector(sector);
     }
@@ -62,18 +73,14 @@ static std::vector<Uint128> build_basis_states(
                     prog.get<int>("--print_interval"),
                     prog.get<int>("--chunk_size"));
     L.build_state_tree();
-    raw_count_local = L.sink().size();
 
-    // Trim unflippable states block-by-block *before* assembling the slab
-    // into one contiguous vector: the high-water mark stays at
-    // (trimmed + one block) instead of (raw + trimmed).
-    if (!GLOBAL_SHUTDOWN_REQUEST && !prog.get<bool>("--notrim")) {
-        for (auto& blk : L.sink().mutable_blocks()) {
-            remove_annihilated_states(H_sym, blk);
-            blk.shrink_to_fit();
-        }
-    }
-    return L.sink().take_states();
+    // Flush the buffer and atomically rename .inprogress -> .done so the shard
+    // can be reopened for the redistribution pass.
+    L.sink().finalize(true);
+    std::filesystem::path shard_path = L.sink().done_path();
+    raw_count_local = std::filesystem::exists(shard_path)
+        ? std::filesystem::file_size(shard_path) / sizeof(Uint128) : 0;
+    return shard_path;
 }
 
 
@@ -105,6 +112,19 @@ int main(int argc, char* argv[]) {
     prog.add_argument("--chunk_size")
         .help("minimum size of a stack to permit sending to another rank")
         .default_value(2)
+        .scan<'i', int>();
+
+    // Basis search spills each rank's found states to a binary shard on a
+    // rank-local scratch disk; they are streamed back and hash-redistributed
+    // after the search. Keeps the search-phase RAM bounded on huge searches.
+    prog.add_argument("--scratch_dir")
+        .help("rank-local scratch directory for basis search shards "
+              "(default: $TMPDIR, else /tmp)")
+        .default_value(std::string(""));
+    prog.add_argument("--ingest-block-size")
+        .help("basis states per rank per redistribution round when streaming "
+              "the search shards back (larger = fewer collective rounds)")
+        .default_value(1<<20)
         .scan<'i', int>();
 
     // Checkpointing (Lanczos only -- the basis search cannot checkpoint in
@@ -243,23 +263,37 @@ int main(int argc, char* argv[]) {
     std::string job_tag = "fused-" +
         std::filesystem::path(lattice_file).stem().string();
 
-    if (ctx.my_rank == 0) logging::log(logging::INFO) << "[Search] Building basis in memory...\n";
+    // Rank-local scratch for the search shards: --scratch_dir, else $TMPDIR,
+    // else /tmp. Each rank writes/reads only its own shard here, so this should
+    // be node-local disk (not the shared output filesystem).
+    std::filesystem::path scratchdir = prog.get<std::string>("--scratch_dir");
+    if (scratchdir.empty()) {
+        const char* tmpenv = std::getenv("TMPDIR");
+        scratchdir = (tmpenv && *tmpenv) ? tmpenv : "/tmp";
+    }
+    std::filesystem::create_directories(scratchdir);
+
+    if (ctx.my_rank == 0)
+        logging::log(logging::INFO) << "[Search] Building basis to shards under "
+                                    << scratchdir << " ...\n";
 
     size_t raw_local = 0;
-    std::vector<Uint128> my_states;
+    std::filesystem::path shard_path;
     if (target_sector.empty()){
-        my_states = build_basis_states<lat_container>(lat, num_spinon_pairs,
-                perm, workdir, job_tag, prog, target_sector, H_sym, raw_local);
+        shard_path = build_basis_shard<lat_container>(lat, num_spinon_pairs,
+                perm, workdir, scratchdir, job_tag, prog, target_sector, raw_local);
     } else {
-        my_states = build_basis_states<lat_container_with_sector>(lat,
-                num_spinon_pairs, perm, workdir, job_tag, prog, target_sector,
-                H_sym, raw_local);
+        shard_path = build_basis_shard<lat_container_with_sector>(lat,
+                num_spinon_pairs, perm, workdir, scratchdir, job_tag, prog,
+                target_sector, raw_local);
     }
 
     // An interrupted search means an incomplete basis: abort, do not diagonalise.
     int interrupted = GLOBAL_SHUTDOWN_REQUEST ? 1 : 0;
     MPI_Allreduce(MPI_IN_PLACE, &interrupted, 1, MPI_INT, MPI_MAX, MPI_COMM_WORLD);
     if (interrupted) {
+        std::error_code ec;
+        std::filesystem::remove(shard_path, ec);
         if (ctx.my_rank == 0) {
             logging::log(logging::INFO) << "[Main] Basis search was interrupted; the in-memory "
                 "pipeline cannot resume a partial search. Exiting.\n";
@@ -275,11 +309,19 @@ int main(int argc, char* argv[]) {
         logging::log(logging::INFO) << "[Search] Done! raw basis dim=" << raw_global << "\n";
     }
 
-	// Step 3: redistribute to hash-correct ranks (states already trimmed
-	// block-wise inside build_basis_states)
+	// Step 3: stream the search shards back off local disk, trimming each block
+	// and hash-redistributing it to the owning ranks (bounds RAM to owned
+	// states + one block + comm buffers). The shard is deleted afterwards.
+    basis_t::StateFilter trim;
+    if (!prog.get<bool>("--notrim")) {
+        trim = [&H_sym](std::vector<Uint128>& blk){
+            remove_annihilated_states(H_sym, blk);
+        };
+    }
     basis_t basis;
-    basis.adopt_states(std::move(my_states));
-    basis.redistribute();
+    basis.ingest_shard_streaming(shard_path,
+            static_cast<size_t>(prog.get<int>("--ingest-block-size")), trim);
+    { std::error_code ec; std::filesystem::remove(shard_path, ec); }
     logging::log(logging::DEBUG)<<"[MPI_BST]  Done! local basis dim="<<basis.dim()<<std::endl;
     if (ctx.my_rank == 0) {
         logging::log(logging::INFO) << "[MPI_BST] global basis dim=" << basis.global_dim()
@@ -432,7 +474,7 @@ int main(int argc, char* argv[]) {
 
     {
         if (ctx.my_rank == 0)
-            logging::log(logging::INFO)<<"Compute <O>... "<<std::flush;
+            logging::log(logging::INFO)<<"Compute <O> and <OO>... "<<std::flush;
 
         std::vector<double> chi(basis.dim()); // |chi> = O_j |psi>
         std::vector<double>& u = local_v0;    // recycled: |u> = O_0 |psi>

@@ -1,6 +1,7 @@
 #pragma once
 #include "operator.hpp"
 #include <cassert>
+#include <functional>
 #include <mpi.h>
 //#include <bit>
 #include "mpi_context.hpp"
@@ -28,10 +29,34 @@ struct ZBasisMPI : public LocalBasis {
     void adopt_states(std::vector<ZBasisBase::state_t>&& s) {
         this->states = std::move(s);
     }
+
+    // Per-block hook applied to each block of freshly-read states before they
+    // are hash-partitioned (e.g. to drop states annihilated by every term of
+    // H). The filter must be ownership-independent so it is valid to apply it
+    // on the finding rank, before redistribution.
+    using StateFilter = std::function<void(std::vector<ZBasisBase::state_t>&)>;
+
+    // Streaming replacement for adopt_states()+redistribute() used by the fused
+    // pipeline. Reads the rank-local binary shard at shard_path in blocks of
+    // block_records Uint128s, applies filter to each block (if provided),
+    // hash-partitions it to the owning ranks via a collective Alltoallv, and
+    // accumulates the owned states locally. This bounds resident memory to
+    // (owned states + one block + send/recv buffers) instead of the full set of
+    // states this rank happened to find during the search. Every rank must call
+    // this collectively; ranks whose shard is exhausted early keep participating
+    // in empty rounds until all shards are drained.
+    void ingest_shard_streaming(const fs::path& shard_path,
+                                size_t block_records,
+                                const StateFilter& filter = {});
+
     ZBasisBase::idx_t global_dim() const { return _global_dim; }
     ZBasisBase::idx_t dim_of_rank(int r) const { return _all_rank_dims[r]; }
     private:
     void tfer_states_to_correct_ranks(ctx_t& ctx);
+    // Sort the local partition, rebuild search-acceleration structures, and
+    // populate the global_dim / dim_of_rank metadata. Shared tail of
+    // redistribute() and ingest_shard_streaming().
+    void finalize_local_partition(ctx_t& ctx);
     ZBasisBase::idx_t _global_dim = 0;
     std::vector<ZBasisBase::idx_t> _all_rank_dims;
 };
