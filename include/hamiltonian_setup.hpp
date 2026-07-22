@@ -13,7 +13,7 @@
 
 template<typename T>
 inline void build_hamiltonian(SymbolicOpSum<double>& H_sym, 
-        const nlohmann::json& jdata, double Jpm, const T& B){
+        const nlohmann::json& jdata, double Jpm, const T& B, bool quiet=false){
 
 	try {
 		auto version=jdata.at("__version__");
@@ -67,15 +67,17 @@ inline void build_hamiltonian(SymbolicOpSum<double>& H_sym,
         for (const auto& spin_set : jdata.at("neighbour2")){
             H_sym.add_term(Jpm/2, SymbolicPMROperator({'+','-'}, {spin_set[0], spin_set[1]}));
             H_sym.add_term(Jpm/2, SymbolicPMROperator({'-','+'}, {spin_set[0], spin_set[1]}));
-
-            std::cout <<"Adding by hand NN Ising term " << 
-                spin_set[0]<<" "<<spin_set[1]
-                <<std::endl;
+            if (!quiet) {
+                std::cout <<"Adding by hand NN Ising term " << 
+                    spin_set[0]<<" "<<spin_set[1]
+                    <<std::endl;
+            }
         }
 
 
     } catch (nlohmann::json::out_of_range& e){
-        std::cout<<"No by hand NN terms."<<std::endl;
+        if (!quiet)
+            std::cout<<"No by hand NN terms."<<std::endl;
     };
 
 
@@ -89,14 +91,17 @@ inline void build_hamiltonian(SymbolicOpSum<double>& H_sym,
             H_sym.add_term(H4_coeff, SymbolicPMROperator({'+','-','+','-'}, 
                         {spin_set[0], spin_set[1], spin_set[2], spin_set[3]}
                         ));
-
-            std::cout <<"Adding by hand NNNN Ising term " << 
-                spin_set[0]<<" "<<spin_set[1]<<" "<<spin_set[2]<<" "<<spin_set[3]
-                <<std::endl;
+            if (!quiet){
+                std::cout <<"Adding by hand NNNN Ising term " << 
+                    spin_set[0]<<" "<<spin_set[1]<<" "<<spin_set[2]<<" "<<spin_set[3]
+                    <<std::endl;
+            }
         }
 
     } catch (nlohmann::json::out_of_range& e){
-std::cout<<"No NNNN terms."<<std::endl;
+        if (!quiet){
+            std::cout<<"No NNNN terms."<<std::endl;
+        }
     };       
 }
 

@@ -225,7 +225,7 @@ int main(int argc, char* argv[]) {
         snprintf(outfilename_buf, 1024, "Jpm=%.4f%%Bx=%.4f%%By=%.4f%%Bz=%.4f%%",
                 Jpm, B[0], B[1], B[2]);
 
-        build_hamiltonian(H_sym, jdata, Jpm, B);
+        build_hamiltonian(H_sym, jdata, Jpm, B, ctx.my_rank != 0);
     }
 
     // make the out dir if not exists
