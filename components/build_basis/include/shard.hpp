@@ -64,6 +64,18 @@ public:
         }
     }
 
+    // Re-open a fresh, empty .inprogress after a finalize(true) so the shard
+    // can keep accepting states. Used by the mid-search hash-redistribution
+    // rounds: finalize(true) renames the accumulated shard out to .done for
+    // streaming back, and reopen() starts a new empty file the search (and the
+    // redistribution's owned states) append into. No-op if already open.
+    void reopen() {
+        if (f) return;
+        f = fopen(inpath.c_str(), "ab");
+        if (!f) throw std::runtime_error("ShardWriter: reopen fopen failed for " + inpath);
+        buf.clear();
+    }
+
     const std::string &in_progress_path() const { return inpath; }
     const std::string &done_path() const { return donepath; }
 };

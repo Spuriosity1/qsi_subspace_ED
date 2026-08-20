@@ -72,6 +72,7 @@ static std::filesystem::path build_basis_shard(
     L.set_iter_opts(prog.get<int>("--check_interval"),
                     prog.get<int>("--print_interval"),
                     prog.get<int>("--chunk_size"));
+    L.set_redist_interval(prog.get<double>("--redist-interval"));
     L.build_state_tree();
 
     // Flush the buffer and atomically rename .inprogress -> .done so the shard
@@ -127,11 +128,19 @@ int main(int argc, char* argv[]) {
         .default_value(1<<20)
         .scan<'i', int>();
 
-    // Checkpointing (Lanczos only -- the basis search cannot checkpoint in
-    // this in-memory pipeline)
-    prog.add_argument("--checkpoint", "-c")
-        .help("Checkpoint file for resuming Lanczos (default: auto-generated)")
-        .default_value(std::string(""));
+    // Periodic in-search redistribution. A rank can *find* far more states than
+    // it will ultimately *own*, so its rank-local scratch shard can overrun the
+    // node's disk before the search finishes. When >0, every this-many seconds
+    // of wall-clock time all ranks synchronise and hash-redistribute their
+    // shards to the owning ranks (as the post-search ingest does), bounding each
+    // shard to that rank's share. 0 (default) keeps the classic one-shot
+    // redistribute-at-the-end behaviour.
+    prog.add_argument("--redist-interval")
+        .help("wall-clock seconds between periodic in-search shard "
+              "redistribution rounds (0 = disabled)")
+        .default_value(0.0)
+        .scan<'g', double>();
+
 
     // G specification
     {
@@ -171,7 +180,7 @@ int main(int argc, char* argv[]) {
 
     prog.add_argument("-o", "--output_dir")
         .required()
-        .help("output directory (also used for Lanczos checkpoints)");
+        .help("output directory ");
 
     provide_lanczos_options(prog);
     provide_logging_options(prog);
@@ -232,18 +241,6 @@ int main(int argc, char* argv[]) {
     std::filesystem::create_directories(prog.get<std::string>("--output_dir"));
 
     s << prog.get<std::string>("--output_dir") << "/" << outfilename_buf;
-
-    // Build checkpoint filename
-    std::string checkpoint_file;
-    if (prog.get<std::string>("--checkpoint").empty()) {
-        checkpoint_file = s.str() + ".checkpoint.h5";
-    } else {
-        checkpoint_file = prog.get<std::string>("--checkpoint");
-    }
-
-    if (ctx.my_rank == 0) {
-        logging::log(logging::INFO) << "[Main] Checkpoint file: " << checkpoint_file << "\n";
-    }
 
 	// Step 2: enumerate the basis directly into RAM
 	lattice lat(jdata);
@@ -402,7 +399,7 @@ int main(int argc, char* argv[]) {
         };
 
         logging::log(logging::INFO) << "[Lanczos] finding lowest eigenvalue\n";
-        auto res=  lanczos_mpi::lanczos_iterate_checkpoint(evadd, local_v0, alphas, betas, settings, checkpoint_file);
+        auto res=  lanczos_mpi::lanczos_iterate(evadd, local_v0, alphas, betas, settings);
 
         logging::log(logging::DEBUG)<<"[rank "<<ctx.my_rank<<"] "<<res;
 
@@ -429,9 +426,8 @@ int main(int argc, char* argv[]) {
         evector.resize(basis.dim());
 
         // Second pass for eigenvector
-        res = lanczos_mpi::lanczos_iterate_checkpoint(
+        res = lanczos_mpi::lanczos_iterate(
             evadd, local_v0, alphas, betas, settings,
-            checkpoint_file + ".eigvec",
             &ritz, &evector
         );
         // The ground state is accumulated into evector; local_v0 holds the

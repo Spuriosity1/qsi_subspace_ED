@@ -1,7 +1,14 @@
 
 #include "pyro_tree_mpi.hpp"
 #include "bittools.hpp"
+#include "mpi_context.hpp"
 #include "mpi.h"
+
+#include <algorithm>
+#include <filesystem>
+#include <fstream>
+#include <numeric>
+#include <type_traits>
 
 volatile sig_atomic_t GLOBAL_SHUTDOWN_REQUEST=0;
 
@@ -272,6 +279,110 @@ auto obtain_ring_targets(int world_size, int my_rank){
 }
 
 
+// Collective mid-search hash-redistribution round. Every rank streams the
+// states it has accumulated in its (disk-backed) shard back through an
+// alltoallv keyed by the same state->rank hash used everywhere else
+// (MPIHashContext::rank_of_state, as in ZBasisMPI redistribution), keeping only
+// the states it owns and shipping the rest to their owner. This bounds each
+// rank's local shard to its share of the basis instead of the full set it
+// happens to *find*, which is what was overrunning the rank-local disk.
+//
+// The states already live on disk, so the round streams block-by-block to keep
+// its transient RAM at ~one block + the incoming buffer:
+//   i)   finalize(true) the active shard, renaming it out to .done;
+//   ii)  reopen() a fresh empty shard; owned states (both our own and those
+//        received from other ranks) are pushed straight back into it;
+//   iii) stream the .done file: read a block, bucket it by owner, alltoallv,
+//        and push the received (all-owned) states into the shard; loop until no
+//        rank read anything (the Allreduce keeps the collective trip count in
+//        lockstep across ranks even though shards differ in size);
+//   iv)  delete the .done file.
+//
+// This is a blocking collective, so it must only be reached with every rank
+// still in the work loop. It is gated on a wall-clock timer (below), never on
+// per-rank state, so all ranks agree on which round to run; the one race this
+// does not close is a rank exiting via the shutdown ring or a signal in the
+// same instant another rank enters the round (accepted: rounds are rare and the
+// feature is opt-in).
+template<typename T, typename Sink>
+void mpi_par_searcher<T, Sink>::redistribute_shard(){
+    // Only the disk-backed ShardWriter path is redistributed; the in-RAM
+    // MemoryShard variant manages its footprint differently and never sets a
+    // redistribution interval, so this compiles away for it.
+    if constexpr (std::is_same_v<Sink, ShardWriter>) {
+        MPIHashContext ctx;
+
+        // (i)/(ii) rotate the active shard out to .done and start a fresh one.
+        shard.finalize(true);
+        const std::string done_path = shard.done_path();
+        shard.reopen();
+
+        std::ifstream in(done_path, std::ios::binary);
+
+        constexpr size_t block_records = (1u << 20);
+        std::vector<Uint128> block, send_buf, recv_buf;
+        std::vector<int> send_counts(ctx.world_size), recv_counts(ctx.world_size);
+        std::vector<int> send_displs(ctx.world_size), recv_displs(ctx.world_size);
+
+        while (true) {
+            // Read up to block_records states; got == 0 means the shard drained.
+            block.resize(block_records);
+            size_t got = 0;
+            if (in) {
+                in.read(reinterpret_cast<char*>(block.data()),
+                        block_records * sizeof(Uint128));
+                got = static_cast<size_t>(in.gcount()) / sizeof(Uint128);
+            }
+            block.resize(got);
+
+            // Bucket the block by destination rank.
+            std::fill(send_counts.begin(), send_counts.end(), 0);
+            for (const auto& psi : block)
+                send_counts[ctx.rank_of_state(psi)]++;
+
+            send_displs[0] = 0;
+            for (int r = 1; r < ctx.world_size; r++)
+                send_displs[r] = send_displs[r-1] + send_counts[r-1];
+
+            send_buf.resize(block.size());
+            {
+                std::vector<int> counters(send_displs);
+                for (const auto& psi : block)
+                    send_buf[counters[ctx.rank_of_state(psi)]++] = psi;
+            }
+
+            MPI_Alltoall(send_counts.data(), 1, get_mpi_type<int>(),
+                    recv_counts.data(), 1, get_mpi_type<int>(), MPI_COMM_WORLD);
+
+            recv_displs[0] = 0;
+            for (int r = 1; r < ctx.world_size; r++)
+                recv_displs[r] = recv_displs[r-1] + recv_counts[r-1];
+            size_t recv_total = std::accumulate(recv_counts.begin(), recv_counts.end(), 0ull);
+
+            recv_buf.resize(recv_total);
+            MPI_Alltoallv(send_buf.data(), send_counts.data(), send_displs.data(),
+                    get_mpi_type<Uint128>(),
+                    recv_buf.data(), recv_counts.data(), recv_displs.data(),
+                    get_mpi_type<Uint128>(), MPI_COMM_WORLD);
+
+            // Everything received is owned by this rank: stream it back to disk.
+            for (const auto& psi : recv_buf)
+                shard.push(psi);
+
+            // Stop once no rank read anything this round.
+            int local_active = block.empty() ? 0 : 1;
+            int any_active = 0;
+            MPI_Allreduce(&local_active, &any_active, 1, get_mpi_type<int>(),
+                    MPI_MAX, MPI_COMM_WORLD);
+            if (!any_active) break;
+        }
+
+        in.close();
+        std::error_code ec;
+        std::filesystem::remove(done_path, ec);
+    }
+}
+
 template<typename T, typename Sink>
 //requires std::derived_from<T, lat_container>
 void mpi_par_searcher<T, Sink>::build_state_tree(){
@@ -293,6 +404,14 @@ void mpi_par_searcher<T, Sink>::build_state_tree(){
     int active_request = -1; // who we are asking for work from
     bool shutdown_continues = false;
 
+    // Periodic hash-redistribution schedule (0 / single-rank => disabled). Only
+    // wall-clock time can gate the collective round: idle ranks spin this loop
+    // far faster than busy ones, so an iteration-count gate would desynchronise
+    // the collective. The deadline is refreshed *after* each round, and every
+    // rank leaves the round's final Allreduce together, so the schedules stay
+    // aligned without depending on MPI_Wtime being globally synchronised.
+    const bool redist_enabled = (REDIST_INTERVAL_SEC > 0.0) && (world_size > 1);
+    double next_redist = redist_enabled ? MPI_Wtime() + REDIST_INTERVAL_SEC : 0.0;
 
     while (true) {
         // Process local work
@@ -367,6 +486,19 @@ void mpi_par_searcher<T, Sink>::build_state_tree(){
         if ( num_checks++ > PRINT_INTERVAL && !my_job_stack.empty()){
             num_checks=0;
             logging::log(logging::DEBUG)<<my_rank<<"] bottom job @ spin "<<my_job_stack[0].curr_spin<<std::endl;
+        }
+
+        // Periodic collective hash-redistribution. Gated purely on the shared
+        // wall-clock deadline (plus a defensive shutdown-signal check) so every
+        // rank makes the same enter/skip decision and reaches the collective;
+        // gating on any per-rank state (e.g. stack emptiness) would deadlock the
+        // round. A rank crossing the deadline first simply blocks inside the
+        // round until the stragglers arrive within one CHECK_INTERVAL.
+        if (redist_enabled && !GLOBAL_SHUTDOWN_REQUEST && MPI_Wtime() >= next_redist){
+            logging::log(logging::INFO) << "[rank " << my_rank
+                << "] redistributing shard to owning ranks...\n";
+            redistribute_shard();
+            next_redist = MPI_Wtime() + REDIST_INTERVAL_SEC;
         }
     }
 

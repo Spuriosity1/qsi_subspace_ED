@@ -89,6 +89,11 @@ class mpi_par_searcher : public T {
 //    static constexpr int TAG_SHUTDOWN_COMPLETE = 301;
     static constexpr int NUM_TERMINATE_LOOPS = 3;
 
+    // Wall-clock seconds between periodic hash-redistribution rounds during the
+    // search (see redistribute_shard()). 0 disables them entirely (the default,
+    // so every existing caller is byte-for-byte unchanged).
+    double REDIST_INTERVAL_SEC = 0.0;
+
 
 
 
@@ -106,6 +111,7 @@ class mpi_par_searcher : public T {
 
     vtree_node_t pop_hardest_job();
     void handle_send_request(int dest_rank);
+    void redistribute_shard();
     bool handle_shutdown_ring(bool& shutdown_continues);
     bool recv_stack_state(int src_rank);
     bool handle_signals(int& flag, MPI_Status& status);
@@ -184,6 +190,12 @@ mpi_par_searcher(const lattice& lat, unsigned num_spinon_pairs,
         this->CHECK_INTERVAL = check_interval;
         this->PRINT_INTERVAL = print_interval;
         this->MIN_CHUNK_SIZE = min_chunk_size;
+    }
+
+    // Enable periodic mid-search hash-redistribution rounds every `seconds`
+    // of wall-clock time (0 = disabled). See redistribute_shard().
+    void set_redist_interval(double seconds) {
+        this->REDIST_INTERVAL_SEC = seconds;
     }
 
 /////

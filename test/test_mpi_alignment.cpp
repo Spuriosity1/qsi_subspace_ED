@@ -50,7 +50,7 @@ void test_vtree_node_serialization(MPI_Datatype node_type) {
 
     // Compare byte-for-byte
     if (memcmp(&node_send, &node_recv, sizeof(vtree_node_t)) != 0) {
-        printf("❌ MPI pack/unpack mismatch!\n");
+        printf("!!!! MPI pack/unpack mismatch!\n");
         for (size_t i = 0; i < sizeof(vtree_node_t); i++) {
             if (((unsigned char*)&node_send)[i] != ((unsigned char*)&node_recv)[i]) {
                 printf("  Byte %zu: send=%02X recv=%02X\n", i,
@@ -59,7 +59,7 @@ void test_vtree_node_serialization(MPI_Datatype node_type) {
             }
         }
     } else {
-        printf("✅ MPI pack/unpack identical\n");
+        printf("<tick> MPI pack/unpack identical\n");
     }
 
     free(buf);
