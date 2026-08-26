@@ -21,21 +21,25 @@ void obtain_flags(
     bool& calc_ring,
     bool& calc_ring_ring,
     bool& calc_partial_vol,
+    bool& calc_flippability,
     const argparse::ArgumentParser& prog){
 
     calc_ring=true;
     calc_ring_ring=true;
     calc_partial_vol=true;
+    calc_flippability=true;
 
     if (prog.is_used("--calculate")){
         calc_ring =        false;
         calc_ring_ring =   false;
         calc_partial_vol = false;
+        calc_flippability = false;
         auto calc_opts = prog.get<std::vector<std::string>>("--calculate");
         for (auto& s : calc_opts){
             if (s == "ring") calc_ring=true;
             if (s == "ring_ring") calc_ring_ring=true;
             if (s == "partial_vol") calc_partial_vol=true;
+            if (s == "flippability") calc_flippability=true;
         }
     }
 }
@@ -52,7 +56,7 @@ int main(int argc, char* argv[]) {
         .default_value(0)
         .scan<'i',int>();
     prog.add_argument("--calculate")
-        .choices("ring", "ring_ring", "partial_vol")
+        .choices("ring", "ring_ring", "partial_vol", "flippability")
         .nargs(argparse::nargs_pattern::at_least_one);
 	prog.add_argument("--n_eigvecs", "-N")
 		.help("Number of eigenvectors to check")
@@ -68,9 +72,10 @@ int main(int argc, char* argv[]) {
     }
 
 
-    bool calc_ring, calc_ring_ring, calc_partial_vol;
+    bool calc_ring, calc_ring_ring, calc_partial_vol, calc_flippability;
 
-    obtain_flags(calc_ring, calc_ring_ring, calc_partial_vol, prog);
+    obtain_flags(calc_ring, calc_ring_ring, calc_partial_vol,
+            calc_flippability, prog);
 
     auto in_datafile=fs::path(prog.get<std::string>("output_file"));
 
@@ -159,8 +164,26 @@ int main(int argc, char* argv[]) {
         auto ring_expect = compute_all_expectations(eigvecs.leftCols(n_eigvecs), ring_operators);
  
         cout<<"Done!"<<endl;
-        write_expectation_vals_h5(out_fid, "ring", ring_expect, 
-                ringL.size(), n_eigvecs); 
+        write_expectation_vals_h5(out_fid, "ring", ring_expect,
+                ringL.size(), n_eigvecs);
+    }
+
+    if (calc_flippability){
+        cout<<"Compute <O^dag O>... "<<flush;
+        // Flippability of ring j === <psi| O_j^dag O_j |psi> == || O_j |psi> ||^2.
+        // O_j == ring_operators[j] is a real +/- product, so O_j^dag == O_j^T.
+        std::vector<Eigen::SparseMatrix<double>> flip_operators;
+        flip_operators.reserve(ring_operators.size());
+        for (auto& O : ring_operators){
+            flip_operators.push_back(
+                    (O.transpose() * O).pruned().eval());
+        }
+        auto flip_expect = compute_all_expectations(
+                eigvecs.leftCols(n_eigvecs), flip_operators);
+
+        cout<<"Done!"<<endl;
+        write_expectation_vals_h5(out_fid, "flippability", flip_expect,
+                ringL.size(), n_eigvecs);
     }
 
     if (calc_ring_ring){

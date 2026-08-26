@@ -94,6 +94,7 @@ def strip(ax, groups, title, ylabel):
     ax.set_xlabel("plaquette sublattice")
     ax.set_ylabel(ylabel)
     ax.set_title(title)
+    ax.set_ylim([-0.25,0.25])
     ax.grid(True, axis="y", alpha=0.3)
 
 

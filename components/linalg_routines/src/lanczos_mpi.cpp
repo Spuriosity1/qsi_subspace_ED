@@ -56,6 +56,43 @@ void check_lanczos_convergence(
 
 
 
+// Performs u += A*v (via evaluate_add) and logs per-rank timing statistics
+// gathered on rank 0. Shared by the plain and checkpointing Lanczos loops.
+template<typename _S, typename ApplyFn>
+void timed_apply_add(ApplyFn& evaluate_add,
+        const std::vector<_S>& v,
+        std::vector<_S>& u,
+        const Settings& settings,
+        int iter_no)
+{
+    auto now_ts = std::chrono::high_resolution_clock::now();
+
+    evaluate_add(v.data(), u.data());
+
+    auto end_ts = std::chrono::high_resolution_clock::now();
+    double dt = std::chrono::duration<double, std::milli>(end_ts - now_ts).count();
+
+    std::vector<double> all_dt(settings.ctx.world_size); // only actually used on rank 0,
+                                                         // dummy elsewhere
+    MPI_Gather(&dt, 1, MPI_DOUBLE, all_dt.data(), 1, MPI_DOUBLE, 0, MPI_COMM_WORLD);
+    if (settings.ctx.my_rank == 0){
+        double avg_dt=0;
+        double max_dt = 0;
+        double min_dt = std::numeric_limits<double>::max();
+        for (auto t : all_dt){
+            avg_dt += t;
+            if (t > max_dt) max_dt = t;
+            if (t < min_dt) min_dt = t;
+        }
+        avg_dt /= settings.ctx.world_size;
+        settings.ctx.log(logging::INFO)
+            << "u += Av\titer "<<iter_no<<" avg "<<avg_dt
+            << " max "<<max_dt
+            << " min "<<min_dt<<"\t(ms)"<<std::endl;
+    }
+}
+
+
 // Runs the Lanczos recurrence MPI ENABLED
 template<typename _S, typename ApplyFn>
 Result lanczos_iterate(ApplyFn evaluate_add,
@@ -77,7 +114,7 @@ Result lanczos_iterate(ApplyFn evaluate_add,
     // v = current v_j (input normalized)
     // u = scratch/previous/next (rotates role each step)
     std::vector<_S> u(local_dim);
-    
+
     alphas.reserve(settings.krylov_dim);
     betas.reserve(settings.krylov_dim);
 
@@ -115,7 +152,7 @@ Result lanczos_iterate(ApplyFn evaluate_add,
             mul(u, -beta);
         }
         // u += A * v
-        TIMEIT("u += Av ", evaluate_add(v.data(), u.data());)
+        timed_apply_add<_S>(evaluate_add, v, u, settings, j);
 
         // α_j = <v_j | u>
         double alpha_local = innerReal(v, u);
@@ -235,6 +272,7 @@ Result lanczos_iterate_checkpoint(ApplyFn evaluate_add,
                   << " minutes remaining\n";
     }
 
+
     // Try to load checkpoint
     CheckpointData<_S> ckpt_data;
     bool loaded = load_checkpoint(checkpoint_file, ckpt_data, settings.ctx);
@@ -261,6 +299,7 @@ Result lanczos_iterate_checkpoint(ApplyFn evaluate_add,
         alphas.resize(0);
         betas.resize(0);
     }
+
 
     // Main iteration loop
     for (size_t j = start_iter; j < settings.max_iterations; j++) {
@@ -307,8 +346,9 @@ Result lanczos_iterate_checkpoint(ApplyFn evaluate_add,
         if (j > 0) {
             mul(u, -beta);
         }
-        
-        TIMEIT("u += Av ", evaluate_add(v.data(), u.data());)
+
+        // u += A * v, with timing statistics
+        timed_apply_add<_S>(evaluate_add, v, u, settings, j);
 
         // α_j = <v_j | u>
         double alpha_local = innerReal(v, u);

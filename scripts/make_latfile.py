@@ -40,6 +40,12 @@ parser.add_argument("--visualise", "-i", default=False,
                     action="store_true",
                     help="interactive mode, visualises the constructed lattice before saving")
 
+parser.add_argument("--xdiag_toml", default=False,
+                    action="store_true",
+                    help="also export an xdiag-compatible TOML file "
+                         "(pyro_<name>.toml) holding the supercell "
+                         "translation symmetry group and its momentum irreps")
+
 args = parser.parse_args()
 
 if args.a1:
@@ -93,4 +99,10 @@ if args.visualise:
 if save_it:
     pyrochlore.export_json(lat, o_path)
     print(f"Saved to {o_path}")
+
+    if args.xdiag_toml:
+        from lattice import export_xdiag_toml
+        toml_path = os.path.join(args.out_dir, "pyro_"+name+".toml")
+        export_xdiag_toml(lat, toml_path)
+        print(f"Saved xdiag symmetries to {toml_path}")
 

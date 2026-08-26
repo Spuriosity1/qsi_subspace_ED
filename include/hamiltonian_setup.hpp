@@ -32,6 +32,8 @@ inline void build_hamiltonian(SymbolicOpSum<double>& H_sym,
 
     auto [ringL, ringR, sl_list]  = get_ring_ops(jdata);
 
+    std::cout<<"Computed ring exchanges g="<<g[0]<<", "<<g[1]<<", "<<g[2]<<", "<<g[3]<<std::endl;
+
     // ring exchanges
     for (size_t i=0; i<sl_list.size(); i++){
         auto sl = sl_list[i];
