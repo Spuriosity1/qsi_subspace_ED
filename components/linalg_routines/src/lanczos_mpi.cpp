@@ -190,9 +190,14 @@ Result lanczos_iterate(ApplyFn evaluate_add,
         if (!ritz && j >= settings.min_iterations) {
             if (settings.ctx.my_rank ==0) {
                 check_lanczos_convergence<_S>(alphas, betas, eigval, j, settings, retval);
-                if (settings.verbosity > 0) {
-                    settings.ctx.log(logging::DEBUG) << "Iter "<< j << " eigval error " << retval.eigval_error << "\n";
-                }
+                double rel_err = retval.eigval_error / std::max(std::abs(eigval), 1e-10);
+                settings.ctx.log(logging::INFO)
+                    << "Lanczos\titer " << j
+                    << " eigval " << eigval
+                    << " err " << retval.eigval_error
+                    << " rel_err " << rel_err
+                    << " converged " << (retval.eigval_converged ? "yes" : "no")
+                    << std::endl;
             }
 
             // Broadcast convergence status to all ranks
@@ -385,9 +390,14 @@ Result lanczos_iterate_checkpoint(ApplyFn evaluate_add,
         if (!ritz && j >= settings.min_iterations) {
             if (settings.ctx.my_rank == 0) {
                 check_lanczos_convergence<_S>(alphas, betas, eigval, j, settings, retval);
-                if (settings.verbosity > 0) {
-                    settings.ctx.log(logging::DEBUG) << "Iter "<< j << " eigval error " << retval.eigval_error << "\n";
-                }
+                double rel_err = retval.eigval_error / std::max(std::abs(eigval), 1e-10);
+                settings.ctx.log(logging::INFO)
+                    << "Lanczos\titer " << j
+                    << " eigval " << eigval
+                    << " err " << retval.eigval_error
+                    << " rel_err " << rel_err
+                    << " converged " << (retval.eigval_converged ? "yes" : "no")
+                    << std::endl;
             }
 
             int converged_flag = retval.eigval_converged ? 1 : 0;
