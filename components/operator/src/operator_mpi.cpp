@@ -4,6 +4,27 @@
 #include <fstream>
 #include "timeit.hpp"
 #include <numeric>
+#include <omp.h>
+#include <stdexcept>
+
+const char* to_string(ApplyStrategy s) {
+    switch (s) {
+        case ApplyStrategy::Serial:      return "serial";
+        case ApplyStrategy::Omp:         return "omp";
+        case ApplyStrategy::OmpOwner:    return "omp-owner";
+        case ApplyStrategy::OmpPrefetch: return "omp-prefetch";
+    }
+    return "serial";
+}
+
+ApplyStrategy parse_strategy(const std::string& s) {
+    if (s == "serial")       return ApplyStrategy::Serial;
+    if (s == "omp")          return ApplyStrategy::Omp;
+    if (s == "omp-owner")    return ApplyStrategy::OmpOwner;
+    if (s == "omp-prefetch") return ApplyStrategy::OmpPrefetch;
+    throw std::runtime_error("Unknown apply strategy '" + s +
+            "' (expected: serial | omp | omp-owner | omp-prefetch)");
+}
 
 #ifndef NDEBUG
 #define ASSERT_STATE_FOUND(error_msg, state, result) \
@@ -799,6 +820,271 @@ void MPILazyOpSum<coeff_t, B>::evaluate_add_off_diag_batched(const coeff_t* x, c
 
 
 
+
+// ---------------------------------------------------------------------------
+// Threaded batched apply (ApplyStrategy::Omp / OmpOwner / OmpPrefetch)
+//
+// Shares the batch loop and MPI collectives with the serial batched path, but
+// threads the three rank-local phases: local-apply scatter, self-update and
+// remote-update. The receive-side search is the diagnosed bottleneck (chains of
+// dependent DRAM misses), so it is what the strategies attack: OmpPrefetch
+// recovers memory-level parallelism, OmpOwner removes the atomics.
+// ---------------------------------------------------------------------------
+
+// Interleaved, software-prefetched exact binary search over the sorted state
+// array. Keeps GROUP probes in flight so several dependent cache misses overlap
+// instead of serialising. Every query is assumed present (received states are
+// always basis states); each out[i] is the index with S[out[i]] == q[i].
+static inline void interleaved_search(
+        const Uint128* __restrict S, int64_t dim,
+        const Uint128* __restrict q, ZBasisBase::idx_t* __restrict out, int64_t n, 
+        int GROUP=8)
+{
+    constexpr int MAX_GROUP=16;
+    // Clamp here so oversized/invalid GROUP can never overrun lo[]/hi[].
+    if (GROUP < 1) GROUP = 1;
+    if (GROUP > MAX_GROUP) GROUP = MAX_GROUP;
+    int64_t lo[MAX_GROUP], hi[MAX_GROUP];
+    for (int64_t base = 0; base < n; base += GROUP) {
+        int g = (int)std::min<int64_t>(GROUP, n - base);
+        for (int j = 0; j < g; ++j) { lo[j] = 0; hi[j] = dim; }
+        bool active = true;
+        while (active) {
+            active = false;
+            for (int j = 0; j < g; ++j) {
+                if (hi[j] - lo[j] > 1) {
+                    active = true;
+                    int64_t mid = (lo[j] + hi[j]) >> 1;
+                    // S[mid] <= q  <=>  !(q < S[mid])
+                    if (!(q[base + j] < S[mid])) lo[j] = mid; else hi[j] = mid;
+                    __builtin_prefetch(&S[(lo[j] + hi[j]) >> 1], 0, 1);
+                }
+            }
+        }
+        for (int j = 0; j < g; ++j) out[base + j] = lo[j];
+    }
+}
+
+template <RealOrCplx coeff_t, Basis B>
+void MPILazyOpSum<coeff_t, B>::apply_records(
+        const ZBasisBST::state_t* states, const coeff_t* dy, int64_t n,
+        coeff_t* y, bool owner, bool prefetch)
+{
+    if (n == 0) return;
+    ap_idx.resize(n);
+
+    int APPLY_PREFETCH_GROUP=0;
+    if (const char* s=std::getenv("APPLY_PREFETCH_GROUP")){
+        APPLY_PREFETCH_GROUP=std::atoi(s);
+    }
+    if (APPLY_PREFETCH_GROUP == 0) APPLY_PREFETCH_GROUP=8; 
+    // fall back to default if invalid specification
+
+    // --- SEARCH PASS: resolve every record's local index (independent) ---
+    if (prefetch) {
+        const Uint128* S = basis.data();
+        int64_t dim = (int64_t)basis.dim();
+        #pragma omp parallel
+        {
+            int nt  = omp_get_num_threads();
+            int tid = omp_get_thread_num();
+            int64_t lo = (int64_t)tid * n / nt;
+            int64_t hi = (int64_t)(tid + 1) * n / nt;
+            interleaved_search(S, dim, states + lo, ap_idx.data() + lo, hi - lo, 
+                    APPLY_PREFETCH_GROUP);
+        }
+    } else {
+        #pragma omp parallel for schedule(static)
+        for (int64_t i = 0; i < n; ++i) {
+            ZBasisBase::idx_t idx = 0;
+            ASSERT_STATE_FOUND("threaded apply", states[i],
+                    basis.search(states[i], idx));
+            ap_idx[i] = idx;
+        }
+    }
+
+    // --- UPDATE PASS: y[idx] += dy ---
+    if (!owner) {
+        // Duplicate target indices can occur within one batch, so guard with an
+        // atomic. Independent searches already gave the memory-level parallelism.
+        #pragma omp parallel for schedule(static)
+        for (int64_t i = 0; i < n; ++i) {
+            #pragma omp atomic
+            y[ap_idx[i]] += dy[i];
+        }
+        return;
+    }
+
+    // Owner-computes: bucket records by owning thread = idx * T / dim, then each
+    // thread applies its own contiguous bucket to a disjoint slice of y — no
+    // atomics, and each thread only touches memory it (first-)owns.
+    const int64_t dim = std::max<int64_t>(1, (int64_t)basis.dim());
+    int T = omp_get_max_threads();
+    auto bucket_of = [&](int64_t idx) {
+        int b = (int)((idx * (int64_t)T) / dim);
+        return b < T ? b : T - 1;
+    };
+
+    ap_thist.assign((size_t)T * T, 0);          // [tid*T + bucket]
+    std::vector<int64_t> boffs(T + 1, 0);       // global bucket offsets
+    // Parallel histogram: each thread counts its own contiguous record range.
+    #pragma omp parallel
+    {
+        int nt  = omp_get_num_threads();
+        int tid = omp_get_thread_num();
+        int64_t lo = (int64_t)tid * n / nt;
+        int64_t hi = (int64_t)(tid + 1) * n / nt;
+        int64_t* h = ap_thist.data() + (size_t)tid * T;
+        for (int64_t i = lo; i < hi; ++i) h[bucket_of(ap_idx[i])]++;
+    }
+    // Global bucket sizes -> offsets.
+    for (int b = 0; b < T; ++b) {
+        int64_t s = 0;
+        for (int t = 0; t < T; ++t) s += ap_thist[(size_t)t * T + b];
+        boffs[b + 1] = boffs[b] + s;
+    }
+    // Per-(thread,bucket) write cursors: bucket base + sum of earlier threads.
+    // Reuse ap_thist to hold each thread's start cursor for each bucket.
+    {
+        std::vector<int64_t> run(T, 0);
+        for (int b = 0; b < T; ++b) run[b] = boffs[b];
+        for (int t = 0; t < T; ++t)
+            for (int b = 0; b < T; ++b) {
+                int64_t c = ap_thist[(size_t)t * T + b];
+                ap_thist[(size_t)t * T + b] = run[b];
+                run[b] += c;
+            }
+    }
+    ap_bidx.resize(n);
+    ap_bdy.resize(n);
+    // Scatter into bucket order using the same contiguous range partition.
+    #pragma omp parallel
+    {
+        int nt  = omp_get_num_threads();
+        int tid = omp_get_thread_num();
+        int64_t lo = (int64_t)tid * n / nt;
+        int64_t hi = (int64_t)(tid + 1) * n / nt;
+        int64_t* cur = ap_thist.data() + (size_t)tid * T;
+        for (int64_t i = lo; i < hi; ++i) {
+            int b = bucket_of(ap_idx[i]);
+            int64_t p = cur[b]++;
+            ap_bidx[p] = ap_idx[i];
+            ap_bdy[p]  = dy[i];
+        }
+    }
+    // Apply: thread t owns bucket t; targets are disjoint across buckets.
+    #pragma omp parallel
+    {
+        int nt  = omp_get_num_threads();
+        int tid = omp_get_thread_num();
+        for (int b = tid; b < T; b += nt)
+            for (int64_t i = boffs[b]; i < boffs[b + 1]; ++i)
+                y[ap_bidx[i]] += ap_bdy[i];
+    }
+}
+
+template <RealOrCplx coeff_t, Basis B>
+void MPILazyOpSum<coeff_t, B>::evaluate_add_off_diag_batched_omp(
+        const coeff_t* x, coeff_t* y)
+{
+    assert(!send_counts.empty() && "allocate_temporaries() must be called first");
+    using state_t = ZBasisBase::state_t;
+    const int N       = ctx.world_size;
+    const int my_rank = ctx.my_rank;
+    const int64_t dim = (int64_t)basis.dim();
+    const int64_t bs  = (batch_size <= 0) ? dim : std::min((int64_t)batch_size, dim);
+    const bool owner    = (strategy == ApplyStrategy::OmpOwner);
+    const bool prefetch = (strategy == ApplyStrategy::OmpPrefetch);
+
+    std::vector<int> batch_sc(N), batch_rc(N);
+    std::vector<int> alltoallv_sd(N), alltoallv_rd(N);
+
+    for (int64_t bidx = 0; bidx < n_batches; ++bidx) {
+        const int64_t s0 = std::min(bidx * bs, dim);
+        const int64_t s1 = std::min(s0 + bs, dim);
+
+        // --- LOCAL APPLY (threaded scatter into per-rank contiguous slots) ---
+        // Two passes over [s0,s1): count per (thread,rank) so each thread owns a
+        // disjoint sub-slot of every rank's send region, then scatter. The two
+        // passes use the same static tid partition so sub-slot offsets line up.
+        int T = omp_get_max_threads();
+        ap_tsend.assign((size_t)T * N, 0);
+        #pragma omp parallel
+        {
+            int nt  = omp_get_num_threads();
+            int tid = omp_get_thread_num();
+            int64_t lo = s0 + (int64_t)tid * (s1 - s0) / nt;
+            int64_t hi = s0 + (int64_t)(tid + 1) * (s1 - s0) / nt;
+            int64_t* tc = ap_tsend.data() + (size_t)tid * N;
+            for (int64_t il = lo; il < hi; ++il)
+                for (const auto& [c, op] : ops.off_diag_terms) {
+                    (void)c;
+                    state_t state = basis[il];
+                    if (op.applyState(state) == 0) continue;
+                    tc[ctx.rank_of_state(state)]++;
+                }
+        }
+        // Per-(thread,rank) base cursors within each rank's slot; per-rank totals.
+        for (int r = 0; r < N; ++r) {
+            int64_t run = send_displs[r];
+            for (int t = 0; t < T; ++t) {
+                int64_t c = ap_tsend[(size_t)t * N + r];
+                ap_tsend[(size_t)t * N + r] = run;
+                run += c;
+            }
+            batch_sc[r] = (int)(run - send_displs[r]);
+        }
+        #pragma omp parallel
+        {
+            int nt  = omp_get_num_threads();
+            int tid = omp_get_thread_num();
+            int64_t lo = s0 + (int64_t)tid * (s1 - s0) / nt;
+            int64_t hi = s0 + (int64_t)(tid + 1) * (s1 - s0) / nt;
+            int64_t* cur = ap_tsend.data() + (size_t)tid * N;
+            for (int64_t il = lo; il < hi; ++il)
+                for (const auto& [c, op] : ops.off_diag_terms) {
+                    state_t state = basis[il];
+                    auto sign = op.applyState(state);
+                    if (sign == 0) continue;
+                    int r = (int)ctx.rank_of_state(state);
+                    int64_t p = cur[r]++;
+                    send_state[p] = state;
+                    send_dy[p]    = c * x[il] * (coeff_t)sign;
+                }
+        }
+
+        // --- SELF-UPDATE (threaded search + apply) ---
+        apply_records(send_state.data() + send_displs[my_rank],
+                      send_dy.data() + send_displs[my_rank],
+                      batch_sc[my_rank], y, owner, prefetch);
+
+        // --- ONE COMMUNICATION ROUND (master thread only) ---
+        MPI_Alltoall(batch_sc.data(), 1, MPI_INT, batch_rc.data(), 1, MPI_INT,
+                     MPI_COMM_WORLD);
+        for (int r = 0; r < N; ++r) alltoallv_sd[r] = (int)send_displs[r];
+        alltoallv_rd[0] = 0;
+        for (int r = 1; r < N; ++r)
+            alltoallv_rd[r] = alltoallv_rd[r-1] + (r-1 != my_rank ? batch_rc[r-1] : 0);
+        int64_t batch_recv_total = 0;
+        for (int r = 0; r < N; ++r)
+            if (r != my_rank) batch_recv_total += batch_rc[r];
+        batch_sc[my_rank] = 0;
+        batch_rc[my_rank] = 0;
+
+        MPI_Alltoallv(
+            send_state.data(), batch_sc.data(), alltoallv_sd.data(), get_mpi_type<state_t>(),
+            recv_state.data(), batch_rc.data(), alltoallv_rd.data(), get_mpi_type<state_t>(),
+            MPI_COMM_WORLD);
+        MPI_Alltoallv(
+            send_dy.data(), batch_sc.data(), alltoallv_sd.data(), get_mpi_type<coeff_t>(),
+            recv_dy.data(), batch_rc.data(), alltoallv_rd.data(), get_mpi_type<coeff_t>(),
+            MPI_COMM_WORLD);
+
+        // --- REMOTE UPDATE (threaded search + apply) ---
+        apply_records(recv_state.data(), recv_dy.data(), batch_recv_total,
+                      y, owner, prefetch);
+    }
+}
 
 template <RealOrCplx coeff_t, Basis basis_t>
 void MPILazyOpSum<coeff_t, basis_t>::allocate_temporaries(int B) {

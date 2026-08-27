@@ -68,6 +68,23 @@ using ZBasisBSTFast_HashMPI = ZBasisMPI<ZBasisBSTFast>;
 using MPIctx=MPIHashContext;
 
 
+// Rank-local work-sharing strategy for the off-diagonal apply. Only affects the
+// batched code path (allocate_temporaries() must have been called); the pipeline
+// and planned paths ignore it.
+//   Serial      - single-threaded batched apply (baseline, unchanged).
+//   Omp         - OpenMP over records; y updated with atomics.
+//   OmpOwner    - OpenMP owner-computes: received records are partitioned by
+//                 target-index range across threads, so each thread updates a
+//                 disjoint slice of y with no atomics (NUMA first-touch friendly).
+//   OmpPrefetch - OpenMP over records, but the per-record accelerated search is
+//                 replaced by a software-prefetched interleaved binary search
+//                 that keeps several probes in flight to hide DRAM latency.
+enum class ApplyStrategy { Serial, Omp, OmpOwner, OmpPrefetch };
+
+const char* to_string(ApplyStrategy s);
+ApplyStrategy parse_strategy(const std::string& s);
+
+
 template<RealOrCplx coeff_t, Basis B>
 struct MPILazyOpSum {
     using Scalar = coeff_t;
@@ -93,6 +110,10 @@ struct MPILazyOpSum {
     void allocate_temporaries(int batch_size = -1);
 
     void set_batch_size(int b) { batch_size = b; }
+
+    // Select the rank-local work-sharing strategy for the batched apply.
+    void set_strategy(ApplyStrategy s) { strategy = s; }
+    ApplyStrategy get_strategy() const { return strategy; }
 
     // Build a static apply plan: the basis, Hamiltonian and batch boundaries
     // never change between applies, so freeze the per-batch communication
@@ -120,11 +141,20 @@ protected:
     void evaluate_add_diagonal(const coeff_t* x, coeff_t* y) const;
     void evaluate_add_off_diag_pipeline(const coeff_t* x, coeff_t* y) const;
     void evaluate_add_off_diag_batched(const coeff_t* x, coeff_t* y);
+    void evaluate_add_off_diag_batched_omp(const coeff_t* x, coeff_t* y);
     void evaluate_add_off_diag_planned(const coeff_t* x, coeff_t* y);
+
+    // Resolve the local index of each of n records (states[i]) and accumulate
+    // y[idx] += dy[i]. Threaded; owner/prefetch select the strategy variant.
+    // Uses the ap_* scratch members. Called for both self- and remote-updates.
+    void apply_records(const ZBasisBST::state_t* states, const coeff_t* dy,
+                       int64_t n, coeff_t* y, bool owner, bool prefetch);
 
 	const B& basis;
 	const SymbolicOpSum<coeff_t> ops;
     MPIctx& ctx;
+
+    ApplyStrategy strategy = ApplyStrategy::Serial;
 
     int batch_size = -1; // -1 = all states in one round
 
@@ -144,6 +174,13 @@ protected:
     std::vector<MPI_Count> recv_displs;
     std::vector<MPI_Count> recv_counts;
 
+    // Scratch for the threaded apply (apply_records). Sized on demand.
+    std::vector<ZBasisBST::idx_t> ap_idx;   // resolved local index per record
+    std::vector<ZBasisBST::idx_t> ap_bidx;  // owner-bucketed indices
+    std::vector<coeff_t>          ap_bdy;   // owner-bucketed dy
+    std::vector<int64_t>          ap_thist; // per-(thread,bucket) histogram
+    std::vector<int64_t>          ap_tsend; // per-(thread,rank) send counts
+
     // --- static apply plan (build_plan / evaluate_add_off_diag_planned) ---
     bool plan_built = false;
     int64_t plan_bs = 0;                  // local batch size the plan was built with
@@ -161,9 +198,12 @@ void MPILazyOpSum<coeff_t, basis_t>::evaluate_add(const coeff_t* x, coeff_t* y) 
     evaluate_add_diagonal(x, y);
     if (plan_built)
         evaluate_add_off_diag_planned(x, y);
-    else if (!send_counts.empty())
-        evaluate_add_off_diag_batched(x, y);
-    else
+    else if (!send_counts.empty()) {
+        if (strategy == ApplyStrategy::Serial)
+            evaluate_add_off_diag_batched(x, y);
+        else
+            evaluate_add_off_diag_batched_omp(x, y);
+    } else
         evaluate_add_off_diag_pipeline(x, y);
 }
 

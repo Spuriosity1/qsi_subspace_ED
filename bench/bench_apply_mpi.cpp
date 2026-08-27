@@ -6,6 +6,8 @@
 #include <random>
 #include "timeit.hpp"
 #include <fstream>
+#include <omp.h>
+#include <iomanip>
 
 
 static void print_mem(const MPIHashContext& ctx, const char* label) {
@@ -84,6 +86,19 @@ int main(int argc, char* argv[]){
         .default_value(0.0)
         .scan<'g', double>();
 
+    prog.add_argument("--strategy")
+        .help("Rank-local work-sharing for the batched off-diagonal apply: "
+              "serial | omp | omp-owner | omp-prefetch. Any non-serial choice "
+              "forces the batched buffers to be allocated. (prefetch width is "
+              "set by the APPLY_PREFETCH_GROUP env var, default 8.)")
+        .default_value(std::string("serial"));
+
+    prog.add_argument("--threads")
+        .help("OpenMP threads per rank for the apply (0 = leave OMP_NUM_THREADS "
+              "/ runtime default untouched).")
+        .default_value(0)
+        .scan<'i', int>();
+
     try {
         prog.parse_args(argc, argv);
     } catch (const std::runtime_error& err) {
@@ -114,7 +129,27 @@ int main(int argc, char* argv[]){
     bool use_plan = prog.get<bool>("--plan");
     size_t plan_mem_cap = (size_t)(prog.get<double>("--plan-memory-cap") * (1ull << 30));
 
-    MPI_Init(NULL, NULL);
+    ApplyStrategy strategy;
+    try {
+        strategy = parse_strategy(prog.get<std::string>("--strategy"));
+    } catch (const std::exception& e) {
+        std::cerr << e.what() << "\n";
+        return 1;
+    }
+    // Non-serial strategies run the batched code path, which needs the
+    // send/recv buffers even if --batch-size was not passed.
+    bool need_batched = use_batched || strategy != ApplyStrategy::Serial;
+
+    int threads = prog.get<int>("--threads");
+    if (threads > 0) omp_set_num_threads(threads);
+
+    // Threads call MPI only between parallel regions, so FUNNELED suffices.
+    int provided = 0;
+    MPI_Init_thread(NULL, NULL, MPI_THREAD_FUNNELED, &provided);
+    if (provided < MPI_THREAD_FUNNELED) {
+        std::cerr << "Warning: MPI provides thread level " << provided
+                  << " < FUNNELED; hybrid runs may be unsafe\n";
+    }
 
 	// Step 1: Load ring data from JSON
     auto lattice_file = prog.get<std::string>("lattice_file");
@@ -167,7 +202,8 @@ int main(int argc, char* argv[]){
         if (ctx.my_rank == 0) std::cout << "\n";
 
         auto H = MPILazyOpSum(basis, H_sym, ctx);
-        if (use_batched)
+        H.set_strategy(strategy);
+        if (need_batched)
             H.allocate_temporaries(batch_size);
         if (use_plan) {
             TIMEIT((std::string("[") + tag + "] build plan").c_str(),
@@ -209,6 +245,36 @@ int main(int argc, char* argv[]){
             std::cout << "[" << tag << "] u += Av summary over " << n_counted
                       << " repeats: min=" << t_min * 1e3
                       << " ms  avg=" << t_sum / n_counted * 1e3 << " ms\n";
+
+        // Global checksum of u so different strategies can be cross-checked:
+        // sum and sum-of-squares over the whole distributed vector. Parallel
+        // reductions reorder FP adds, so expect agreement to ~1e-10 relative,
+        // not bit-identical.
+        double loc_sum = 0.0, loc_sq = 0.0;
+        for (ZBasisBase::idx_t i = 0; i < basis.dim(); ++i) {
+            loc_sum += u[i];
+            loc_sq  += u[i] * u[i];
+        }
+        double glob_sum = 0.0, glob_sq = 0.0;
+        MPI_Reduce(&loc_sum, &glob_sum, 1, MPI_DOUBLE, MPI_SUM, 0, MPI_COMM_WORLD);
+        MPI_Reduce(&loc_sq,  &glob_sq,  1, MPI_DOUBLE, MPI_SUM, 0, MPI_COMM_WORLD);
+
+        // Machine-readable one-liner for sweep.sh to grep into a CSV row.
+        if (ctx.my_rank == 0 && n_counted >= 1) {
+            const char* strat = H.has_plan() ? "planned" : to_string(strategy);
+            std::cout << "[result]"
+                      << " tag=" << tag
+                      << " strategy=" << strat
+                      << " ranks=" << ctx.world_size
+                      << " threads=" << omp_get_max_threads()
+                      << " batch=" << batch_size
+                      << " repeats=" << n_counted
+                      << " min_ms=" << t_min * 1e3
+                      << " avg_ms=" << t_sum / n_counted * 1e3
+                      << " sum=" << std::setprecision(12) << glob_sum
+                      << " sumsq=" << std::setprecision(12) << glob_sq
+                      << "\n";
+        }
         print_mem(ctx, (std::string(tag) + " after apply").c_str());
     };
 

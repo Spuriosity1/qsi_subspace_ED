@@ -115,6 +115,14 @@ struct ZBasisBase {
 		return states[idx];
 	}
 
+	// Raw pointer to the sorted state array. Used by the prefetched
+	// interleaved-search apply strategy, which binary-searches the array
+	// directly (bypassing the derived acceleration structures) so it can keep
+	// many independent probes in flight with software prefetch.
+	inline const state_t* data() const {
+		return states.data();
+	}
+
 	void load_from_file(const fs::path& bfile, const std::string& dataset="basis");
 
     template<typename coeff_t>
