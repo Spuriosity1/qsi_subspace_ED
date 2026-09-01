@@ -213,7 +213,10 @@ struct pyro_vtree_parallel : public LatContainer {
             }
         }
         std::cout<<"Outfile: "<<outfilename<<std::endl;
-        basis_io::write_basis_hdf5(state_set[0], outfilename);
+        if (state_set.size() > 0)
+            basis_io::write_basis_hdf5(state_set[0], outfilename);
+        else
+            std::cout<<"Warning: no states found... "<<std::endl;
     }
 
 
