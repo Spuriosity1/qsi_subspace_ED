@@ -166,6 +166,10 @@ int main(int argc, char* argv[]){
 	using T=double;
 	SymbolicOpSum<T> H_sym;
 
+    // These couplings build a purely off-diagonal Hamiltonian (ring exchange
+    // only; no Ising/field diagonal term). So evaluate_add's diagonal pass is
+    // trivial and the timed apply is entirely the searched off-diagonal path —
+    // no need to isolate it, the whole measurement already is it.
     std::vector<double> gv {1.0, -0.2, -0.2, -0.2};
     build_hamiltonian(H_sym, jdata, gv);
 
@@ -188,8 +192,19 @@ int main(int argc, char* argv[]){
         TIMEIT((std::string("[") + tag + "] redistribute").c_str(), basis.redistribute();)
         print_mem(ctx, (std::string(tag) + " after redistribute").c_str());
 
-        // Per-rank breakdown
+        // Per-rank breakdown. The searched working set (sorted states + any
+        // acceleration structure) is what must exceed L3 for this benchmark to
+        // exercise the DRAM-latency regime rather than a cache-resident toy.
         size_t states_bytes = basis.dim() * sizeof(ZBasisBase::state_t);
+        size_t accel_bytes = 0;
+        if constexpr (std::is_base_of_v<ZBasisInterp, std::decay_t<decltype(basis)>>)
+            accel_bytes = basis.n_bounds_entries() * 56;
+        size_t wset_local = states_bytes + accel_bytes;
+        // Local dims differ across ranks; report the largest so the field
+        // reflects the rank that actually has to reach furthest into memory.
+        size_t wset_max = 0;
+        MPI_Reduce(&wset_local, &wset_max, 1, get_mpi_type<size_t>(), MPI_MAX,
+                   0, MPI_COMM_WORLD);
         if (ctx.my_rank == 0)
             std::cout << "[" << tag << "] local dim=" << basis.dim()
                       << "  states=" << states_bytes / (1<<20) << " MiB";
@@ -268,6 +283,7 @@ int main(int argc, char* argv[]){
                       << " ranks=" << ctx.world_size
                       << " threads=" << omp_get_max_threads()
                       << " batch=" << batch_size
+                      << " wset_kib=" << wset_max / 1024
                       << " repeats=" << n_counted
                       << " min_ms=" << t_min * 1e3
                       << " avg_ms=" << t_sum / n_counted * 1e3
