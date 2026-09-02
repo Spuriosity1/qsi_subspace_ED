@@ -9,6 +9,8 @@
 #include <fstream>
 #include <omp.h>
 #include <iomanip>
+#include <cstdlib>
+#include <algorithm>
 
 
 static void print_mem(const MPIHashContext& ctx, const char* label) {
@@ -154,6 +156,15 @@ int main(int argc, char* argv[]){
 
     MPILazyOpSumStrategy strat = parse_mpi_strategy(prog.get<std::string>("--strategy"));
 
+    // Interleaved-search / scatter-prefetch knobs (consumed inside the apply via
+    // the same env vars); recorded here so the sweep CSV captures what was used.
+    auto env_int = [](const char* name, int def) {
+        const char* e = std::getenv(name);
+        return e ? std::atoi(e) : def;
+    };
+    const int search_group = std::min(32, std::max(1, env_int("APPLY_SEARCH_GROUP", 8)));
+    const int scatter_pd   = std::max(0, env_int("APPLY_SCATTER_PD", 16));
+
     auto bench_one = [&](auto& basis, const char* tag) {
         if constexpr (std::is_base_of_v<ZBasisInterp, std::decay_t<decltype(basis)>>) {
             basis.set_hi_mask(interp_hi_mask);
@@ -250,6 +261,8 @@ int main(int argc, char* argv[]){
                       << " strategy=" << strat
                       << " ranks=" << ctx.world_size
                       << " threads=" << omp_get_max_threads()
+                      << " search_group=" << search_group
+                      << " scatter_pd=" << scatter_pd
                       << " wset_kib=" << wset_max / 1024
                       << " repeats=" << n_counted
                       << " min_ms=" << t_min * 1e3

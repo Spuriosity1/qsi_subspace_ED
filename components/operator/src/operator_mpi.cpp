@@ -6,6 +6,7 @@
 #include <numeric>
 #include <omp.h>
 #include <stdexcept>
+#include <cstdlib>
 
 #ifndef NDEBUG
 #define ASSERT_STATE_FOUND(error_msg, state, result) \
@@ -415,6 +416,43 @@ void MPILazyOpSum<coeff_t, B>::evaluate_add_off_diag_pipeline(const coeff_t* x, 
 
     bool has_prev_op = false;
 
+    // Scratch for batched interleaved search (reused across sources/operators;
+    // pipeline is single-threaded so one buffer is safe).
+    std::vector<ZBasisBase::idx_t> idxbuf;
+
+    // Scatter prefetch distance: how many records ahead to prefetch the random
+    // y[idx] write target. Read once; tune via APPLY_SCATTER_PD (0 disables).
+    static const int PD = [] {
+        const char* e = std::getenv("APPLY_SCATTER_PD");
+        int d = e ? std::atoi(e) : 16;
+        return d < 0 ? 0 : d;
+    }();
+
+    // Resolve a block of `m` states in one prefetched interleaved search, then
+    // scatter y[idx] += dy with the write target prefetched PD records ahead so
+    // the random y-write miss overlaps too.
+    auto apply_block = [&](const ZBasisBase::state_t* st, const coeff_t* dyv,
+                           int64_t m, const char* what) {
+        (void)what;
+        if (m == 0) return;
+        idxbuf.resize(m);
+        basis.search_batch(st, m, idxbuf.data());
+        for (int64_t j = 0; j < m; ++j) {
+            if (j + PD < m && idxbuf[j + PD] >= 0)
+                __builtin_prefetch(&y[idxbuf[j + PD]], 1, 0);
+            const ZBasisBase::idx_t p = idxbuf[j];
+#ifndef NDEBUG
+            if (p < 0) {
+                std::cerr << "State not found (" << what << ") on rank "
+                          << ctx.my_rank << ": ";
+                printHex(std::cerr, st[j]) << "\n";
+                throw std::logic_error("State not found in batched apply");
+            }
+#endif
+            if (p >= 0) y[p] += dyv[j];
+        }
+    };
+
     // Post receives for operator prev_index's data into comm, wait for all of
     // its communication to finish, then apply the received updates to y.
     auto process_receives = [&](OperatorCommState& comm, int prev_index) {
@@ -455,12 +493,9 @@ void MPILazyOpSum<coeff_t, B>::evaluate_add_off_diag_pipeline(const coeff_t* x, 
         BENCH_TIMER_TIMEIT(rem_up_timer,
         for (int source = 0; source < ctx.world_size; ++source) {
             if (source == ctx.my_rank) continue;
-            for (size_t j = 0; j < comm.recv_states_bufs[source].size(); ++j) {
-                ZBasisBase::idx_t local_idx;
-                ASSERT_STATE_FOUND("remote", comm.recv_states_bufs[source][j],
-                        basis.search(comm.recv_states_bufs[source][j], local_idx));
-                y[local_idx] += comm.recv_dy_bufs[source][j];
-            }
+            apply_block(comm.recv_states_bufs[source].data(),
+                        comm.recv_dy_bufs[source].data(),
+                        (int64_t)comm.recv_states_bufs[source].size(), "remote");
         }
         )
     };
@@ -498,13 +533,9 @@ void MPILazyOpSum<coeff_t, B>::evaluate_add_off_diag_pipeline(const coeff_t* x, 
         }
 
         BENCH_TIMER_TIMEIT(loc_up_timer,
-        for (size_t i = 0; i < curr_op_comm.send_states[ctx.my_rank].size(); ++i) {
-            ZBasisBase::idx_t local_idx;
-            ASSERT_STATE_FOUND("self",
-                    curr_op_comm.send_states[ctx.my_rank][i],
-                    basis.search(curr_op_comm.send_states[ctx.my_rank][i], local_idx));
-            y[local_idx] += curr_op_comm.send_dy[ctx.my_rank][i];
-        }
+        apply_block(curr_op_comm.send_states[ctx.my_rank].data(),
+                    curr_op_comm.send_dy[ctx.my_rank].data(),
+                    (int64_t)curr_op_comm.send_states[ctx.my_rank].size(), "self");
         )
 
         // === PROCESS PREVIOUS OPERATOR'S RECEIVES ===

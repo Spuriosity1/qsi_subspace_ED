@@ -1,5 +1,51 @@
 #include "operator.hpp"
 #include <cassert>
+#include <cstdlib>
+
+void ZBasisBase::search_batch(const state_t* q, idx_t n, idx_t* out) const {
+    const __uint128_t* arr = reinterpret_cast<const __uint128_t*>(states.data());
+    const idx_t N = (idx_t)states.size();
+    if (N == 0) { for (idx_t i = 0; i < n; ++i) out[i] = -1; return; }
+
+    // GROUP independent binary searches advance in lockstep: issue all their
+    // probe prefetches, THEN do all their comparisons, so each probe's miss has
+    // ~GROUP loads' worth of time to resolve before it is used. GROUP is the
+    // number of memory requests kept in flight; tune via APPLY_SEARCH_GROUP
+    // (read once, clamped to [1, MAX_GROUP]).
+    constexpr int MAX_GROUP = 32;
+    static const int GROUP = [] {
+        const char* e = std::getenv("APPLY_SEARCH_GROUP");
+        int g = e ? std::atoi(e) : 8;
+        return g < 1 ? 1 : (g > MAX_GROUP ? MAX_GROUP : g);
+    }();
+
+    int iters = 1;
+    while ((idx_t(1) << iters) < N) ++iters;
+    ++iters;                              // guarantee lo==hi convergence
+
+    idx_t lo[MAX_GROUP], hi[MAX_GROUP], mid[MAX_GROUP];
+    for (idx_t base = 0; base < n; base += GROUP) {
+        const int g = (int)std::min<idx_t>(GROUP, n - base);
+        for (int k = 0; k < g; ++k) { lo[k] = 0; hi[k] = N; }
+
+        for (int it = 0; it < iters; ++it) {
+            for (int k = 0; k < g; ++k) {
+                mid[k] = (lo[k] + hi[k]) >> 1;
+                __builtin_prefetch(arr + mid[k], 0, 0);
+            }
+            for (int k = 0; k < g; ++k) {
+                if (lo[k] >= hi[k]) continue;
+                if (arr[mid[k]] < q[base + k].uint128) lo[k] = mid[k] + 1;
+                else                                   hi[k] = mid[k];
+            }
+        }
+        for (int k = 0; k < g; ++k) {
+            const idx_t p = lo[k];
+            out[base + k] = (p < N && arr[p] == q[base + k].uint128) ? p : -1;
+        }
+    }
+}
+
 
 int ZBasisBST::search(const state_t& state, idx_t& J) const {
     const __uint128_t* arr = reinterpret_cast<const __uint128_t*>(states.data());

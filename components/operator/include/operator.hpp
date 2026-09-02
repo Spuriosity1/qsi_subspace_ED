@@ -123,6 +123,15 @@ struct ZBasisBase {
 		return states.data();
 	}
 
+	// Batched exact-match lookup via a software-prefetched interleaved binary
+	// search: several independent probes are kept in flight so their DRAM
+	// misses overlap (memory-level parallelism) instead of stalling one
+	// dependent miss at a time. out[i] = index of q[i] in the sorted array, or
+	// -1 if absent. Operates on the raw sorted array (bypasses the derived
+	// acceleration structures). Single-threaded; the parallelism is over
+	// outstanding memory requests, not cores.
+	void search_batch(const state_t* q, idx_t n, idx_t* out) const;
+
 	void load_from_file(const fs::path& bfile, const std::string& dataset="basis");
 
     template<typename coeff_t>
