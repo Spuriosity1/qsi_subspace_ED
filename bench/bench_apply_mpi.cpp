@@ -86,6 +86,11 @@ int main(int argc, char* argv[]){
         .default_value(false)
         .implicit_value(true);
 
+    prog.add_argument("--strategy")
+        .help("Choice of apply kernel")
+        .choices("prealloc", "pipe")
+        .default_value("pipe");
+
     try {
         prog.parse_args(argc, argv);
     } catch (const std::runtime_error& err) {
@@ -146,6 +151,15 @@ int main(int argc, char* argv[]){
     std::vector<double> gv {1.0, -0.2, -0.2, -0.2};
     build_hamiltonian(H_sym, jdata, gv);
 
+
+    MPILazyOpSumStrategy strat;
+    if (prog.get<std::string>("--strategy") == "pipe")
+        strat = MPILazyOpSumStrategy::PIPE;
+    else if (prog.get<std::string>("--strategy") == "prealloc")
+        strat = MPILazyOpSumStrategy::PREALLOC;
+    else
+        throw std::runtime_error("Unrecognised strategy");
+
     auto bench_one = [&](auto& basis, const char* tag) {
         if constexpr (std::is_base_of_v<ZBasisInterp, std::decay_t<decltype(basis)>>) {
             basis.set_hi_mask(interp_hi_mask);
@@ -189,7 +203,7 @@ int main(int argc, char* argv[]){
         }
         if (ctx.my_rank == 0) std::cout << "\n";
 
-        auto H = MPILazyOpSum(basis, H_sym, ctx);
+        auto H = MPILazyOpSum(basis, H_sym, ctx, strat);
 
         std::vector<double> v(basis.dim()), u(basis.dim(), 0.0);
         std::mt19937 rng(seed);
@@ -239,7 +253,7 @@ int main(int argc, char* argv[]){
         if (ctx.my_rank == 0 && n_counted >= 1) {
             std::cout << "[result]"
                       << " tag=" << tag
-                      << " strategy=pipeline"
+                      << " strategy=" << strat
                       << " ranks=" << ctx.world_size
                       << " threads=" << omp_get_max_threads()
                       << " wset_kib=" << wset_max / 1024

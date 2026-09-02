@@ -355,8 +355,47 @@ void MPILazyOpSum<coeff_t, B>::evaluate_add_diagonal(const coeff_t* x, coeff_t* 
 }
 
 
+
+
+
 template <RealOrCplx coeff_t, Basis B>
 void MPILazyOpSum<coeff_t, B>::evaluate_add_off_diag_pipeline(const coeff_t* x, coeff_t* y) const {
+
+
+    // State for pipelined communication
+    struct OperatorCommState {
+        std::vector<MPI_Request> requests;
+
+        std::vector<std::vector<coeff_t>> send_dy;
+        std::vector<std::vector<ZBasisBase::state_t>> send_states;
+
+        std::vector<std::vector<coeff_t>> recv_dy_bufs;
+        std::vector<std::vector<ZBasisBase::state_t>> recv_states_bufs;
+
+        MPI_Request count_exchange_req;
+        std::vector<int> recvcounts;
+
+        bool count_exchange_done = false;
+
+        void resize(int world_size){
+            send_dy.resize(world_size);
+            send_states.resize(world_size);
+
+            recv_dy_bufs.resize(world_size);
+            recv_states_bufs.resize(world_size);
+
+            recvcounts.resize(world_size);
+        }
+
+        void reset_for_new_op(){
+            count_exchange_done=false;
+            requests.clear();
+            for (auto& v : send_dy)     v.clear();
+            for (auto& v : send_states) v.clear();
+            for (auto& v : recv_dy_bufs)     v.clear();
+            for (auto& v : recv_states_bufs) v.clear();
+        }
+    };
 
     Timer loc_apply_timer("[local apply]", ctx.my_rank);
     Timer loc_up_timer("[local update]", ctx.my_rank);
@@ -436,7 +475,7 @@ void MPILazyOpSum<coeff_t, B>::evaluate_add_off_diag_pipeline(const coeff_t* x, 
     for ( const auto& [c, op] : ops.off_diag_terms ){
         curr_op_comm.reset_for_new_op();
 
-         // Organize sends by destination rank
+         // Organise sends by destination rank
         BENCH_TIMER_TIMEIT(loc_apply_timer,
 
         for (ZBasisBase::idx_t il = 0; il < basis.dim(); ++il) {
@@ -537,6 +576,155 @@ void MPILazyOpSum<coeff_t, B>::evaluate_add_off_diag_pipeline(const coeff_t* x, 
 #endif
 
 
+}
+
+
+// Precompute, per off-diagonal operator, how many records this rank sends to
+// (and receives from) every rank, and the packed displacements. Static across
+// applies: the basis partition and Hamiltonian never change. Also sizes the
+// ping-pong record buffers to the largest per-operator total.
+template <RealOrCplx coeff_t, Basis B>
+void MPILazyOpSum<coeff_t, B>::build_apply_metadata() const {
+    using idx_t = ZBasisBase::idx_t;
+    const int N = ctx.world_size;
+    const size_t n_ops = ops.off_diag_terms.size();
+
+    op_comm_metadata.resize(n_ops);
+    int64_t max_send = 0, max_recv = 0;
+
+    for (size_t oi = 0; oi < n_ops; ++oi) {
+        const auto& op = ops.off_diag_terms[oi].second;
+        auto& md = op_comm_metadata[oi];
+        md.send_sizes.assign(N, 0);
+        md.send_displs.assign(N, 0);
+        md.recv_sizes.assign(N, 0);
+        md.recv_displs.assign(N, 0);
+
+        // applyState mutates the state into its target; the destination rank is
+        // the rank owning that target state.
+        for (idx_t il = 0; il < basis.dim(); ++il) {
+            ZBasisBase::state_t state = basis[il];
+            if (op.applyState(state) == 0) continue;
+            md.send_sizes[ctx.rank_of_state(state)]++;
+        }
+
+        MPI_Alltoall(md.send_sizes.data(), 1, get_mpi_type<int>(),
+                     md.recv_sizes.data(), 1, get_mpi_type<int>(), MPI_COMM_WORLD);
+
+        for (int r = 1; r < N; ++r) {
+            md.send_displs[r] = md.send_displs[r-1] + md.send_sizes[r-1];
+            md.recv_displs[r] = md.recv_displs[r-1] + md.recv_sizes[r-1];
+        }
+        md.send_total = md.send_displs[N-1] + md.send_sizes[N-1];
+        md.recv_total = md.recv_displs[N-1] + md.recv_sizes[N-1];
+        max_send = std::max(max_send, md.send_total);
+        max_recv = std::max(max_recv, md.recv_total);
+    }
+
+    for (int s = 0; s < 2; ++s) {
+        send_ring[s].resize(max_send);
+        recv_ring[s].resize(max_recv);
+    }
+}
+
+
+template <RealOrCplx coeff_t, Basis B>
+void MPILazyOpSum<coeff_t, B>::
+evaluate_add_off_diag_pipeline_prealloc(const coeff_t* x, coeff_t* y) const
+{
+    using idx_t    = ZBasisBase::idx_t;
+    using record_t = ApplyRecord<coeff_t>;
+    const MPI_Datatype rec_type = get_mpi_type<record_t>();
+
+    Timer prealloc_timer("[preallocate]", ctx.my_rank);
+    Timer fill_sends_timer("[fill_sends]", ctx.my_rank);
+    Timer post_timer("[post]", ctx.my_rank);
+    Timer wait_timer("[wait]", ctx.my_rank);
+    Timer apply_recvs_timer("[apply_recvs]", ctx.my_rank);
+    std::vector<const Timer*> timers {&prealloc_timer, &fill_sends_timer, &post_timer, &wait_timer, &apply_recvs_timer};
+
+    BENCH_TIMER_TIMEIT(prealloc_timer,
+    if (op_comm_metadata.empty()) build_apply_metadata();
+    )
+
+    const size_t n_ops = ops.off_diag_terms.size();
+    if (n_ops == 0) return;
+
+    // Fill send_ring[slot] with operator oi's (coeff, target-state) records,
+    // grouped by destination rank per the precomputed displacements.
+    auto fill_sends = [&](int slot, size_t oi) {
+        BENCH_TIMER_TIMEIT(fill_sends_timer,
+        const auto& [c, op] = ops.off_diag_terms[oi];
+        const auto& md = op_comm_metadata[oi];
+        auto& sbuf = send_ring[slot];
+        std::vector<int> cursor(md.send_displs);   // per-rank write head
+        for (idx_t il = 0; il < basis.dim(); ++il) {
+            record_t rec;
+            rec.state = basis[il];
+            auto sign = op.applyState(rec.state);  // mutates state -> target
+            if (sign == 0) continue;
+            rec.coeff = c * x[il] * sign;
+            sbuf[cursor[ctx.rank_of_state(rec.state)]++] = rec;
+        }
+        )
+    };
+
+    // One collective per operator: coeff and state travel together.
+    auto post = [&](int slot, size_t oi, MPI_Request* req) {
+        BENCH_TIMER_TIMEIT(post_timer,
+        const auto& md = op_comm_metadata[oi];
+        MPI_Ialltoallv(
+            send_ring[slot].data(), md.send_sizes.data(), md.send_displs.data(), rec_type,
+            recv_ring[slot].data(), md.recv_sizes.data(), md.recv_displs.data(), rec_type,
+            MPI_COMM_WORLD, req);
+        )
+    };
+
+    // Search each received target into the local basis and accumulate. The
+    // self block arrived via the same alltoallv, so there is no separate local
+    // update pass.
+    auto apply_recvs = [&](int slot, size_t oi) {
+        BENCH_TIMER_TIMEIT(apply_recvs_timer,
+        const auto& rbuf = recv_ring[slot];
+        const int64_t n = op_comm_metadata[oi].recv_total;
+        for (int64_t j = 0; j < n; ++j) {
+            idx_t idx;
+            ASSERT_STATE_FOUND("remote", rbuf[j].state,
+                    basis.search(rbuf[j].state, idx));
+            y[idx] += rbuf[j].coeff;
+        }
+        )
+    };
+
+    // Software-pipelined over operators: operator i's alltoallv overlaps
+    // operator (i-1)'s search and operator (i+1)'s fill. Slot i-2 is guaranteed
+    // complete (waited at iteration i-1) before it is reused at iteration i.
+    MPI_Request req[2];
+    fill_sends(0, 0);
+    post(0, 0, &req[0]);
+    for (size_t i = 1; i < n_ops; ++i) {
+        const int cur = i & 1, prev = (i - 1) & 1;
+        fill_sends(cur, i);
+        post(cur, i, &req[cur]);
+        BENCH_TIMER_TIMEIT(wait_timer,
+        MPI_Wait(&req[prev], MPI_STATUS_IGNORE);
+        )
+        apply_recvs(prev, i - 1);
+    }
+    const int last = (n_ops - 1) & 1;
+
+    BENCH_TIMER_TIMEIT(wait_timer,
+    MPI_Wait(&req[last], MPI_STATUS_IGNORE);
+    )
+    apply_recvs(last, n_ops - 1);
+
+
+    // print diagnostics
+#ifdef SUBSPACE_ED_BENCHMARK_OPERATIONS
+        for (auto t : timers){
+            t->print_summary(ctx.log(logging::DEBUG));
+        }
+#endif
 }
 
 

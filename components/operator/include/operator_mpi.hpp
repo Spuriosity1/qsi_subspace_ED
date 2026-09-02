@@ -1,10 +1,54 @@
 #pragma once
 #include "operator.hpp"
 #include <cassert>
+#include <array>
+#include <cstddef>
 #include <functional>
 #include <mpi.h>
 //#include <bit>
 #include "mpi_context.hpp"
+
+
+// A single off-diagonal apply contribution: the coefficient to accumulate and
+// the target state it lands on. Stored contiguously (array-of-structs) so the
+// pipeline ships ONE homogeneous buffer per operator instead of parallel
+// coeff/state arrays, and so each record's key+value share a cache line.
+// POD + trivially copyable => it maps 1:1 onto a committed MPI datatype below.
+template<RealOrCplx coeff_t>
+struct ApplyRecord {
+    coeff_t coeff;
+    ZBasisBase::state_t state;
+};
+
+// Build (once) the committed MPI struct type for ApplyRecord<coeff_t>. The
+// resize to sizeof(record) pins the type's extent to the C++ array stride so
+// arrays of records send/receive correctly regardless of padding.
+template<RealOrCplx coeff_t>
+inline MPI_Datatype make_apply_record_mpi_type() {
+    using R = ApplyRecord<coeff_t>;
+    int          blocklen[2] = {1, 1};
+    MPI_Aint     displ[2]    = {offsetof(R, coeff), offsetof(R, state)};
+    MPI_Datatype types[2]    = {get_mpi_type<coeff_t>(),
+                                get_mpi_type<ZBasisBase::state_t>()};
+    MPI_Datatype packed, resized;
+    MPI_Type_create_struct(2, blocklen, displ, types, &packed);
+    MPI_Type_create_resized(packed, 0, sizeof(R), &resized);
+    MPI_Type_commit(&resized);
+    MPI_Type_free(&packed);
+    return resized;
+}
+
+// Same static-commit trick as get_mpi_type<Uint128>(): built lazily on first
+// use (after MPI_Init), cached for the process lifetime. Magic-static init is
+// thread-safe.
+template<> inline MPI_Datatype get_mpi_type<ApplyRecord<double>>() {
+    static MPI_Datatype dtype = make_apply_record_mpi_type<double>();
+    return dtype;
+}
+template<> inline MPI_Datatype get_mpi_type<ApplyRecord<std::complex<double>>>() {
+    static MPI_Datatype dtype = make_apply_record_mpi_type<std::complex<double>>();
+    return dtype;
+}
 
 
 // MPI-distributed wrapper around any local basis type.
@@ -68,13 +112,30 @@ using ZBasisBSTFast_HashMPI = ZBasisMPI<ZBasisBSTFast>;
 using MPIctx=MPIHashContext;
 
 
+enum class MPILazyOpSumStrategy {
+    PIPE, PREALLOC
+};
+
+inline std::ostream& operator<<(std::ostream& o, const MPILazyOpSumStrategy s){
+    switch(s) {
+        case MPILazyOpSumStrategy::PIPE: o<<"PIPE"; break;
+        case MPILazyOpSumStrategy::PREALLOC: o<<"PREALLOC"; break;
+        default: o<<static_cast<int>(s);
+    }
+    return o;
+}
+
 template<RealOrCplx coeff_t, Basis B>
 struct MPILazyOpSum {
+
+    const MPILazyOpSumStrategy apply_strat;
+
     using Scalar = coeff_t;
     explicit MPILazyOpSum(
             const B& local_basis_, const SymbolicOpSum<coeff_t>& ops_,
-            MPIctx& context_
-            ) : basis(local_basis_), ops(ops_), ctx(context_) {
+            MPIctx& context_,
+            MPILazyOpSumStrategy strat=MPILazyOpSumStrategy::PIPE
+            ) : apply_strat(strat), basis(local_basis_), ops(ops_), ctx(context_)  {
     }
 
     MPILazyOpSum operator=(const MPILazyOpSum& other) = delete;
@@ -92,45 +153,37 @@ struct MPILazyOpSum {
 
 protected:
 
-    // State for pipelined communication
-    struct OperatorCommState {
-        std::vector<MPI_Request> requests;
-
-        std::vector<std::vector<coeff_t>> send_dy;
-        std::vector<std::vector<ZBasisBase::state_t>> send_states;
-
-        std::vector<std::vector<coeff_t>> recv_dy_bufs;
-        std::vector<std::vector<ZBasisBase::state_t>> recv_states_bufs;
-
-        MPI_Request count_exchange_req;
-        std::vector<int> recvcounts;
-
-        bool count_exchange_done = false;
-
-        void resize(int world_size){
-            send_dy.resize(world_size);
-            send_states.resize(world_size);
-
-            recv_dy_bufs.resize(world_size);
-            recv_states_bufs.resize(world_size);
-
-            recvcounts.resize(world_size);
-        }
-
-        void reset_for_new_op(){
-            count_exchange_done=false;
-            requests.clear();
-            for (auto& v : send_dy)     v.clear();
-            for (auto& v : send_states) v.clear();
-            for (auto& v : recv_dy_bufs)     v.clear();
-            for (auto& v : recv_states_bufs) v.clear();
-        }
+    // Per-operator communication plan. The basis and Hamiltonian are fixed, so
+    // the alltoallv counts/displs for each off-diagonal term never change; we
+    // precompute them once (build_apply_metadata) and reuse across every apply.
+    // Counts/displs are in units of ApplyRecord (one collective now covers both
+    // coeff and state). The self->self block is included so the local update
+    // rides the same alltoallv instead of a separate path.
+    struct OperatorMetadata {
+        std::vector<int> send_sizes;   // records sent to each rank (incl. self)
+        std::vector<int> send_displs;  // prefix sums, in records
+        std::vector<int> recv_sizes;   // records received from each rank
+        std::vector<int> recv_displs;
+        int64_t send_total = 0;        // == send_displs.back() + send_sizes.back()
+        int64_t recv_total = 0;
     };
+    mutable std::vector<OperatorMetadata> op_comm_metadata;
 
+    // Double-buffered record buffers, so op i's
+    // alltoallv can be in flight while op i-1's records are searched into y and
+    // op i+1's sends are filled. 
+    // Sized once to the largest per-operator total the first time 
+    // evaluate_add_off_diag_pipeline_prealloc is called.
+    mutable std::array<std::vector<ApplyRecord<coeff_t>>, 2> send_ring;
+    mutable std::array<std::vector<ApplyRecord<coeff_t>>, 2> recv_ring;
+
+    // Populate op_comm_metadata and size the ring buffers. Idempotent; a no-op
+    // once built (basis/H are const for the object's lifetime).
+    void build_apply_metadata() const;
 
     void evaluate_add_diagonal(const coeff_t* x, coeff_t* y) const;
     void evaluate_add_off_diag_pipeline(const coeff_t* x, coeff_t* y) const;
-    // void evaluate_add_off_diag_pipeline_prealloc(const coeff_t* x, coeff_t* y) const;
+    void evaluate_add_off_diag_pipeline_prealloc(const coeff_t* x, coeff_t* y) const;
 
 	const B& basis;
 	const SymbolicOpSum<coeff_t> ops;
@@ -142,7 +195,16 @@ protected:
 template <RealOrCplx coeff_t, Basis basis_t>
 void MPILazyOpSum<coeff_t, basis_t>::evaluate_add(const coeff_t* x, coeff_t* y) {
     evaluate_add_diagonal(x, y);
-    evaluate_add_off_diag_pipeline(x, y);
+    switch (apply_strat) {
+        case MPILazyOpSumStrategy::PIPE:
+            evaluate_add_off_diag_pipeline(x, y);
+            break;
+        case MPILazyOpSumStrategy::PREALLOC:
+            evaluate_add_off_diag_pipeline_prealloc(x, y);
+            break;
+        default:
+            throw std::runtime_error("The developer has not implemented this strategy yet.");
+    }
 }
 
 
