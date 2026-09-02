@@ -88,7 +88,7 @@ int main(int argc, char* argv[]){
 
     prog.add_argument("--strategy")
         .help("Choice of apply kernel")
-        .choices("prealloc", "pipe")
+        .choices("prealloc", "pipe", "prealloc_p2p")
         .default_value("pipe");
 
     try {
@@ -152,13 +152,7 @@ int main(int argc, char* argv[]){
     build_hamiltonian(H_sym, jdata, gv);
 
 
-    MPILazyOpSumStrategy strat;
-    if (prog.get<std::string>("--strategy") == "pipe")
-        strat = MPILazyOpSumStrategy::PIPE;
-    else if (prog.get<std::string>("--strategy") == "prealloc")
-        strat = MPILazyOpSumStrategy::PREALLOC;
-    else
-        throw std::runtime_error("Unrecognised strategy");
+    MPILazyOpSumStrategy strat = parse_mpi_strategy(prog.get<std::string>("--strategy"));
 
     auto bench_one = [&](auto& basis, const char* tag) {
         if constexpr (std::is_base_of_v<ZBasisInterp, std::decay_t<decltype(basis)>>) {

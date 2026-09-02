@@ -112,17 +112,30 @@ using ZBasisBSTFast_HashMPI = ZBasisMPI<ZBasisBSTFast>;
 using MPIctx=MPIHashContext;
 
 
+// Forward declaration so the apply helpers can take a Timer& without pulling
+// timeit.hpp into this header (it is included in the .cpp).
+class Timer;
+
 enum class MPILazyOpSumStrategy {
-    PIPE, PREALLOC
+    PIPE, PREALLOC, PREALLOC_P2P
 };
 
 inline std::ostream& operator<<(std::ostream& o, const MPILazyOpSumStrategy s){
     switch(s) {
         case MPILazyOpSumStrategy::PIPE: o<<"PIPE"; break;
         case MPILazyOpSumStrategy::PREALLOC: o<<"PREALLOC"; break;
+        case MPILazyOpSumStrategy::PREALLOC_P2P: o<<"PREALLOC_P2P"; break;
         default: o<<static_cast<int>(s);
     }
     return o;
+}
+
+inline MPILazyOpSumStrategy parse_mpi_strategy(const std::string& s) {
+    if (s == "pipe")         return MPILazyOpSumStrategy::PIPE;
+    if (s == "prealloc")     return MPILazyOpSumStrategy::PREALLOC;
+    if (s == "prealloc_p2p") return MPILazyOpSumStrategy::PREALLOC_P2P;
+    throw std::runtime_error("Unrecognised strategy '" + s +
+            "' (expected: pipe | prealloc | prealloc_p2p)");
 }
 
 template<RealOrCplx coeff_t, Basis B>
@@ -181,9 +194,18 @@ protected:
     // once built (basis/H are const for the object's lifetime).
     void build_apply_metadata() const;
 
+    // Shared building blocks of the prealloc apply variants (threaded).
+    // fill_sends: counting-sort operator oi's records into send_ring[slot].
+    // apply_recvs: search recv_ring[slot] into the local basis and accumulate.
+    void fill_sends(int slot, size_t oi, const coeff_t* x, Timer& timer) const;
+    void apply_recvs(int slot, size_t oi, coeff_t* y, Timer& timer) const;
+
     void evaluate_add_diagonal(const coeff_t* x, coeff_t* y) const;
     void evaluate_add_off_diag_pipeline(const coeff_t* x, coeff_t* y) const;
+    // Prealloc + precomputed comm plan, records shipped by one Ialltoallv/op.
     void evaluate_add_off_diag_pipeline_prealloc(const coeff_t* x, coeff_t* y) const;
+    // Same, but records shipped by point-to-point Isend/Irecv per peer/op.
+    void evaluate_add_off_diag_prealloc_p2p(const coeff_t* x, coeff_t* y) const;
 
 	const B& basis;
 	const SymbolicOpSum<coeff_t> ops;
@@ -201,6 +223,9 @@ void MPILazyOpSum<coeff_t, basis_t>::evaluate_add(const coeff_t* x, coeff_t* y) 
             break;
         case MPILazyOpSumStrategy::PREALLOC:
             evaluate_add_off_diag_pipeline_prealloc(x, y);
+            break;
+        case MPILazyOpSumStrategy::PREALLOC_P2P:
+            evaluate_add_off_diag_prealloc_p2p(x, y);
             break;
         default:
             throw std::runtime_error("The developer has not implemented this strategy yet.");

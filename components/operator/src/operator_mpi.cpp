@@ -628,11 +628,99 @@ void MPILazyOpSum<coeff_t, B>::build_apply_metadata() const {
 }
 
 
+// ---- Shared prealloc building blocks (threaded) --------------------------
+
+// Counting-sort operator oi's (coeff, target-state) records into
+// send_ring[slot], grouped by destination rank per the precomputed
+// displacements. Threaded: the send buffer must stay grouped by rank and the
+// per-rank write cursor is shared, so a plain parallel-for won't do. Each
+// thread owns a contiguous chunk of states; pass 1 counts how many records it
+// contributes to each rank, an exclusive prefix over threads gives each thread
+// a disjoint write slot within every rank's block, and pass 2 scatters into
+// those slots. applyState is recomputed in pass 2 rather than stashing an
+// O(dim) per-state scratch (prohibitive at the target scale).
+template <RealOrCplx coeff_t, Basis B>
+void MPILazyOpSum<coeff_t, B>::fill_sends(int slot, size_t oi,
+                                          const coeff_t* x, Timer& timer) const {
+    using idx_t    = ZBasisBase::idx_t;
+    using record_t = ApplyRecord<coeff_t>;
+    BENCH_TIMER_TIMEIT(timer,
+    // Plain locals, not a structured binding: Clang cannot capture a
+    // structured binding into an OpenMP region.
+    const coeff_t c  = ops.off_diag_terms[oi].first;
+    const auto&   op = ops.off_diag_terms[oi].second;
+    const auto& md = op_comm_metadata[oi];
+    auto& sbuf = send_ring[slot];
+    const int N = ctx.world_size;
+    const idx_t dim = basis.dim();
+    const int T = omp_get_max_threads();
+
+    std::vector<int> hist((size_t)T * N, 0);   // [t*N + r], tiny (T*N)
+    _Pragma("omp parallel num_threads(T)")
+    {
+        const int t = omp_get_thread_num();
+        const int nth = omp_get_num_threads();
+        const idx_t chunk = (dim + nth - 1) / nth;
+        const idx_t s0 = std::min<idx_t>((idx_t)t * chunk, dim);
+        const idx_t s1 = std::min<idx_t>(s0 + chunk, dim);
+
+        int* h = &hist[(size_t)t * N];
+        for (idx_t il = s0; il < s1; ++il) {
+            ZBasisBase::state_t s = basis[il];
+            if (op.applyState(s) == 0) continue;
+            h[ctx.rank_of_state(s)]++;
+        }
+        _Pragma("omp barrier")
+
+        // This thread's write head per rank: rank's base displacement plus
+        // everything earlier threads place into that rank.
+        std::vector<int> cur(N);
+        for (int r = 0; r < N; ++r) {
+            int base = md.send_displs[r];
+            for (int tt = 0; tt < t; ++tt) base += hist[(size_t)tt * N + r];
+            cur[r] = base;
+        }
+        for (idx_t il = s0; il < s1; ++il) {
+            record_t rec;
+            rec.state = basis[il];
+            auto sign = op.applyState(rec.state);  // mutates state -> target
+            if (sign == 0) continue;
+            rec.coeff = c * x[il] * sign;
+            sbuf[cur[ctx.rank_of_state(rec.state)]++] = rec;
+        }
+    }
+    )
+}
+
+// Search each received target into the local basis and accumulate. A single
+// off-diagonal operator is injective on its support (a fixed bit-flip), so the
+// records for one operator are images O(s) of distinct basis states and resolve
+// to DISTINCT local indices: no two iterations write the same y[idx] => the
+// accumulation is race-free with no atomics. basis.search is read-only /
+// re-entrant. (_Pragma, not #pragma: we are inside a macro.)
+template <RealOrCplx coeff_t, Basis B>
+void MPILazyOpSum<coeff_t, B>::apply_recvs(int slot, size_t oi,
+                                           coeff_t* y, Timer& timer) const {
+    using idx_t = ZBasisBase::idx_t;
+    BENCH_TIMER_TIMEIT(timer,
+    const auto& rbuf = recv_ring[slot];
+    const int64_t n = op_comm_metadata[oi].recv_total;
+    _Pragma("omp parallel for schedule(static)")
+    for (int64_t j = 0; j < n; ++j) {
+        idx_t idx;
+        ASSERT_STATE_FOUND("remote", rbuf[j].state,
+                basis.search(rbuf[j].state, idx));
+        y[idx] += rbuf[j].coeff;
+    }
+    )
+}
+
+
+// ---- Variant A: collective transport (one Ialltoallv per operator) -------
 template <RealOrCplx coeff_t, Basis B>
 void MPILazyOpSum<coeff_t, B>::
 evaluate_add_off_diag_pipeline_prealloc(const coeff_t* x, coeff_t* y) const
 {
-    using idx_t    = ZBasisBase::idx_t;
     using record_t = ApplyRecord<coeff_t>;
     const MPI_Datatype rec_type = get_mpi_type<record_t>();
 
@@ -650,25 +738,6 @@ evaluate_add_off_diag_pipeline_prealloc(const coeff_t* x, coeff_t* y) const
     const size_t n_ops = ops.off_diag_terms.size();
     if (n_ops == 0) return;
 
-    // Fill send_ring[slot] with operator oi's (coeff, target-state) records,
-    // grouped by destination rank per the precomputed displacements.
-    auto fill_sends = [&](int slot, size_t oi) {
-        BENCH_TIMER_TIMEIT(fill_sends_timer,
-        const auto& [c, op] = ops.off_diag_terms[oi];
-        const auto& md = op_comm_metadata[oi];
-        auto& sbuf = send_ring[slot];
-        std::vector<int> cursor(md.send_displs);   // per-rank write head
-        for (idx_t il = 0; il < basis.dim(); ++il) {
-            record_t rec;
-            rec.state = basis[il];
-            auto sign = op.applyState(rec.state);  // mutates state -> target
-            if (sign == 0) continue;
-            rec.coeff = c * x[il] * sign;
-            sbuf[cursor[ctx.rank_of_state(rec.state)]++] = rec;
-        }
-        )
-    };
-
     // One collective per operator: coeff and state travel together.
     auto post = [&](int slot, size_t oi, MPI_Request* req) {
         BENCH_TIMER_TIMEIT(post_timer,
@@ -680,46 +749,110 @@ evaluate_add_off_diag_pipeline_prealloc(const coeff_t* x, coeff_t* y) const
         )
     };
 
-    // Search each received target into the local basis and accumulate. The
-    // self block arrived via the same alltoallv, so there is no separate local
-    // update pass.
-    auto apply_recvs = [&](int slot, size_t oi) {
-        BENCH_TIMER_TIMEIT(apply_recvs_timer,
-        const auto& rbuf = recv_ring[slot];
-        const int64_t n = op_comm_metadata[oi].recv_total;
-        for (int64_t j = 0; j < n; ++j) {
-            idx_t idx;
-            ASSERT_STATE_FOUND("remote", rbuf[j].state,
-                    basis.search(rbuf[j].state, idx));
-            y[idx] += rbuf[j].coeff;
-        }
-        )
-    };
-
     // Software-pipelined over operators: operator i's alltoallv overlaps
     // operator (i-1)'s search and operator (i+1)'s fill. Slot i-2 is guaranteed
     // complete (waited at iteration i-1) before it is reused at iteration i.
     MPI_Request req[2];
-    fill_sends(0, 0);
+    fill_sends(0, 0, x, fill_sends_timer);
     post(0, 0, &req[0]);
     for (size_t i = 1; i < n_ops; ++i) {
         const int cur = i & 1, prev = (i - 1) & 1;
-        fill_sends(cur, i);
+        fill_sends(cur, i, x, fill_sends_timer);
         post(cur, i, &req[cur]);
         BENCH_TIMER_TIMEIT(wait_timer,
         MPI_Wait(&req[prev], MPI_STATUS_IGNORE);
         )
-        apply_recvs(prev, i - 1);
+        apply_recvs(prev, i - 1, y, apply_recvs_timer);
     }
     const int last = (n_ops - 1) & 1;
-
     BENCH_TIMER_TIMEIT(wait_timer,
     MPI_Wait(&req[last], MPI_STATUS_IGNORE);
     )
-    apply_recvs(last, n_ops - 1);
+    apply_recvs(last, n_ops - 1, y, apply_recvs_timer);
+
+#ifdef SUBSPACE_ED_BENCHMARK_OPERATIONS
+        for (auto t : timers){
+            t->print_summary(ctx.log(logging::DEBUG));
+        }
+#endif
+}
 
 
-    // print diagnostics
+// ---- Variant B: point-to-point transport (Isend/Irecv per peer/op) -------
+// Identical plan, fill and search to variant A; only the transport differs:
+// one Irecv + one Isend per non-self peer, the self block copied locally. The
+// motivation is that point-to-point over shared memory / eager protocols makes
+// progress without re-entering MPI, so the transfer can overlap the fill and
+// search instead of stalling at a collective wait. tag = slot uniquely
+// disambiguates the (at most two) operators in flight under the ping-pong.
+template <RealOrCplx coeff_t, Basis B>
+void MPILazyOpSum<coeff_t, B>::
+evaluate_add_off_diag_prealloc_p2p(const coeff_t* x, coeff_t* y) const
+{
+    using record_t = ApplyRecord<coeff_t>;
+    const MPI_Datatype rec_type = get_mpi_type<record_t>();
+    const int N  = ctx.world_size;
+    const int me = ctx.my_rank;
+
+    Timer prealloc_timer("[preallocate]", me);
+    Timer fill_sends_timer("[fill_sends]", me);
+    Timer post_timer("[post]", me);
+    Timer wait_timer("[wait]", me);
+    Timer apply_recvs_timer("[apply_recvs]", me);
+    std::vector<const Timer*> timers {&prealloc_timer, &fill_sends_timer, &post_timer, &wait_timer, &apply_recvs_timer};
+
+    BENCH_TIMER_TIMEIT(prealloc_timer,
+    if (op_comm_metadata.empty()) build_apply_metadata();
+    )
+
+    const size_t n_ops = ops.off_diag_terms.size();
+    if (n_ops == 0) return;
+
+    std::array<std::vector<MPI_Request>, 2> reqs;
+
+    auto post_p2p = [&](int slot, size_t oi) {
+        BENCH_TIMER_TIMEIT(post_timer,
+        const auto& md = op_comm_metadata[oi];
+        auto& sbuf = send_ring[slot];
+        auto& rbuf = recv_ring[slot];
+        auto& rq = reqs[slot];
+        rq.clear();
+        for (int r = 0; r < N; ++r) {
+            if (r == me || md.recv_sizes[r] == 0) continue;
+            rq.emplace_back();
+            MPI_Irecv(rbuf.data() + md.recv_displs[r], md.recv_sizes[r], rec_type,
+                      r, slot, MPI_COMM_WORLD, &rq.back());
+        }
+        for (int r = 0; r < N; ++r) {
+            if (r == me || md.send_sizes[r] == 0) continue;
+            rq.emplace_back();
+            MPI_Isend(sbuf.data() + md.send_displs[r], md.send_sizes[r], rec_type,
+                      r, slot, MPI_COMM_WORLD, &rq.back());
+        }
+        // Self block: no message, copy send self-slot -> recv self-slot
+        // (send_sizes[me] == recv_sizes[me] by construction).
+        for (int k = 0; k < md.send_sizes[me]; ++k)
+            rbuf[md.recv_displs[me] + k] = sbuf[md.send_displs[me] + k];
+        )
+    };
+
+    fill_sends(0, 0, x, fill_sends_timer);
+    post_p2p(0, 0);
+    for (size_t i = 1; i < n_ops; ++i) {
+        const int cur = i & 1, prev = (i - 1) & 1;
+        fill_sends(cur, i, x, fill_sends_timer);
+        post_p2p(cur, i);
+        BENCH_TIMER_TIMEIT(wait_timer,
+        MPI_Waitall((int)reqs[prev].size(), reqs[prev].data(), MPI_STATUSES_IGNORE);
+        )
+        apply_recvs(prev, i - 1, y, apply_recvs_timer);
+    }
+    const int last = (n_ops - 1) & 1;
+    BENCH_TIMER_TIMEIT(wait_timer,
+    MPI_Waitall((int)reqs[last].size(), reqs[last].data(), MPI_STATUSES_IGNORE);
+    )
+    apply_recvs(last, n_ops - 1, y, apply_recvs_timer);
+
 #ifdef SUBSPACE_ED_BENCHMARK_OPERATIONS
         for (auto t : timers){
             t->print_summary(ctx.log(logging::DEBUG));

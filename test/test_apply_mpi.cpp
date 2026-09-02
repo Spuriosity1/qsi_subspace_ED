@@ -164,6 +164,7 @@ int main(int argc, char* argv[]){
     auto H_interp = MPILazyOpSum(basis_interp_loc, H_sym, ctx);
 
     auto H_fast_pre   = MPILazyOpSum(basis_fast_loc,   H_sym, ctx, MPILazyOpSumStrategy::PREALLOC);
+    auto H_fast_p2p   = MPILazyOpSum(basis_fast_loc,   H_sym, ctx, MPILazyOpSumStrategy::PREALLOC_P2P);
 
     auto H_st     = LazyOpSum(basis_st, H_sym);
 
@@ -174,7 +175,7 @@ int main(int argc, char* argv[]){
 //        ctx.log(logging::DEBUG)<<"[basis reshuffle]"<<std::endl;
 //        basis.exchange_local_states(wisdom, ctx);
 //    }
-    std::vector<double> v_global, v_local, u_global, u1_local, u2_local, u3_local, u4_local;
+    std::vector<double> v_global, v_local, u_global, u1_local, u2_local, u3_local, u4_local, u5_local;
     v_global.resize(basis_st.dim());
     u_global.resize(basis_st.dim());
 
@@ -182,6 +183,7 @@ int main(int argc, char* argv[]){
     u2_local.resize(basis_fast_loc.dim());
     u3_local.resize(basis_interp_loc.dim());
     u4_local.resize(basis_fast_loc.dim());
+    u5_local.resize(basis_fast_loc.dim());
 
 
     std::mt19937 rng(seed);
@@ -203,6 +205,7 @@ int main(int argc, char* argv[]){
     std::fill(u2_local.begin(), u2_local.end(), 0);
     std::fill(u3_local.begin(), u3_local.end(), 0);
     std::fill(u4_local.begin(), u4_local.end(), 0);
+    std::fill(u5_local.begin(), u5_local.end(), 0);
 
     std::cout<<"[BST "<<ctx.my_rank<<"]       Apply..."<<std::endl;
     TIMEIT("[BST]        u += Av", H_st.evaluate_add(v_global.data(), u_global.data());)
@@ -218,6 +221,9 @@ int main(int argc, char* argv[]){
 
     std::cout<<"[fast_MPI_prealloc "<<ctx.my_rank<<"]  Apply..."<<std::endl;
     TIMEIT("[MPI_fast_prealloc]   u += Av", H_fast_pre.evaluate_add(v_local.data(), u4_local.data());)
+
+    std::cout<<"[fast_MPI_prealloc_p2p "<<ctx.my_rank<<"]  Apply..."<<std::endl;
+    TIMEIT("[MPI_fast_prealloc_p2p]   u += Av", H_fast_p2p.evaluate_add(v_local.data(), u5_local.data());)
 
     double tol = 1e-9;
     bool ok = true;
@@ -243,6 +249,7 @@ int main(int argc, char* argv[]){
     check("[MPI_fast]  ", u2_local);
     check("[MPI_interp]", u3_local);
     check("[MPI_fast_prealloc]", u4_local);
+    check("[MPI_fast_prealloc_p2p]", u5_local);
 
     MPI_Finalize();
     return ok ? 0 : 1;
