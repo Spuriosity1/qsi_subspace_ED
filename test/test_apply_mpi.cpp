@@ -58,10 +58,6 @@ int main(int argc, char* argv[]){
         .default_value(64)
         .scan<'i', int>();
 
-    prog.add_argument("--batch-size")
-        .help("Operators per MPI communication round (-1 = all). Uses pipeline if omitted.")
-        .default_value(-1)
-        .scan<'i', int>();
 //    prog.add_argument("--rebalance")
 //        .default_value(false)
 //        .implicit_value(true);
@@ -166,7 +162,6 @@ int main(int argc, char* argv[]){
     auto H_mpi    = MPILazyOpSum(basis_loc,        H_sym, ctx);
     auto H_fast   = MPILazyOpSum(basis_fast_loc,   H_sym, ctx);
     auto H_interp = MPILazyOpSum(basis_interp_loc, H_sym, ctx);
-    auto H_plan   = MPILazyOpSum(basis_fast_loc,   H_sym, ctx);
     auto H_st     = LazyOpSum(basis_st, H_sym);
 
 
@@ -176,30 +171,13 @@ int main(int argc, char* argv[]){
 //        ctx.log(logging::DEBUG)<<"[basis reshuffle]"<<std::endl;
 //        basis.exchange_local_states(wisdom, ctx);
 //    }
-    ctx.log(logging::DEBUG)<<"[allocate temporaries]"<<std::endl;
-    bool use_batched = prog.is_used("--batch-size");
-    int batch_size   = prog.get<int>("--batch-size");
-    if (use_batched) {
-        H_mpi.allocate_temporaries(batch_size);
-        H_fast.allocate_temporaries(batch_size);
-        H_interp.allocate_temporaries(batch_size);
-    } else {
-        H_mpi.allocate_temporaries();
-        H_fast.allocate_temporaries();
-        H_interp.allocate_temporaries();
-    }
-    ctx.log(logging::DEBUG)<<"[build plan]"<<std::endl;
-    H_plan.build_plan(use_batched ? batch_size : -1);
-    assert(H_plan.has_plan());
-
-    std::vector<double> v_global, v_local, u_global, u1_local, u2_local, u3_local, u4_local;
+    std::vector<double> v_global, v_local, u_global, u1_local, u2_local, u3_local;
     v_global.resize(basis_st.dim());
     u_global.resize(basis_st.dim());
 
     u1_local.resize(basis_loc.dim());
     u2_local.resize(basis_fast_loc.dim());
     u3_local.resize(basis_interp_loc.dim());
-    u4_local.resize(basis_fast_loc.dim());
 
 
     std::mt19937 rng(seed);
@@ -220,7 +198,6 @@ int main(int argc, char* argv[]){
     std::fill(u1_local.begin(), u1_local.end(), 0);
     std::fill(u2_local.begin(), u2_local.end(), 0);
     std::fill(u3_local.begin(), u3_local.end(), 0);
-    std::fill(u4_local.begin(), u4_local.end(), 0);
 
     std::cout<<"[BST "<<ctx.my_rank<<"]       Apply..."<<std::endl;
     TIMEIT("[BST]        u += Av", H_st.evaluate_add(v_global.data(), u_global.data());)
@@ -233,9 +210,6 @@ int main(int argc, char* argv[]){
 
     std::cout<<"[interp_MPI "<<ctx.my_rank<<"] Apply..."<<std::endl;
     TIMEIT("[MPI_interp] u += Av", H_interp.evaluate_add(v_local.data(), u3_local.data());)
-
-    std::cout<<"[plan_MPI "<<ctx.my_rank<<"]   Apply..."<<std::endl;
-    TIMEIT("[MPI_plan]   u += Av", H_plan.evaluate_add(v_local.data(), u4_local.data());)
 
     double tol = 1e-9;
     bool ok = true;
@@ -260,7 +234,6 @@ int main(int argc, char* argv[]){
     check("[MPI_BST]   ", u1_local);
     check("[MPI_fast]  ", u2_local);
     check("[MPI_interp]", u3_local);
-    check("[MPI_plan]  ", u4_local);
 
     MPI_Finalize();
     return ok ? 0 : 1;

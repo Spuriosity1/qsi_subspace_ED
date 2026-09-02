@@ -115,9 +115,9 @@ if mpiexec.found()
     is_parallel: false,
   )
 
-  # Local variant: uses the small in-repo basis, exercises all apply paths
-  # (pipeline reference, batched, planned) with a batch size chosen to give
-  # several unequal communication rounds across the 2 ranks.
+  # Local variant: uses the small in-repo basis, exercises the pipelined
+  # off-diagonal apply across the 3 MPI basis search structures (BST, fast,
+  # interp) against the serial reference, on 2 ranks.
   local_lattice_dir = meson.current_source_dir() / 'lattice_files'
   test('test_apply_mpi_local',
     mpiexec,
@@ -126,7 +126,6 @@ if mpiexec.found()
       test_apply_mpi.full_path(),
       local_lattice_dir / 'pyro_2_2_3x0,4,4b4,0,4b4,4,0b1.json',
       '-b', local_lattice_dir / 'pyro_2_2_3x0,4,4b4,0,4b4,4,0b1.0test.h5',
-      '--batch-size', '10000',
     ],
     timeout: 300,
     suite: ['mpi'],

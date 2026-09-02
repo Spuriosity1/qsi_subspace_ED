@@ -68,23 +68,6 @@ using ZBasisBSTFast_HashMPI = ZBasisMPI<ZBasisBSTFast>;
 using MPIctx=MPIHashContext;
 
 
-// Rank-local work-sharing strategy for the off-diagonal apply. Only affects the
-// batched code path (allocate_temporaries() must have been called); the pipeline
-// and planned paths ignore it.
-//   Serial      - single-threaded batched apply (baseline, unchanged).
-//   Omp         - OpenMP over records; y updated with atomics.
-//   OmpOwner    - OpenMP owner-computes: received records are partitioned by
-//                 target-index range across threads, so each thread updates a
-//                 disjoint slice of y with no atomics (NUMA first-touch friendly).
-//   OmpPrefetch - OpenMP over records, but the per-record accelerated search is
-//                 replaced by a software-prefetched interleaved binary search
-//                 that keeps several probes in flight to hide DRAM latency.
-enum class ApplyStrategy { Serial, Omp, OmpOwner, OmpPrefetch };
-
-const char* to_string(ApplyStrategy s);
-ApplyStrategy parse_strategy(const std::string& s);
-
-
 template<RealOrCplx coeff_t, Basis B>
 struct MPILazyOpSum {
     using Scalar = coeff_t;
@@ -104,107 +87,62 @@ struct MPILazyOpSum {
         this->evaluate_add(x, y);
 	}
 
-    // allocates send/receive buffers for batched MPI alltoallv.
-    // batch_size: number of local basis states per communication round (-1 = all).
-    // If not called, evaluate_add falls back to the pipeline implementation.
-    void allocate_temporaries(int batch_size = -1);
-
-    void set_batch_size(int b) { batch_size = b; }
-
-    // Select the rank-local work-sharing strategy for the batched apply.
-    void set_strategy(ApplyStrategy s) { strategy = s; }
-    ApplyStrategy get_strategy() const { return strategy; }
-
-    // Build a static apply plan: the basis, Hamiltonian and batch boundaries
-    // never change between applies, so freeze the per-batch communication
-    // counts and precompute the local target index of every record this rank
-    // will receive (plus every self-update record). Steady-state applies then
-    // ship only dy (one Alltoallv, 8 B/record) and scatter through the index
-    // lists — no search, no sort, no count exchange.
-    // Costs ~4 B per off-diagonal nonzero of the local slab; if mem_cap_bytes
-    // is nonzero and any rank would exceed it, the plan is not built (check
-    // has_plan()) and evaluate_add keeps using the batched/pipeline path.
-    // Calls allocate_temporaries(batch_size) if buffers are not yet sized.
-    void build_plan(int batch_size = -1, size_t mem_cap_bytes = 0);
-    bool has_plan() const { return plan_built; }
-    size_t plan_bytes() const;
-
-    // Free the state-record send/recv buffers once a plan is built; only dy
-    // buffers are needed thereafter. The batched/pipeline paths become
-    // unusable until allocate_temporaries() is called again.
-    void release_state_buffers();
-
     // Does y += A*x, where y[i] and x[i] are both indexed from the start of the local block
 	void evaluate_add(const coeff_t* x, coeff_t* y);
 
 protected:
+
+    // State for pipelined communication
+    struct OperatorCommState {
+        std::vector<MPI_Request> requests;
+
+        std::vector<std::vector<coeff_t>> send_dy;
+        std::vector<std::vector<ZBasisBase::state_t>> send_states;
+
+        std::vector<std::vector<coeff_t>> recv_dy_bufs;
+        std::vector<std::vector<ZBasisBase::state_t>> recv_states_bufs;
+
+        MPI_Request count_exchange_req;
+        std::vector<int> recvcounts;
+
+        bool count_exchange_done = false;
+
+        void resize(int world_size){
+            send_dy.resize(world_size);
+            send_states.resize(world_size);
+
+            recv_dy_bufs.resize(world_size);
+            recv_states_bufs.resize(world_size);
+
+            recvcounts.resize(world_size);
+        }
+
+        void reset_for_new_op(){
+            count_exchange_done=false;
+            requests.clear();
+            for (auto& v : send_dy)     v.clear();
+            for (auto& v : send_states) v.clear();
+            for (auto& v : recv_dy_bufs)     v.clear();
+            for (auto& v : recv_states_bufs) v.clear();
+        }
+    };
+
+
     void evaluate_add_diagonal(const coeff_t* x, coeff_t* y) const;
     void evaluate_add_off_diag_pipeline(const coeff_t* x, coeff_t* y) const;
-    void evaluate_add_off_diag_batched(const coeff_t* x, coeff_t* y);
-    void evaluate_add_off_diag_batched_omp(const coeff_t* x, coeff_t* y);
-    void evaluate_add_off_diag_planned(const coeff_t* x, coeff_t* y);
-
-    // Resolve the local index of each of n records (states[i]) and accumulate
-    // y[idx] += dy[i]. Threaded; owner/prefetch select the strategy variant.
-    // Uses the ap_* scratch members. Called for both self- and remote-updates.
-    void apply_records(const ZBasisBST::state_t* states, const coeff_t* dy,
-                       int64_t n, coeff_t* y, bool owner, bool prefetch);
+    // void evaluate_add_off_diag_pipeline_prealloc(const coeff_t* x, coeff_t* y) const;
 
 	const B& basis;
 	const SymbolicOpSum<coeff_t> ops;
     MPIctx& ctx;
 
-    ApplyStrategy strategy = ApplyStrategy::Serial;
-
-    int batch_size = -1; // -1 = all states in one round
-
-    // Global number of communication rounds per apply. Local dims (and thus
-    // ceil(dim/batch_size)) differ across ranks, but every rank must take part
-    // in every collective round; set by allocate_temporaries via an Allreduce.
-    int64_t n_batches = 0;
-
-    // flat contiguous buffers; allocated by allocate_temporaries()
-    std::vector<coeff_t> send_dy;
-    std::vector<ZBasisBST::state_t> send_state;
-    std::vector<MPI_Count> send_displs;
-    std::vector<MPI_Count> send_counts;
-
-    std::vector<coeff_t> recv_dy;
-    std::vector<ZBasisBST::state_t> recv_state;
-    std::vector<MPI_Count> recv_displs;
-    std::vector<MPI_Count> recv_counts;
-
-    // Scratch for the threaded apply (apply_records). Sized on demand.
-    std::vector<ZBasisBST::idx_t> ap_idx;   // resolved local index per record
-    std::vector<ZBasisBST::idx_t> ap_bidx;  // owner-bucketed indices
-    std::vector<coeff_t>          ap_bdy;   // owner-bucketed dy
-    std::vector<int64_t>          ap_thist; // per-(thread,bucket) histogram
-    std::vector<int64_t>          ap_tsend; // per-(thread,rank) send counts
-
-    // --- static apply plan (build_plan / evaluate_add_off_diag_planned) ---
-    bool plan_built = false;
-    int64_t plan_bs = 0;                  // local batch size the plan was built with
-    std::vector<int> plan_sc;             // [b*N + r] frozen send counts (self slot kept)
-    std::vector<int> plan_rc;             // [b*N + r] frozen recv counts (self slot zeroed)
-    std::vector<uint32_t> plan_tgt;       // local target index per received record
-    std::vector<int64_t>  plan_tgt_offs;  // [n_batches+1] offsets into plan_tgt
-    std::vector<uint32_t> plan_self;      // local target index per self-update record
-    std::vector<int64_t>  plan_self_offs; // [n_batches+1] offsets into plan_self
 };
 
 
 template <RealOrCplx coeff_t, Basis basis_t>
 void MPILazyOpSum<coeff_t, basis_t>::evaluate_add(const coeff_t* x, coeff_t* y) {
     evaluate_add_diagonal(x, y);
-    if (plan_built)
-        evaluate_add_off_diag_planned(x, y);
-    else if (!send_counts.empty()) {
-        if (strategy == ApplyStrategy::Serial)
-            evaluate_add_off_diag_batched(x, y);
-        else
-            evaluate_add_off_diag_batched_omp(x, y);
-    } else
-        evaluate_add_off_diag_pipeline(x, y);
+    evaluate_add_off_diag_pipeline(x, y);
 }
 
 

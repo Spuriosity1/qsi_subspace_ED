@@ -165,19 +165,6 @@ int main(int argc, char* argv[]) {
         .default_value(false)
         .implicit_value(true);
 
-    prog.add_argument("--batch-size")
-        .help("Local basis states per MPI communication round for batched "
-              "apply (-1 = all in one round). The default is bounded to keep "
-              "the apply send/recv buffers small.")
-        .default_value(1<<20)
-        .scan<'i', int>();
-
-    prog.add_argument("--noplan")
-        .help("Skip the static apply plan (precomputed remote target indices) "
-              "and fall back to the batched search path.")
-        .default_value(false)
-        .implicit_value(true);
-
     prog.add_argument("-o", "--output_dir")
         .required()
         .help("output directory ");
@@ -376,23 +363,15 @@ int main(int argc, char* argv[]) {
     settings.verbosity = prog.get<int>("--verbosity");
     settings.calc_eigenvector = true;
 
-    const int batch_size = prog.get<int>("--batch-size");
-
     double eigval;
     std::vector<double> local_v0(basis.dim());
     std::vector<double> evector;
     std::vector<double> alphas, betas;
 
-    // Scope the Hamiltonian so its apply plan (~4 B per off-diagonal nonzero)
-    // and dy send/recv buffers are freed before the observable phase.
+    // Scope the Hamiltonian so its pipelined comm buffers are freed before the
+    // observable phase.
     {
         auto H = MPILazyOpSum(basis, H_sym, ctx);
-        if (!prog.get<bool>("--noplan")) {
-            H.build_plan(batch_size);
-            H.release_state_buffers();
-        } else {
-            H.allocate_temporaries(batch_size);
-        }
 
         RealApplyFn evadd = [&H](const coeff_t* x_local, coeff_t* y_local){
             H.evaluate_add(x_local, y_local);
@@ -477,10 +456,9 @@ int main(int argc, char* argv[]) {
 
         for (int opi=0; opi<n_operators; opi++){
             if (ctx.my_rank == 0) logging::log(logging::INFO)<<opi<<" " <<std::flush;
-            // Constructed per iteration so the bounded comm buffers of each
-            // operator are freed again before the next one.
+            // Constructed per iteration so each operator's comm buffers are
+            // freed again before the next one.
             MPILazyOpSum<double, basis_t> op(basis, ringL[opi], ctx);
-            op.allocate_temporaries(batch_size);
             op.evaluate(evector.data(), chi.data());
             if (opi == 0){
                 u = chi; // copies into the existing buffer, no new allocation
@@ -518,13 +496,8 @@ int main(int argc, char* argv[]) {
                 partial_vol[sl].resize(par_vol_operators.size(), 0.0);
                 for (size_t opi=0; opi<par_vol_operators.size(); opi++){
                     if (ctx.my_rank == 0) logging::log(logging::INFO)<<opi<<" "<<std::flush;
-                    // Per-iteration construction with bounded batches, as in
-                    // the ring loop: the default allocate_temporaries() (-1 =
-                    // whole slab in one round) would size the send/recv
-                    // buffers at up to 6 records/state for these 6-term
-                    // opsums -- far more than the basis itself.
+                    // Per-iteration construction, as in the ring loop.
                     MPILazyOpSum<double, basis_t> op(basis, par_vol_operators[opi], ctx);
-                    op.allocate_temporaries(batch_size);
                     op.evaluate(evector.data(), chi.data());
                     double res = 0;
                     double res_local = projED::inner(chi, evector);

@@ -62,36 +62,11 @@ int main(int argc, char* argv[]){
         .default_value(64)
         .scan<'i', int>();
 
-    prog.add_argument("--batch-size")
-        .help("Number of operators per MPI communication round for batched apply (-1 = all, uses pipeline if not set). "
-              "Triggers allocate_temporaries() and the batched code path.")
-        .default_value(-1)
-        .scan<'i', int>();
-
     prog.add_argument("--repeats")
         .help("Number of timed apply repetitions. With N>1 the first repeat is "
               "treated as warm-up and excluded from the min/avg summary.")
         .default_value(1)
         .scan<'i', int>();
-
-    prog.add_argument("--plan")
-        .help("Build a static apply plan (frozen comm counts + precomputed "
-              "target index lists) and benchmark the planned path.")
-        .default_value(false)
-        .implicit_value(true);
-
-    prog.add_argument("--plan-memory-cap")
-        .help("Refuse to build the plan if any rank would need more than this "
-              "many GiB for it (0 = no cap).")
-        .default_value(0.0)
-        .scan<'g', double>();
-
-    prog.add_argument("--strategy")
-        .help("Rank-local work-sharing for the batched off-diagonal apply: "
-              "serial | omp | omp-owner | omp-prefetch. Any non-serial choice "
-              "forces the batched buffers to be allocated. (prefetch width is "
-              "set by the APPLY_PREFETCH_GROUP env var, default 8.)")
-        .default_value(std::string("serial"));
 
     prog.add_argument("--threads")
         .help("OpenMP threads per rank for the apply (0 = leave OMP_NUM_THREADS "
@@ -122,23 +97,8 @@ int main(int argc, char* argv[]){
     // Top-N-bit mask: 0xFFFF...FF00...00 with N high bits set
     uint64_t interp_hi_mask = (interp_bits >= 64) ? ~0ULL : (~0ULL << (64 - interp_bits));
 
-    bool use_batched = prog.is_used("--batch-size");
-    int batch_size = prog.get<int>("--batch-size");
     unsigned int seed = prog.get<unsigned int>("--seed");
     int repeats = std::max(1, prog.get<int>("--repeats"));
-    bool use_plan = prog.get<bool>("--plan");
-    size_t plan_mem_cap = (size_t)(prog.get<double>("--plan-memory-cap") * (1ull << 30));
-
-    ApplyStrategy strategy;
-    try {
-        strategy = parse_strategy(prog.get<std::string>("--strategy"));
-    } catch (const std::exception& e) {
-        std::cerr << e.what() << "\n";
-        return 1;
-    }
-    // Non-serial strategies run the batched code path, which needs the
-    // send/recv buffers even if --batch-size was not passed.
-    bool need_batched = use_batched || strategy != ApplyStrategy::Serial;
 
     int threads = prog.get<int>("--threads");
     if (threads > 0) omp_set_num_threads(threads);
@@ -217,18 +177,6 @@ int main(int argc, char* argv[]){
         if (ctx.my_rank == 0) std::cout << "\n";
 
         auto H = MPILazyOpSum(basis, H_sym, ctx);
-        H.set_strategy(strategy);
-        if (need_batched)
-            H.allocate_temporaries(batch_size);
-        if (use_plan) {
-            TIMEIT((std::string("[") + tag + "] build plan").c_str(),
-                   H.build_plan(batch_size, plan_mem_cap);)
-            if (H.has_plan())
-                H.release_state_buffers();
-            else if (ctx.my_rank == 0)
-                std::cout << "[" << tag << "] plan refused; timing the search path instead\n";
-            print_mem(ctx, (std::string(tag) + " after plan build").c_str());
-        }
 
         std::vector<double> v(basis.dim()), u(basis.dim(), 0.0);
         std::mt19937 rng(seed);
@@ -276,13 +224,11 @@ int main(int argc, char* argv[]){
 
         // Machine-readable one-liner for sweep.sh to grep into a CSV row.
         if (ctx.my_rank == 0 && n_counted >= 1) {
-            const char* strat = H.has_plan() ? "planned" : to_string(strategy);
             std::cout << "[result]"
                       << " tag=" << tag
-                      << " strategy=" << strat
+                      << " strategy=pipeline"
                       << " ranks=" << ctx.world_size
                       << " threads=" << omp_get_max_threads()
-                      << " batch=" << batch_size
                       << " wset_kib=" << wset_max / 1024
                       << " repeats=" << n_counted
                       << " min_ms=" << t_min * 1e3
