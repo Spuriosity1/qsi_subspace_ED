@@ -44,11 +44,9 @@ elif get_option('buildtype') == 'debug'
 endif
 
 
-blas_backend = get_option('blas_backend')  # 'auto', 'openblas', 'mkl', 'generic'
+blas_backend = get_option('blas_backend')  # 'auto', 'openblas', 'mkl', 'aocl', 'generic'
 
 # Apple bullshit
-# For christ sake just use a goddamn normal header file you turtleneck wearing
-# hipster shits I swear to god
 accelerate_dep = declare_dependency(
   compile_args: ['-framework', 'Accelerate',
     '-DUSE_APPLE_ACCELERATE', 
@@ -56,6 +54,9 @@ accelerate_dep = declare_dependency(
     '-DACCELERATE_LAPACK_ILP64'],
     link_args: ['-framework', 'Accelerate'],
   )
+
+# AMD bullshit
+cc = meson.get_compiler('c')
 
 if host_cpu.startswith('aarch64') and blas_backend != 'Accelerate'
   message('Trying to link with a non-Accelerate BLAS backend on macOS. This will probably not work!')
@@ -69,6 +70,19 @@ message('compiler is ', cpp_compiler.get_id())
   if cpp_compiler.get_id() == 'gcc'
     add_project_arguments('-flax-vector-conversions', language: 'cpp')
   endif
+elif blas_backend == 'aocl'
+  aocl_root = get_option('aocl_root')  
+
+  blis_lib  = cc.find_library('blis-mt' )
+  flame_lib = cc.find_library('flame'   )
+
+  blas_dep = declare_dependency(
+    compile_args: ['-DUSE_BLIS'],
+    dependencies: blis_lib
+  )
+  lapack_dep = declare_dependency(
+    dependencies: flame_lib
+  )
 elif blas_backend == 'mkl'
   mkl_dep = dependency('mkl-dynamic-lp64-seq', required: false)
   if mkl_dep.found()

@@ -8,6 +8,8 @@
 	#include <Accelerate/Accelerate.h>
 #elif defined(USE_MKL)
 	#include <mkl_cblas.h>
+#elif defined(USE_BLIS)
+	#include <blis/cblas.h>
 #else
 extern "C" {
 	#include <cblas.h>
