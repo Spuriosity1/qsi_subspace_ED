@@ -75,12 +75,13 @@ using MPIctx=MPIHashContext;
 class Timer;
 
 enum class MPILazyOpSumStrategy {
-    PIPE, PREALLOC, PREALLOC_P2P
+    PIPE, PIPE_PLAIN, PREALLOC, PREALLOC_P2P
 };
 
 inline std::ostream& operator<<(std::ostream& o, const MPILazyOpSumStrategy s){
     switch(s) {
         case MPILazyOpSumStrategy::PIPE: o<<"PIPE"; break;
+        case MPILazyOpSumStrategy::PIPE_PLAIN: o<<"PIPE_PLAIN"; break;
         case MPILazyOpSumStrategy::PREALLOC: o<<"PREALLOC"; break;
         case MPILazyOpSumStrategy::PREALLOC_P2P: o<<"PREALLOC_P2P"; break;
         default: o<<static_cast<int>(s);
@@ -90,10 +91,11 @@ inline std::ostream& operator<<(std::ostream& o, const MPILazyOpSumStrategy s){
 
 inline MPILazyOpSumStrategy parse_mpi_strategy(const std::string& s) {
     if (s == "pipe")         return MPILazyOpSumStrategy::PIPE;
+    if (s == "pipe_plain")   return MPILazyOpSumStrategy::PIPE_PLAIN;
     if (s == "prealloc")     return MPILazyOpSumStrategy::PREALLOC;
     if (s == "prealloc_p2p") return MPILazyOpSumStrategy::PREALLOC_P2P;
     throw std::runtime_error("Unrecognised strategy '" + s +
-            "' (expected: pipe | prealloc | prealloc_p2p)");
+            "' (expected: pipe | pipe_plain | prealloc | prealloc_p2p)");
 }
 
 template<RealOrCplx coeff_t, Basis B>
@@ -166,7 +168,11 @@ protected:
     void apply_recvs(int slot, size_t oi, coeff_t* y, Timer& timer) const;
 
     void evaluate_add_diagonal(const coeff_t* x, coeff_t* y) const;
-    void evaluate_add_off_diag_pipeline(const coeff_t* x, coeff_t* y) const;
+    // Reference pipeline. use_prefetch=true resolves received states with the
+    // batched interleaved search + prefetched scatter; false is the original
+    // per-record binary search (no software prefetch) — kept for A/B benchmarks.
+    void evaluate_add_off_diag_pipeline(const coeff_t* x, coeff_t* y,
+                                        bool use_prefetch) const;
     // Prealloc + precomputed comm plan, records shipped by one Ialltoallv/op.
     void evaluate_add_off_diag_pipeline_prealloc(const coeff_t* x, coeff_t* y) const;
     // Same, but records shipped by point-to-point Isend/Irecv per peer/op.
@@ -184,7 +190,10 @@ void MPILazyOpSum<coeff_t, basis_t>::evaluate_add(const coeff_t* x, coeff_t* y) 
     evaluate_add_diagonal(x, y);
     switch (apply_strat) {
         case MPILazyOpSumStrategy::PIPE:
-            evaluate_add_off_diag_pipeline(x, y);
+            evaluate_add_off_diag_pipeline(x, y, /*use_prefetch=*/true);
+            break;
+        case MPILazyOpSumStrategy::PIPE_PLAIN:
+            evaluate_add_off_diag_pipeline(x, y, /*use_prefetch=*/false);
             break;
         case MPILazyOpSumStrategy::PREALLOC:
             evaluate_add_off_diag_pipeline_prealloc(x, y);

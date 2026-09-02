@@ -90,7 +90,7 @@ int main(int argc, char* argv[]){
 
     prog.add_argument("--strategy")
         .help("Choice of apply kernel")
-        .choices("prealloc", "pipe", "prealloc_p2p")
+        .choices("prealloc", "pipe", "pipe_plain", "prealloc_p2p")
         .default_value("pipe");
 
     try {

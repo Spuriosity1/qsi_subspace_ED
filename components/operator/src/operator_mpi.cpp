@@ -360,7 +360,8 @@ void MPILazyOpSum<coeff_t, B>::evaluate_add_diagonal(const coeff_t* x, coeff_t* 
 
 
 template <RealOrCplx coeff_t, Basis B>
-void MPILazyOpSum<coeff_t, B>::evaluate_add_off_diag_pipeline(const coeff_t* x, coeff_t* y) const {
+void MPILazyOpSum<coeff_t, B>::evaluate_add_off_diag_pipeline(const coeff_t* x, coeff_t* y,
+                                                              bool use_prefetch) const {
 
 
     // State for pipelined communication. Coeff and state travel as two parallel
@@ -428,28 +429,46 @@ void MPILazyOpSum<coeff_t, B>::evaluate_add_off_diag_pipeline(const coeff_t* x, 
         return d < 0 ? 0 : d;
     }();
 
-    // Resolve a block of `m` states in one prefetched interleaved search, then
-    // scatter y[idx] += dy with the write target prefetched PD records ahead so
-    // the random y-write miss overlaps too.
+    // Resolve a block of `m` states and scatter y[idx] += dy. use_prefetch=true:
+    // one batched interleaved search + the y-write prefetched PD records ahead
+    // (both stacked-miss sources overlapped). use_prefetch=false: the original
+    // per-record binary search, one dependent miss at a time (the reference).
     auto apply_block = [&](const ZBasisBase::state_t* st, const coeff_t* dyv,
                            int64_t m, const char* what) {
         (void)what;
         if (m == 0) return;
-        idxbuf.resize(m);
-        basis.search_batch(st, m, idxbuf.data());
-        for (int64_t j = 0; j < m; ++j) {
-            if (j + PD < m && idxbuf[j + PD] >= 0)
-                __builtin_prefetch(&y[idxbuf[j + PD]], 1, 0);
-            const ZBasisBase::idx_t p = idxbuf[j];
+        if (use_prefetch) {
+            idxbuf.resize(m);
+            basis.search_batch(st, m, idxbuf.data());
+            for (int64_t j = 0; j < m; ++j) {
+                if (j + PD < m && idxbuf[j + PD] >= 0)
+                    __builtin_prefetch(&y[idxbuf[j + PD]], 1, 0);
+                const ZBasisBase::idx_t p = idxbuf[j];
 #ifndef NDEBUG
-            if (p < 0) {
-                std::cerr << "State not found (" << what << ") on rank "
-                          << ctx.my_rank << ": ";
-                printHex(std::cerr, st[j]) << "\n";
-                throw std::logic_error("State not found in batched apply");
-            }
+                if (p < 0) {
+                    std::cerr << "State not found (" << what << ") on rank "
+                              << ctx.my_rank << ": ";
+                    printHex(std::cerr, st[j]) << "\n";
+                    throw std::logic_error("State not found in batched apply");
+                }
 #endif
-            if (p >= 0) y[p] += dyv[j];
+                if (p >= 0) y[p] += dyv[j];
+            }
+        } else {
+            for (int64_t j = 0; j < m; ++j) {
+                ZBasisBase::idx_t idx;
+                int found = basis.search(st[j], idx);
+                (void)found;
+#ifndef NDEBUG
+                if (!found) {
+                    std::cerr << "State not found (" << what << ") on rank "
+                              << ctx.my_rank << ": ";
+                    printHex(std::cerr, st[j]) << "\n";
+                    throw std::logic_error("State not found in pipeline apply");
+                }
+#endif
+                y[idx] += dyv[j];
+            }
         }
     };
 
