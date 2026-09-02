@@ -9,48 +9,6 @@
 #include "mpi_context.hpp"
 
 
-// A single off-diagonal apply contribution: the coefficient to accumulate and
-// the target state it lands on. Stored contiguously (array-of-structs) so the
-// pipeline ships ONE homogeneous buffer per operator instead of parallel
-// coeff/state arrays, and so each record's key+value share a cache line.
-// POD + trivially copyable => it maps 1:1 onto a committed MPI datatype below.
-template<RealOrCplx coeff_t>
-struct ApplyRecord {
-    coeff_t coeff;
-    ZBasisBase::state_t state;
-};
-
-// Build (once) the committed MPI struct type for ApplyRecord<coeff_t>. The
-// resize to sizeof(record) pins the type's extent to the C++ array stride so
-// arrays of records send/receive correctly regardless of padding.
-template<RealOrCplx coeff_t>
-inline MPI_Datatype make_apply_record_mpi_type() {
-    using R = ApplyRecord<coeff_t>;
-    int          blocklen[2] = {1, 1};
-    MPI_Aint     displ[2]    = {offsetof(R, coeff), offsetof(R, state)};
-    MPI_Datatype types[2]    = {get_mpi_type<coeff_t>(),
-                                get_mpi_type<ZBasisBase::state_t>()};
-    MPI_Datatype packed, resized;
-    MPI_Type_create_struct(2, blocklen, displ, types, &packed);
-    MPI_Type_create_resized(packed, 0, sizeof(R), &resized);
-    MPI_Type_commit(&resized);
-    MPI_Type_free(&packed);
-    return resized;
-}
-
-// Same static-commit trick as get_mpi_type<Uint128>(): built lazily on first
-// use (after MPI_Init), cached for the process lifetime. Magic-static init is
-// thread-safe.
-template<> inline MPI_Datatype get_mpi_type<ApplyRecord<double>>() {
-    static MPI_Datatype dtype = make_apply_record_mpi_type<double>();
-    return dtype;
-}
-template<> inline MPI_Datatype get_mpi_type<ApplyRecord<std::complex<double>>>() {
-    static MPI_Datatype dtype = make_apply_record_mpi_type<std::complex<double>>();
-    return dtype;
-}
-
-
 // MPI-distributed wrapper around any local basis type.
 // Each rank holds the subset of states whose hash maps to that rank.
 // After loading and redistribution, on_states_changed() is called on the
@@ -169,34 +127,41 @@ protected:
     // Per-operator communication plan. The basis and Hamiltonian are fixed, so
     // the alltoallv counts/displs for each off-diagonal term never change; we
     // precompute them once (build_apply_metadata) and reuse across every apply.
-    // Counts/displs are in units of ApplyRecord (one collective now covers both
-    // coeff and state). The self->self block is included so the local update
-    // rides the same alltoallv instead of a separate path.
+    // Records (coeff+state) travel as two parallel native transfers: coeff as
+    // coeff_t, state as uint64 (a Uint128 is two uint64), so *_sizes/_displs are
+    // in record units for the coeff transfer and doubled (*_u64) for the state
+    // transfer. The self->self block is included so the local update rides the
+    // same exchange instead of a separate path.
     struct OperatorMetadata {
         std::vector<int> send_sizes;   // records sent to each rank (incl. self)
         std::vector<int> send_displs;  // prefix sums, in records
         std::vector<int> recv_sizes;   // records received from each rank
         std::vector<int> recv_displs;
+        std::vector<int> send_sizes_u64;   // == 2*send_sizes  (uint64 units)
+        std::vector<int> send_displs_u64;  // == 2*send_displs
+        std::vector<int> recv_sizes_u64;   // == 2*recv_sizes
+        std::vector<int> recv_displs_u64;  // == 2*recv_displs
         int64_t send_total = 0;        // == send_displs.back() + send_sizes.back()
         int64_t recv_total = 0;
     };
     mutable std::vector<OperatorMetadata> op_comm_metadata;
 
-    // Double-buffered record buffers, so op i's
-    // alltoallv can be in flight while op i-1's records are searched into y and
-    // op i+1's sends are filled. 
-    // Sized once to the largest per-operator total the first time 
-    // evaluate_add_off_diag_pipeline_prealloc is called.
-    mutable std::array<std::vector<ApplyRecord<coeff_t>>, 2> send_ring;
-    mutable std::array<std::vector<ApplyRecord<coeff_t>>, 2> recv_ring;
+    // Double-buffered send/recv buffers (coeff + state, parallel arrays), so op
+    // i's exchange can be in flight while op i-1's records are searched into y
+    // and op i+1's sends are filled. Sized once to the largest per-operator
+    // total the first time a prealloc apply is called.
+    mutable std::array<std::vector<coeff_t>, 2>             send_dy_ring;
+    mutable std::array<std::vector<ZBasisBase::state_t>, 2> send_state_ring;
+    mutable std::array<std::vector<coeff_t>, 2>             recv_dy_ring;
+    mutable std::array<std::vector<ZBasisBase::state_t>, 2> recv_state_ring;
 
     // Populate op_comm_metadata and size the ring buffers. Idempotent; a no-op
     // once built (basis/H are const for the object's lifetime).
     void build_apply_metadata() const;
 
     // Shared building blocks of the prealloc apply variants (threaded).
-    // fill_sends: counting-sort operator oi's records into send_ring[slot].
-    // apply_recvs: search recv_ring[slot] into the local basis and accumulate.
+    // fill_sends: counting-sort operator oi's records into send_{dy,state}_ring[slot].
+    // apply_recvs: search recv_state_ring[slot] into the basis and accumulate recv_dy_ring.
     void fill_sends(int slot, size_t oi, const coeff_t* x, Timer& timer) const;
     void apply_recvs(int slot, size_t oi, coeff_t* y, Timer& timer) const;
 
