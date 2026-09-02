@@ -357,40 +357,6 @@ void MPILazyOpSum<coeff_t, B>::evaluate_add_diagonal(const coeff_t* x, coeff_t* 
 
 template <RealOrCplx coeff_t, Basis B>
 void MPILazyOpSum<coeff_t, B>::evaluate_add_off_diag_pipeline(const coeff_t* x, coeff_t* y) const {
-    // State for pipelined communication
-    struct OperatorCommState {
-        std::vector<MPI_Request> requests;
-
-        std::vector<std::vector<coeff_t>> send_dy;
-        std::vector<std::vector<ZBasisBase::state_t>> send_states;
-
-        std::vector<std::vector<coeff_t>> recv_dy_bufs;
-        std::vector<std::vector<ZBasisBase::state_t>> recv_states_bufs;
-
-        MPI_Request count_exchange_req;
-        std::vector<int> recvcounts;
-
-        bool count_exchange_done = false;
-
-        void resize(int world_size){
-            send_dy.resize(world_size);
-            send_states.resize(world_size);
-
-            recv_dy_bufs.resize(world_size);
-            recv_states_bufs.resize(world_size);
-
-            recvcounts.resize(world_size);
-        }
-
-        void reset_for_new_op(){
-            count_exchange_done=false;
-            requests.clear();
-            for (auto& v : send_dy)     v.clear();
-            for (auto& v : send_states) v.clear();
-            for (auto& v : recv_dy_bufs)     v.clear();
-            for (auto& v : recv_states_bufs) v.clear();
-        }
-    };
 
     Timer loc_apply_timer("[local apply]", ctx.my_rank);
     Timer loc_up_timer("[local update]", ctx.my_rank);
@@ -572,6 +538,9 @@ void MPILazyOpSum<coeff_t, B>::evaluate_add_off_diag_pipeline(const coeff_t* x, 
 
 
 }
+
+
+
 
 // explicit template instantiations: generate symbols to link with
 template struct ZBasisMPI<ZBasisBST>;

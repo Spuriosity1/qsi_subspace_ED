@@ -1,6 +1,7 @@
 #include "argparse/argparse.hpp"
 #include "hamiltonian_setup.hpp"
 #include <nlohmann/json.hpp>
+#include "logging.hpp"
 #include "operator_mpi.hpp"
 #include "common_bits_mpi.hpp"
 #include <random>
@@ -27,6 +28,7 @@ using json = nlohmann::json;
 
 
 int main(int argc, char* argv[]){
+
     
 	argparse::ArgumentParser prog(argv[0]);
 	prog.add_argument("lattice_file");
@@ -73,6 +75,16 @@ int main(int argc, char* argv[]){
               "/ runtime default untouched).")
         .default_value(0)
         .scan<'i', int>();
+
+    prog.add_argument("--verbosity")
+        .help("Level of detail to print")
+        .default_value(2)
+        .scan<'i', int>();
+
+    prog.add_argument("--all-rank-info")
+        .help("Prints stats for all ranks (default: only rank 0)")
+        .default_value(false)
+        .implicit_value(true);
 
     try {
         prog.parse_args(argc, argv);
@@ -122,6 +134,7 @@ int main(int argc, char* argv[]){
 	jfile >> jdata;
 
     MPIHashContext ctx;
+    logging::configure(ctx.my_rank, prog.get<int>("--verbosity"), prog.get<bool>("--all-rank-info"));
 
 	using T=double;
 	SymbolicOpSum<T> H_sym;
