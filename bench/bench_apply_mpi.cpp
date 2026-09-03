@@ -220,6 +220,8 @@ int main(int argc, char* argv[]){
         int n_counted = 0;
         for (int rep = 0; rep < repeats; rep++) {
             std::fill(u.begin(), u.end(), 0.0);
+            if (ctx.my_rank == 0)
+                std::cout << "[" << tag << "] u += Av rep " << rep << ": ";
             MPI_Barrier(MPI_COMM_WORLD);
             double t0 = MPI_Wtime();
             H.evaluate_add(v.data(), u.data());
@@ -228,8 +230,8 @@ int main(int argc, char* argv[]){
 
             bool warmup = (repeats > 1 && rep == 0);
             if (ctx.my_rank == 0)
-                std::cout << "[" << tag << "] u += Av rep " << rep << ": "
-                          << dt_max * 1e3 << " ms" << (warmup ? " (warm-up)" : "") << "\n";
+                std::cout << dt_max * 1e3 << " ms" << (warmup ? " (warm-up)" : "") << "\n";
+
             if (!warmup) {
                 t_min = (n_counted == 0) ? dt_max : std::min(t_min, dt_max);
                 t_sum += dt_max;

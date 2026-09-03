@@ -15,16 +15,50 @@ host_cpu = host_machine.cpu_family()
 
 target_args = []
 
+cpu_arch = get_option('cpu_arch')
+
 if get_option('buildtype') == 'release'
-  target_args += ['-DNDEBUG'] 
-  if host_cpu.startswith('x86')
-    if cpp_compiler.has_argument('-mavx2')
-      target_args += ['-mavx2']
-    elif cpp_compiler.has_argument('-mavx')
-      target_args += ['-mavx']
+  target_args += ['-DNDEBUG']
+
+  # Scalar/loop optimisation flags safe for the ED/Lanczos numerics: no
+  # reassociation or fast-math (those can wreck Lanczos orthogonality).
+  # Guarded so toolchains lacking them still configure.
+  foreach flag : ['-funroll-loops', '-fno-math-errno', '-fno-trapping-math']
+    if cpp_compiler.has_argument(flag)
+      target_args += [flag]
     endif
-    if cpp_compiler.has_argument('-msse2')
-      target_args += ['-msse2']
+  endforeach
+
+  if host_cpu.startswith('x86')
+    if cpu_arch == 'auto'
+      # Portable default: generic AVX2, runs on any recent x86 (dev boxes/CI).
+      if cpp_compiler.has_argument('-mavx2')
+        target_args += ['-mavx2']
+      elif cpp_compiler.has_argument('-mavx')
+        target_args += ['-mavx']
+      endif
+      if cpp_compiler.has_argument('-msse2')
+        target_args += ['-msse2']
+      endif
+    elif cpu_arch == 'generic'
+      # No explicit ISA beyond the compiler baseline.
+    else
+      # Explicit target: 'native' or a named Zen microarchitecture.
+      march = '-march=' + cpu_arch
+      if cpp_compiler.has_argument(march)
+        target_args += [march, '-mtune=' + cpu_arch]
+        # Zen 4 (double-pumped) / Zen 5 (native) have AVX-512; prefer wide
+        # vectors. Benchmark this: on some parts 256-bit downclocks less.
+        if cpu_arch == 'znver4' or cpu_arch == 'znver5'
+          if cpp_compiler.has_argument('-mprefer-vector-width=512')
+            target_args += ['-mprefer-vector-width=512']
+          endif
+        endif
+      else
+        error('Compiler rejects -march=' + cpu_arch +
+          ' (need AOCC 5+/clang 19+ for znver5, clang 16+ for znver4). ' +
+          'Use -Dcpu_arch=auto or a supported target.')
+      endif
     endif
   elif host_cpu.startswith('aarch64') or host_cpu.startswith('arm')
     # Apple silicon, we need to juggle a bit 

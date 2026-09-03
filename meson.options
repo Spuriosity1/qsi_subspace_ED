@@ -1,5 +1,11 @@
 option('build_tests', type: 'boolean', value: true)
 option('build_benchmarks', type: 'boolean', value: true)
+option('cpu_arch',
+  type: 'combo',
+  choices: ['auto', 'native', 'znver5', 'znver4', 'znver3', 'generic'],
+  value: 'auto',
+  description: 'Target x86 microarchitecture. "auto" = portable generic AVX2 (safe for dev boxes/CI); "native" = host CPU; "znverN" = AMD Zen (adds -mprefer-vector-width=512 for AVX-512 Zen4/5). Non-auto targets emit ISA the build host may not run.'
+)
 option('blas_backend',
   type: 'combo',
   choices: ['auto', 'openblas', 'mkl', 'Accelerate', 'aocl', 'generic'],
