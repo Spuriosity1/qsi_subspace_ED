@@ -62,10 +62,19 @@ public:
             }
         }
         
-        // Load indices into AVX-512 registers
-        __m512i idx1 = _mm512_loadu_si512(indices.data());
-        __m512i idx2 = _mm512_loadu_si512(indices.data() + 64);
-        
+        // The kernel gathers: out[k] = in[gather[k]]. The project-wide
+        // convention (bittools::permute / fallback / AVX2) is scatter, i.e.
+        // input bit i moves to output bit indices[i]. Invert once here so the
+        // gather reproduces that scatter; the hot path stays untouched.
+        alignas(64) uint8_t inv[128];
+        for (int i = 0; i < 128; i++) {
+            inv[indices[i]] = static_cast<uint8_t>(i);
+        }
+
+        // Load inverted indices into AVX-512 registers
+        __m512i idx1 = _mm512_loadu_si512(inv);
+        __m512i idx2 = _mm512_loadu_si512(inv + 64);
+
         // Precompute permutation constants
         get_permute_constants(idx1, &byte_idx1, &bit_mask1);
         get_permute_constants(idx2, &byte_idx2, &bit_mask2);
