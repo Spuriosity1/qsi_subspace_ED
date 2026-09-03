@@ -13,7 +13,16 @@ cpp_compiler = meson.get_compiler('cpp')
 
 host_cpu = host_machine.cpu_family()
 
+# target_args: per-target extras carried via `cpp_args: target_args`. Holds only
+#   -DNDEBUG, so it stays off for unit tests that don't opt in (keeping their
+#   assert()s live).
+# simd_args: ISA + safe optimisation flags. These MUST be identical across every
+#   C++ translation unit: Eigen derives EIGEN_MAX_ALIGN_BYTES per-TU from the
+#   enabled vector ISA, so a TU that misses -march=znver5 (no __AVX512F__) links
+#   against libs built with it and their aligned AVX-512 loads fault (SIGSEGV).
+#   Applied project-wide via add_project_arguments below.
 target_args = []
+simd_args = []
 
 cpu_arch = get_option('cpu_arch')
 
@@ -25,7 +34,7 @@ if get_option('buildtype') == 'release'
   # Guarded so toolchains lacking them still configure.
   foreach flag : ['-funroll-loops', '-fno-math-errno', '-fno-trapping-math']
     if cpp_compiler.has_argument(flag)
-      target_args += [flag]
+      simd_args += [flag]
     endif
   endforeach
 
@@ -33,12 +42,12 @@ if get_option('buildtype') == 'release'
     if cpu_arch == 'auto'
       # Portable default: generic AVX2, runs on any recent x86 (dev boxes/CI).
       if cpp_compiler.has_argument('-mavx2')
-        target_args += ['-mavx2']
+        simd_args += ['-mavx2']
       elif cpp_compiler.has_argument('-mavx')
-        target_args += ['-mavx']
+        simd_args += ['-mavx']
       endif
       if cpp_compiler.has_argument('-msse2')
-        target_args += ['-msse2']
+        simd_args += ['-msse2']
       endif
     elif cpu_arch == 'generic'
       # No explicit ISA beyond the compiler baseline.
@@ -46,12 +55,12 @@ if get_option('buildtype') == 'release'
       # Explicit target: 'native' or a named Zen microarchitecture.
       march = '-march=' + cpu_arch
       if cpp_compiler.has_argument(march)
-        target_args += [march, '-mtune=' + cpu_arch]
+        simd_args += [march, '-mtune=' + cpu_arch]
         # Zen 4 (double-pumped) / Zen 5 (native) have AVX-512; prefer wide
         # vectors. Benchmark this: on some parts 256-bit downclocks less.
         if cpu_arch == 'znver4' or cpu_arch == 'znver5'
           if cpp_compiler.has_argument('-mprefer-vector-width=512')
-            target_args += ['-mprefer-vector-width=512']
+            simd_args += ['-mprefer-vector-width=512']
           endif
         endif
       else
@@ -61,20 +70,27 @@ if get_option('buildtype') == 'release'
       endif
     endif
   elif host_cpu.startswith('aarch64') or host_cpu.startswith('arm')
-    # Apple silicon, we need to juggle a bit 
+    # Apple silicon, we need to juggle a bit
     #    if cpp_compiler.has_argument('-mfpu=neon')
-    #      target_args += ['-mfpu=neon']
+    #      simd_args += ['-mfpu=neon']
     #    elif cpp_compiler.has_argument('-march=armv8-a+simd')
-    #      target_args += ['-march=armv8-a+simd']
+    #      simd_args += ['-march=armv8-a+simd']
     #    endif
     #    if cpp_compiler.has_argument('-march=armv8-a+sha3')
-    #      target_args += ['-march=armv8-a+sha3']
+    #      simd_args += ['-march=armv8-a+sha3']
     #    endif
   endif
 
 
 elif get_option('buildtype') == 'debug'
 #   add_project_arguments(['-fsanitize=address'], language: 'cpp' )
+endif
+
+# ISA/optimisation flags must be uniform across all C++ TUs (see the Eigen
+# alignment note above); apply them project-wide. -DNDEBUG is deliberately NOT
+# here — it stays in target_args so unit tests keep their assert()s enabled.
+if simd_args.length() > 0
+  add_project_arguments(simd_args, language: 'cpp')
 endif
 
 
