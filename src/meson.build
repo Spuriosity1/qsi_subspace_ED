@@ -2,6 +2,13 @@
 # Paths are relative to this directory; deps/includes come from the root
 # and components/ meson files (subdir'd before src/).
 
+# Build/runtime diagnostics: MPI + HDF5 versions and HDF5 filter support.
+getconfig = executable('getconfig', files('getconfig.cpp'),
+  dependencies: [hdf5_dep, mpi_dep],
+  cpp_args: target_args,
+  install: true
+  )
+
 polyring_basis = executable('polyring_basis', files('polyring_basis.cpp'),
   dependencies: [common_dep, eigen_dep, operator_dep],
   include_directories: basis_inc,
