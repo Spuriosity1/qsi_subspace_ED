@@ -4,6 +4,7 @@
 #include <vector>
 #include <array>
 #include <sstream>
+#include <algorithm>
 #include <hdf5.h>
 
 
@@ -27,13 +28,20 @@ private:
 
 namespace basis_io {
 
+// gzip/deflate level applied to all basis datasets (0 = off, 1-9 = deflate).
+// Basis states barely compress with a generic codec, but sorted shards still
+// shed ~1.5-2x; bump this toward 9 for better ratio at the cost of write speed.
+constexpr int H5_COMPRESSION_LEVEL = 4;
+// Rows per chunk (each row is 2x uint64 = 16 B); required for a deflate filter.
+constexpr hsize_t H5_CHUNK_ROWS = 1 << 20;
+
 inline void write_basis_hdf5(const std::vector<Uint128>& state_list, const std::string& outfilename, const char* dataset_name="basis"){
 	// do this C style because the C++ API is borked
-	
+
 
 	hsize_t dims[2] = {state_list.size(),2};
 
-	hid_t file_id = -1, dataspace_id = -1, dataset_id = -1;
+	hid_t file_id = -1, dataspace_id = -1, dataset_id = -1, plist_id = -1;
 	herr_t status;
 
 	try {
@@ -46,9 +54,21 @@ inline void write_basis_hdf5(const std::vector<Uint128>& state_list, const std::
 		dataspace_id = H5Screate_simple(2, dims, nullptr);
 		if (dataspace_id < 0) throw HDF5Error(file_id, dataspace_id, -1, "write_basis: Failed to create dataspace");
 
+		// Dataset creation property list: chunk + deflate. Deflate requires a
+		// chunked layout, so only enable it for a non-empty dataset.
+		plist_id = H5Pcreate(H5P_DATASET_CREATE);
+		if (plist_id < 0) throw HDF5Error(file_id, dataspace_id, -1, "write_basis: Failed to create property list");
+		if (H5_COMPRESSION_LEVEL > 0 && dims[0] > 0) {
+			hsize_t chunk_dims[2] = {std::min<hsize_t>(H5_CHUNK_ROWS, dims[0]), 2};
+			if (H5Pset_chunk(plist_id, 2, chunk_dims) < 0)
+				throw HDF5Error(file_id, dataspace_id, -1, "write_basis: Failed to set chunking");
+			if (H5Pset_deflate(plist_id, H5_COMPRESSION_LEVEL) < 0)
+				throw HDF5Error(file_id, dataspace_id, -1, "write_basis: Failed to set deflate");
+		}
+
 		// Create the dataset
 		dataset_id = H5Dcreate(file_id, dataset_name, H5T_NATIVE_UINT64, dataspace_id,
-				H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT);
+				H5P_DEFAULT, plist_id, H5P_DEFAULT);
 		if (dataset_id < 0) throw HDF5Error(file_id, dataspace_id, dataset_id, "write_basis: Failed to create dataset");
 
 		// Write data to the dataset
@@ -57,11 +77,13 @@ inline void write_basis_hdf5(const std::vector<Uint128>& state_list, const std::
 		if (status < 0) throw HDF5Error(file_id, dataspace_id, dataset_id, "write_basis: Failed to write data");
 
 		// Cleanup and close everything
+		H5Pclose(plist_id);
 		H5Dclose(dataset_id);
 		H5Sclose(dataspace_id);
 		H5Fclose(file_id);
 		return;
 	} catch (const HDF5Error& e){
+		if (plist_id >= 0) H5Pclose(plist_id);
 		if (dataset_id >= 0) H5Dclose(dataset_id);
 		if (dataspace_id >= 0) H5Sclose(dataspace_id);
 		if (file_id >= 0) H5Fclose(file_id);

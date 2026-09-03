@@ -250,7 +250,7 @@ inline void h5_expect_ok(herr_t status, const char* msg) {
 
 
 // Create HDF5 dataset with unlimited first dimension
-std::pair<hid_t, hid_t> create_hdf5_dataset(const std::string& filename, size_t batch_size, size_t chunk_size = 1<<20, int compression = 0) {
+std::pair<hid_t, hid_t> create_hdf5_dataset(const std::string& filename, size_t batch_size, size_t chunk_size = 1<<20, int compression = 4) {
     hsize_t dims[2]       = {0, 2};
     hsize_t maxdims[2]    = {H5S_UNLIMITED, 2};
     hsize_t chunk_dims[2] = {chunk_size, 2};

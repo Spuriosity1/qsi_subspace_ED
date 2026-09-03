@@ -111,7 +111,8 @@ inline void partition_basis_hdf5(const std::string& infile, const std::array<Uin
                         
                         hid_t plist_id = H5Pcreate(H5P_DATASET_CREATE);
                         H5Pset_chunk(plist_id, 2, chunk_dims);
-                        
+                        H5Pset_deflate(plist_id, 4);
+
                         hid_t file_dataspace_id = H5Screate_simple(2, initial_dims, max_dims);
                         hid_t dataset_id = H5Dcreate2(output_file_id, sector_name.c_str(), H5T_NATIVE_UINT64, 
                                                      file_dataspace_id, H5P_DEFAULT, plist_id, H5P_DEFAULT);
@@ -168,7 +169,8 @@ inline void partition_basis_hdf5(const std::string& infile, const std::array<Uin
                     
                     hid_t plist_id = H5Pcreate(H5P_DATASET_CREATE);
                     H5Pset_chunk(plist_id, 2, chunk_dims);
-                    
+                    H5Pset_deflate(plist_id, 4);
+
                     hid_t file_dataspace_id = H5Screate_simple(2, initial_dims, max_dims);
                     hid_t dataset_id = H5Dcreate2(output_file_id, sector_name.c_str(), H5T_NATIVE_UINT64, 
                                                  file_dataspace_id, H5P_DEFAULT, plist_id, H5P_DEFAULT);
