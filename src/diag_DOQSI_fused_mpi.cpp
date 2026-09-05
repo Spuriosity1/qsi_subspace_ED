@@ -349,10 +349,9 @@ int main(int argc, char* argv[]) {
             logging::log(logging::INFO) << "[Search] Estimated steady-state memory (global):\n"
                       << "    basis (Uint128)        : " << g[0] * MiB << " MiB\n"
                       << "    Lanczos vectors (3x)   : " << g[1] * MiB << " MiB\n"
-                      << "    operator index cache   : " << g[2] * MiB
-                      << " MiB (~4 B x off-diag nonzeros)\n"
-                      << "    total                  : "
-                      << (g[0] + g[1] + g[2]) * MiB << " MiB\n";
+                      << "    total persistent       : "
+                      << (g[0] + g[1] ) * MiB << " MiB\n"
+                      << "    operator indices       : " << g[2] * MiB << " MiB (~4 B x off-diag nonzeros, not cached)\n" ;
         }
     }
 
@@ -371,7 +370,7 @@ int main(int argc, char* argv[]) {
     // Scope the Hamiltonian so its pipelined comm buffers are freed before the
     // observable phase.
     {
-        auto H = MPILazyOpSum(basis, H_sym, ctx);
+        auto H = MPILazyOpSum(basis, H_sym, ctx, MPILazyOpSumStrategy::PIPE);
 
         RealApplyFn evadd = [&H](const coeff_t* x_local, coeff_t* y_local){
             H.evaluate_add(x_local, y_local);
