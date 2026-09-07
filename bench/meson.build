@@ -39,6 +39,20 @@ bench_apply_mpi = executable('bench_apply_mpi',
   install_dir: bench_bindir
   )
 
+# In-memory basis-build variant of bench_apply_mpi: enumerates the basis
+# straight to RAM (fused pipeline) so it can benchmark a single apply for
+# problems too large to materialise a basis file for. Compiles the build_basis
+# MPI sources in; links bench_operator_mpi_lib for the per-phase apply timers.
+bench_apply_inmem_mpi = executable('bench_apply_inmem_mpi',
+  ['bench_apply_inmem_mpi.cpp', basis_common_mpi_src],
+  include_directories: [inc, operator_inc, basis_inc],
+  dependencies: [common_dep, eigen_dep, linalg_routines_dep, mpi_dep],
+  link_with: [bench_operator_mpi_lib],
+  cpp_args: target_args,
+  install: true,
+  install_dir: bench_bindir
+  )
+
 bench_lanczos = executable('bench_lanczos',
   'bench_lanczos.cpp',
   include_directories: [inc],

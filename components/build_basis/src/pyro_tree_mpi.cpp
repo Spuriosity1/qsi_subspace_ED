@@ -209,56 +209,6 @@ bool mpi_par_searcher<T, Sink>::recv_stack_state(int src_rank){
     }
 }
 
-// rreturns true if we should exit
-template<typename T, typename Sink>
-//requires std::derived_from<T, lat_container>
-bool mpi_par_searcher<T, Sink>::handle_shutdown_ring(bool& shutdown_continues){
-    // early exit if world size is trivial
-    if (world_size == 1) return true;
-
-    // returns true if we should exit
-    const int src_rank = (my_rank + world_size - 1) % world_size;
-    const int dest_rank = (my_rank + 1) % world_size;
-
-//    int flag;
-    int continue_exit;
-    MPI_Recv(&continue_exit, 1, MPI_INT, src_rank, TAG_SHUTDOWN_RING,
-                MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-    if (!my_job_stack.empty()) {
-        // cancel shutdown and continue
-        logging::log(logging::TRACE) << "rank " << my_rank << " cancelling shutdown... "<<std::endl;
-        continue_exit = 0;
-        shutdown_continues = false;
-    } else {
-        continue_exit++;
-    }
-
-    // with world_size =4, NUM_TERMINATE_LOOPS = 3
-    //  rank | continue_exit
-    //  0    |       4    8  12   16 x
-    //  1    |  1    5    9  13 x
-    //  2    |  2    6   10  14 x
-    //  3    |  3    7   11  15 x
-    
-    // condition to continue: either rank != 0, or 0 < continue_exit < world_size*(NUM_TERMINATE_LOOPS+1)
-    bool terminate =false;
-    if (continue_exit > world_size * NUM_TERMINATE_LOOPS){
-        logging::log(logging::TRACE) << my_rank<<"] shutdown complete.\n";
-        logging::log(logging::TRACE) <<  src_rank << " -> " << my_rank << " X " <<std::endl;
-        terminate = true;
-    }
-
-    logging::log(logging::TRACE) << continue_exit << " | " << src_rank << " -> " << my_rank << " -> " << dest_rank << std::endl;
-    if (!((terminate || continue_exit==0 ) && my_rank == 0)){
-        // stop forwarding here
-        MPI_Send(&continue_exit, 1, MPI_INT, dest_rank, TAG_SHUTDOWN_RING, MPI_COMM_WORLD);
-    }
-    return terminate;
-}
-
-
-
-
 auto obtain_shuffled_targets(int world_size, int my_rank, std::mt19937& rng){
     std::vector<int> targets;
     targets.reserve(world_size - 1);
@@ -380,6 +330,72 @@ void mpi_par_searcher<T, Sink>::redistribute_shard(){
         in.close();
         std::error_code ec;
         std::filesystem::remove(done_path, ec);
+    } else if constexpr (std::is_same_v<Sink, MemoryShard>) {
+        // In-RAM redistribution: move the accumulated blocks aside and refill
+        // the shard with only the states this rank owns (its hash-share),
+        // hash-routing everything else to its owner. This bounds the per-rank
+        // high-water mark to ~(owned states + one block + comm buffers) during
+        // a search where a rank can *find* far more states than it will own,
+        // without ever touching disk. Processing block-by-block (rather than
+        // one giant Alltoallv) keeps the extra send/recv buffers to one block.
+        MPIHashContext ctx;
+
+        std::vector<std::vector<Uint128>> old_blocks;
+        old_blocks.swap(shard.mutable_blocks());   // shard is now empty; refill it
+
+        std::vector<Uint128> send_buf, recv_buf;
+        std::vector<int> send_counts(ctx.world_size), recv_counts(ctx.world_size);
+        std::vector<int> send_displs(ctx.world_size), recv_displs(ctx.world_size);
+
+        size_t bi = 0;
+        while (true) {
+            // This round's block (empty once this rank's blocks are exhausted);
+            // free the source slot immediately so it does not double the footprint.
+            std::vector<Uint128> block;
+            if (bi < old_blocks.size()) {
+                block.swap(old_blocks[bi]);
+                std::vector<Uint128>().swap(old_blocks[bi]);
+                ++bi;
+            }
+
+            std::fill(send_counts.begin(), send_counts.end(), 0);
+            for (const auto& psi : block)
+                send_counts[ctx.rank_of_state(psi)]++;
+
+            send_displs[0] = 0;
+            for (int r = 1; r < ctx.world_size; r++)
+                send_displs[r] = send_displs[r-1] + send_counts[r-1];
+
+            send_buf.resize(block.size());
+            {
+                std::vector<int> counters(send_displs);
+                for (const auto& psi : block)
+                    send_buf[counters[ctx.rank_of_state(psi)]++] = psi;
+            }
+
+            MPI_Alltoall(send_counts.data(), 1, get_mpi_type<int>(),
+                    recv_counts.data(), 1, get_mpi_type<int>(), MPI_COMM_WORLD);
+
+            recv_displs[0] = 0;
+            for (int r = 1; r < ctx.world_size; r++)
+                recv_displs[r] = recv_displs[r-1] + recv_counts[r-1];
+            size_t recv_total = std::accumulate(recv_counts.begin(), recv_counts.end(), 0ull);
+
+            recv_buf.resize(recv_total);
+            MPI_Alltoallv(send_buf.data(), send_counts.data(), send_displs.data(),
+                    get_mpi_type<Uint128>(),
+                    recv_buf.data(), recv_counts.data(), recv_displs.data(),
+                    get_mpi_type<Uint128>(), MPI_COMM_WORLD);
+
+            for (const auto& psi : recv_buf)
+                shard.push(psi);
+
+            int local_active = block.empty() ? 0 : 1;
+            int any_active = 0;
+            MPI_Allreduce(&local_active, &any_active, 1, get_mpi_type<int>(),
+                    MPI_MAX, MPI_COMM_WORLD);
+            if (!any_active) break;
+        }
     }
 }
 
@@ -402,16 +418,28 @@ void mpi_par_searcher<T, Sink>::build_state_tree(){
     int steal_idx = 0;
 
     int active_request = -1; // who we are asking for work from
-    bool shutdown_continues = false;
 
-    // Periodic hash-redistribution schedule (0 / single-rank => disabled). Only
-    // wall-clock time can gate the collective round: idle ranks spin this loop
-    // far faster than busy ones, so an iteration-count gate would desynchronise
-    // the collective. The deadline is refreshed *after* each round, and every
-    // rank leaves the round's final Allreduce together, so the schedules stay
-    // aligned without depending on MPI_Wtime being globally synchronised.
-    const bool redist_enabled = (REDIST_INTERVAL_SEC > 0.0) && (world_size > 1);
-    double next_redist = redist_enabled ? MPI_Wtime() + REDIST_INTERVAL_SEC : 0.0;
+    // Periodic collective "sync round": every rank rendezvouses on a shared
+    // wall-clock deadline to (a) optionally hash-redistribute the found states
+    // and (b) reach consensus on termination. Only wall-clock time can gate the
+    // collective: idle ranks spin this loop far faster than busy ones, so an
+    // iteration-count gate would desynchronise it. The deadline is refreshed
+    // *after* each round, and every rank leaves the round's final Allreduce
+    // together, so the schedules stay aligned without depending on MPI_Wtime
+    // being globally synchronised.
+    //
+    // Termination is decided here, collectively, rather than by a token-passing
+    // ring: a ring interleaves badly with the work-stealing point-to-point
+    // traffic and can deadlock. Instead each round takes a globally consistent
+    // quiescence snapshot -- every rank idle with no steal request in flight --
+    // via a single MPI_Allreduce; if it holds, all ranks break together. A rank
+    // with an outstanding request reports itself busy, so any in-flight work
+    // transfer is accounted for and the snapshot is race-free.
+    const bool sync_enabled = (world_size > 1);
+    const bool redist_enabled = (REDIST_INTERVAL_SEC > 0.0) && sync_enabled;
+    const double sync_interval =
+        redist_enabled ? REDIST_INTERVAL_SEC : DEFAULT_SYNC_INTERVAL_SEC;
+    double next_sync = sync_enabled ? MPI_Wtime() + sync_interval : 0.0;
 
     while (true) {
         // Process local work
@@ -449,36 +477,25 @@ void mpi_par_searcher<T, Sink>::build_state_tree(){
                 active_request = -1; // show that request complete
                 if (recv_stack_state(status.MPI_SOURCE)){
                     steal_idx = 0; // reset stealing on success
-                } 
-            } else if (status.MPI_TAG == TAG_SHUTDOWN_RING) {
-                if (handle_shutdown_ring(shutdown_continues)){
-                    break;  // shutdown complete
-                }  
+                }
             }
         }
         
 
-        // steal work if idle 
+        // Steal work if idle. We ask each peer at most once per sync interval
+        // (steal_idx walks the ring of targets); once everyone has refused we
+        // stop asking and wait for the next sync round, which either hands us
+        // fresh work to chase or, if every rank is equally idle, terminates the
+        // search collectively. The sync round resets steal_idx so idle ranks
+        // re-probe each interval. Termination is no longer initiated here -- it
+        // is decided by the collective consensus below.
         if (my_job_stack.empty()){
             if (world_size==1) break;
-            if (!shutdown_continues && active_request == -1) {
-                if (steal_idx < static_cast<int>(steal_targets.size()) ) {
-//                    if ( active_request == -1){
-                        request_work_from(steal_targets[steal_idx]);
-                        active_request = steal_idx;
-                        steal_idx++;
-//                    }
-                } else {
-                    // have tried everyone -- probably time to exit
-                    // initiate shutdown on rank 0
-                    if (my_rank == 0 ){
-                        const int dest_rank = 1;
-                        const int continue_exit = 0;
-                        MPI_Send(&continue_exit, 1, MPI_INT, dest_rank, TAG_SHUTDOWN_RING, MPI_COMM_WORLD);
-                    }
-
-                    shutdown_continues=true;
-                }
+            if (active_request == -1 &&
+                    steal_idx < static_cast<int>(steal_targets.size())) {
+                request_work_from(steal_targets[steal_idx]);
+                active_request = steal_idx;
+                steal_idx++;
             }
         }
 
@@ -488,17 +505,34 @@ void mpi_par_searcher<T, Sink>::build_state_tree(){
             logging::log(logging::DEBUG)<<my_rank<<"] bottom job @ spin "<<my_job_stack[0].curr_spin<<std::endl;
         }
 
-        // Periodic collective hash-redistribution. Gated purely on the shared
-        // wall-clock deadline (plus a defensive shutdown-signal check) so every
-        // rank makes the same enter/skip decision and reaches the collective;
-        // gating on any per-rank state (e.g. stack emptiness) would deadlock the
-        // round. A rank crossing the deadline first simply blocks inside the
-        // round until the stragglers arrive within one CHECK_INTERVAL.
-        if (redist_enabled && !GLOBAL_SHUTDOWN_REQUEST && MPI_Wtime() >= next_redist){
-            logging::log(logging::INFO) << "[rank " << my_rank
-                << "] redistributing shard to owning ranks...\n";
-            redistribute_shard();
-            next_redist = MPI_Wtime() + REDIST_INTERVAL_SEC;
+        // Periodic collective sync round. Gated purely on the shared wall-clock
+        // deadline (plus a defensive shutdown-signal check) so every rank makes
+        // the same enter/skip decision and reaches the collective; gating on any
+        // per-rank state (e.g. stack emptiness) would deadlock the round. A rank
+        // crossing the deadline first simply blocks inside the round until the
+        // stragglers arrive within one CHECK_INTERVAL.
+        if (sync_enabled && !GLOBAL_SHUTDOWN_REQUEST && MPI_Wtime() >= next_sync){
+            if (redist_enabled){
+                logging::log(logging::INFO) << "[rank " << my_rank
+                    << "] redistributing shard to owning ranks...\n";
+                redistribute_shard();
+            }
+
+            // Collective termination consensus: break iff every rank is idle
+            // (empty stack, no steal request in flight) at this rendezvous.
+            const int local_idle =
+                (my_job_stack.empty() && active_request == -1) ? 1 : 0;
+            int all_idle = 0;
+            MPI_Allreduce(&local_idle, &all_idle, 1, MPI_INT, MPI_MIN,
+                    MPI_COMM_WORLD);
+            if (all_idle){
+                logging::log(logging::DEBUG) << "[rank " << my_rank
+                    << "] all ranks idle -- terminating search\n";
+                break;
+            }
+
+            steal_idx = 0; // re-enable stealing for the coming interval
+            next_sync = MPI_Wtime() + sync_interval;
         }
     }
 

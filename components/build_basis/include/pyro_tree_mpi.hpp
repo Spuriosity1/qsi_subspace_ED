@@ -85,14 +85,18 @@ class mpi_par_searcher : public T {
     static constexpr int TAG_WORK_REQUEST = 1;
     static constexpr int TAG_WORK_RESPONSE = 2;
 
-    static constexpr int TAG_SHUTDOWN_RING = 300;
-//    static constexpr int TAG_SHUTDOWN_COMPLETE = 301;
-    static constexpr int NUM_TERMINATE_LOOPS = 3;
-
     // Wall-clock seconds between periodic hash-redistribution rounds during the
     // search (see redistribute_shard()). 0 disables them entirely (the default,
     // so every existing caller is byte-for-byte unchanged).
     double REDIST_INTERVAL_SEC = 0.0;
+
+    // Wall-clock seconds between collective sync rounds when redistribution is
+    // disabled. These rounds carry only the termination consensus (a single
+    // cheap MPI_Allreduce), so the cadence trades a small periodic-barrier
+    // overhead against how promptly a quiescent search is detected. When
+    // redistribution is enabled its (typically much longer) interval is reused
+    // for the consensus instead, since the round already rendezvouses there.
+    static constexpr double DEFAULT_SYNC_INTERVAL_SEC = 1.0;
 
 
 
