@@ -32,6 +32,7 @@
 #include "pyro_tree.hpp"
 #include "pyro_tree_mpi.hpp"
 #include "shard.hpp"          // MemoryShard
+#include "local_memory_cli.hpp"
 #include "admin.hpp"
 #include "basis_io_h5.hpp"    // basis_io::make_sector_string
 
@@ -91,6 +92,8 @@ static std::vector<Uint128> search_basis_inmem(
                     prog.get<int>("--print_interval"),
                     prog.get<int>("--chunk_size"));
     L.set_redist_interval(prog.get<double>("--redist-interval"));
+    L.set_local_memory_limit(
+            resolve_local_memory_bytes(prog.get<double>("--local-memory")));
     L.build_state_tree();
 
     std::vector<Uint128> states = L.sink().take_states();
@@ -141,6 +144,13 @@ int main(int argc, char* argv[]){
               "(0 = only redistribute once, at the end). >0 caps per-rank RAM "
               "during a large search.")
         .default_value(30.0)
+        .scan<'g', double>();
+    prog.add_argument("--local-memory")
+        .help("soft cap on this rank's in-RAM basis shard, in GiB; on reaching "
+              "it the rank pauses enumeration until the next --redist-interval "
+              "round drains the shard. 0 = unlimited; <0 (default) = auto "
+              "(0.5 x SLURM_MEM_PER_CPU x SLURM_CPUS_PER_TASK)")
+        .default_value(-1.0)
         .scan<'g', double>();
 
     // ---- apply/benchmark options (mirror bench_apply_mpi) ------------------

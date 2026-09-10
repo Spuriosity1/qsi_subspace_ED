@@ -12,6 +12,7 @@
 #include "physics/geometry.hpp"
 
 #include "hamiltonian_setup.hpp"
+#include "local_memory_cli.hpp"
 #include "operator_mpi.hpp"
 #include "lanczos_mpi.hpp"
 #include "lanczos_cli.hpp"
@@ -75,6 +76,8 @@ static std::vector<Uint128> search_basis_inmem(
                     prog.get<int>("--print_interval"),
                     prog.get<int>("--chunk_size"));
     L.set_redist_interval(prog.get<double>("--redist-interval"));
+    L.set_local_memory_limit(
+            resolve_local_memory_bytes(prog.get<double>("--local-memory")));
     L.build_state_tree();
 
     std::vector<Uint128> states = L.sink().take_states();
@@ -137,6 +140,20 @@ int main(int argc, char* argv[]) {
         .help("wall-clock seconds between periodic in-search hash-redistribution "
               "rounds (0 = only redistribute once, at the end)")
         .default_value(60.0)
+        .scan<'g', double>();
+
+    // Soft per-rank cap on the in-RAM basis shard. If a rank's found set spikes
+    // to this size between redistribution rounds it stops enumerating new states
+    // until the next round drains it, bounding the per-rank high-water mark
+    // (guards against an OOM/UCX-registration failure from a shard overrunning
+    // the node before a redistribution can rebalance it). Needs
+    // --redist-interval > 0 to have any effect.
+    prog.add_argument("--local-memory")
+        .help("soft cap on this rank's in-RAM basis shard, in GiB; on reaching "
+              "it the rank pauses enumeration until the next --redist-interval "
+              "round drains the shard. 0 = unlimited; <0 (default) = auto "
+              "(0.5 x SLURM_MEM_PER_CPU x SLURM_CPUS_PER_TASK)")
+        .default_value(-1.0)
         .scan<'g', double>();
 
 

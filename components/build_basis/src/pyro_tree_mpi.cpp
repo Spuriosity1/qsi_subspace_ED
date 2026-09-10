@@ -441,10 +441,31 @@ void mpi_par_searcher<T, Sink>::build_state_tree(){
         redist_enabled ? REDIST_INTERVAL_SEC : DEFAULT_SYNC_INTERVAL_SEC;
     double next_sync = sync_enabled ? MPI_Wtime() + sync_interval : 0.0;
 
+    // Soft per-rank in-RAM shard cap (see set_local_memory_limit), expressed to
+    // the loop as a state count. Only active with periodic redistribution: a
+    // paused rank relies on a redistribution round to drain it and resume, so
+    // without one the cap would stall the search. Ignored for the disk-backed
+    // Sink (which bounds its own RAM by streaming to disk).
+    const size_t local_mem_cap_states =
+        (LOCAL_MEM_LIMIT_BYTES && redist_enabled)
+            ? std::max<size_t>(1, LOCAL_MEM_LIMIT_BYTES / sizeof(Uint128))
+            : 0;
+
     while (true) {
-        // Process local work
+        // If this rank's in-RAM shard has hit the soft cap, pause enumeration
+        // (skip the fork/push batch) until the next redistribution round drains
+        // it. The rank still services steal requests and joins the sync/redist
+        // round below, and its job stack stays non-empty so it is never mistaken
+        // for idle in the termination consensus.
+        bool shard_full = false;
+        if constexpr (std::is_same_v<Sink, MemoryShard>) {
+            shard_full = local_mem_cap_states &&
+                         shard.size() >= local_mem_cap_states;
+        }
+
+        // Process local work (unless paused by the local-memory cap)
         for (iter_count = 0;
-                !my_job_stack.empty() && 
+                !shard_full && !my_job_stack.empty() &&
                 iter_count < static_cast<size_t>(CHECK_INTERVAL);
              iter_count++)
         {
@@ -502,7 +523,10 @@ void mpi_par_searcher<T, Sink>::build_state_tree(){
         // give an update
         if ( num_checks++ > PRINT_INTERVAL && !my_job_stack.empty()){
             num_checks=0;
-            logging::log(logging::DEBUG)<<my_rank<<"] bottom job @ spin "<<my_job_stack[0].curr_spin<<std::endl;
+            logging::log(logging::DEBUG)<<my_rank<<"] bottom job @ spin "
+                <<my_job_stack[0].curr_spin
+                <<(shard_full ? " [local-memory cap reached: paused]" : "")
+                <<std::endl;
         }
 
         // Periodic collective sync round. Gated purely on the shared wall-clock

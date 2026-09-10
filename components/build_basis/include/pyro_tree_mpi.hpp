@@ -90,6 +90,15 @@ class mpi_par_searcher : public T {
     // so every existing caller is byte-for-byte unchanged).
     double REDIST_INTERVAL_SEC = 0.0;
 
+    // Soft cap on this rank's in-RAM MemoryShard, in bytes (0 = unlimited).
+    // When the accumulated shard reaches this size the search stops expanding
+    // new work (it skips its per-CHECK_INTERVAL fork/push batch) until the next
+    // redistribution round drains it back toward this rank's owned share -- a
+    // safety valve against the shard spiking between redistribution rounds.
+    // Only honoured for an in-RAM Sink (MemoryShard) and only when periodic
+    // redistribution is enabled, since a paused rank needs a drain to resume.
+    size_t LOCAL_MEM_LIMIT_BYTES = 0;
+
     // Wall-clock seconds between collective sync rounds when redistribution is
     // disabled. These rounds carry only the termination consensus (a single
     // cheap MPI_Allreduce), so the cadence trades a small periodic-barrier
@@ -200,6 +209,12 @@ mpi_par_searcher(const lattice& lat, unsigned num_spinon_pairs,
     // of wall-clock time (0 = disabled). See redistribute_shard().
     void set_redist_interval(double seconds) {
         this->REDIST_INTERVAL_SEC = seconds;
+    }
+
+    // Soft cap on this rank's in-RAM shard in bytes (0 = unlimited). See
+    // LOCAL_MEM_LIMIT_BYTES and build_state_tree().
+    void set_local_memory_limit(size_t bytes) {
+        this->LOCAL_MEM_LIMIT_BYTES = bytes;
     }
 
 /////
