@@ -53,6 +53,20 @@ bench_apply_inmem_mpi = executable('bench_apply_inmem_mpi',
   install_dir: bench_bindir
   )
 
+# Growth/closure in-memory basis-build variant: instead of enumerating the whole
+# constrained basis, rank 0 seeds a small set of valid states via the serial DFS
+# and the basis is grown to its Hamiltonian-closure fixed point across ranks.
+# Same links as bench_apply_inmem_mpi (build_basis MPI sources + apply timers).
+bench_apply_inmem_grow_mpi = executable('bench_apply_inmem_grow_mpi',
+  ['bench_apply_inmem_grow_mpi.cpp', basis_common_mpi_src],
+  include_directories: [inc, operator_inc, basis_inc],
+  dependencies: [common_dep, eigen_dep, linalg_routines_dep, mpi_dep],
+  link_with: [bench_operator_mpi_lib],
+  cpp_args: target_args,
+  install: true,
+  install_dir: bench_bindir
+  )
+
 bench_lanczos = executable('bench_lanczos',
   'bench_lanczos.cpp',
   include_directories: [inc],

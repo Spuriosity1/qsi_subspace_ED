@@ -57,6 +57,19 @@ diag_DOQSI_fused_mpi = executable('diag_DOQSI_fused_mpi',
   install: true
   )
 
+# Grow-by-closure basis generation + diagonalisation: builds the basis in RAM by
+# growing it from a seed under the Hamiltonian (requires a fixed --sector), then
+# runs Lanczos. Shares the grow helpers in include/basis_grow_mpi.hpp with
+# bench_apply_inmem_grow_mpi. Only the serial DFS (pyro_tree.cpp) is needed.
+diag_DOQSI_grow_mpi = executable('diag_DOQSI_grow_mpi',
+  [files(['diag_DOQSI_grow_mpi.cpp']), basis_common_src],
+  dependencies: [g_deps, eigen_dep, common_dep, operator_mpi_dep, linalg_routines_mpi_dep],
+  include_directories: [inc, basis_inc],
+  link_with: [expectation_eval],
+  cpp_args: target_args,
+  install: true
+  )
+
 eval_observables = executable('eval_observables',
   files(['eval_observables.cpp']),
   dependencies: [g_deps, eigen_dep, omp_dep, operator_dep, linalg_routines_dep, spectra_dep],
