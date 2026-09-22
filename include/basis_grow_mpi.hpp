@@ -19,7 +19,12 @@
 //      of owned states, routes each produced neighbour to its hash-owner, and
 //      inserts any genuinely new state into a locally-sorted std::set. Newly
 //      inserted states form the next round's frontier. The loop ends when no
-//      rank discovers a new state anywhere.
+//      rank discovers a new state anywhere. Crucially the frontier is expanded
+//      and *redistributed on the fly* in bounded chunks through a nonblocking
+//      MPI_Ialltoall/MPI_Ialltoallv pipeline rather than materialising the whole
+//      round's neighbour list and shipping it in one shot -- at ~1 TB over ~500
+//      ranks a single per-round exchange buffer (frontier x #offdiag) dwarfs the
+//      basis itself and OOMs, and any per-rank imbalance is fatal.
 //   4. Stream the discovery set into the plain std::vector that backs the basis,
 //      erasing set nodes as they are copied so the set shrinks while the vector
 //      fills (rather than both being fully resident at once).
@@ -124,18 +129,44 @@ inline std::vector<state_t> scatter_seeds(const std::vector<state_t>& seeds,
 // off-diagonal terms of H. Every round each rank turns its current frontier of
 // owned states into neighbours (H * state), routes them to their hash-owners
 // (same routing as the apply), and inserts the received states into `known`;
-// states not already present become the next frontier. Terminates when no rank
-// inserts a new state anywhere (a collective MAX-reduction keeps every rank in
-// lockstep, so all ranks execute the same number of collective rounds).
+// states not already present become the next frontier. Terminates when every
+// rank's frontier is empty (a collective MAX-reduction of the per-rank chunk
+// count keeps every rank in lockstep and detects the fixed point).
+//
+// The frontier is *not* expanded into one big per-round send buffer -- at the
+// target scale (~1 TB / ~500 ranks) `frontier x #offdiag` states dwarfs the
+// basis and OOMs, and per-rank imbalance in that transient is fatal. Instead the
+// frontier is swept in bounded chunks of `chunk_frontier` states, each chunk
+// redistributed on the fly through a depth-3 nonblocking pipeline:
+//   stage A  produce(chunk c):    expand+bucket the chunk, post MPI_Ialltoall of
+//                                 the send counts;
+//   stage B  launch_data(c-1):    wait c-1's counts, post MPI_Ialltoallv of the
+//                                 states;
+//   stage C  harvest(c-2):        wait c-2's states, insert them into `known`.
+// With three stages in flight the counts wait (A->B) and the states wait (B->C)
+// are both on collectives posted a full iteration earlier, so their latency
+// overlaps the next chunk's neighbour generation -- important on Otus where the
+// per-collective latency, while modest, is paid once per chunk. Peak transient
+// send/recv memory is ~3 x chunk_frontier x #offdiag states instead of the whole
+// frontier's worth, and the `int`-counted alltoallv can no longer overflow.
+//
+// Collective correctness: MPI_Ialltoall/MPI_Ialltoallv are collective, so all
+// ranks must post the same sequence. The per-round chunk count is the global MAX
+// of the local counts; a rank that runs out of its own frontier keeps posting
+// empty (zero-send) chunks -- it still *receives* neighbours other ranks route
+// to it, which is exactly the on-the-fly redistribution we want.
+//
 // Returns the rank-local sorted set of owned states; n_rounds is set to the
-// number of exchange rounds executed.
+// number of BFS rounds executed.
 template <typename coeff_t>
 std::set<state_t> grow_basis(std::vector<state_t>&& my_seeds,
                              const SymbolicOpSum<coeff_t>& H,
                              const MPIHashContext& ctx,
+                             size_t chunk_frontier,
                              size_t& n_rounds)
 {
     const int N = ctx.world_size;
+    if (chunk_frontier == 0) chunk_frontier = (1u << 16);
 
     std::set<state_t> known;
     std::vector<state_t> frontier;
@@ -143,65 +174,110 @@ std::set<state_t> grow_basis(std::vector<state_t>&& my_seeds,
         if (known.insert(s).second) frontier.push_back(s);
     { std::vector<state_t> tmp; std::swap(tmp, my_seeds); }  // free seeds
 
-    std::vector<int> send_counts(N), recv_counts(N), send_displs(N), recv_displs(N);
-    std::vector<state_t> neigh, send_buf, recv_buf, next_frontier;
+    // One in-flight chunk: its hash-bucketed send/recv buffers and the two
+    // nonblocking-collective requests it owns. Three slots are enough to keep
+    // chunk c's counts exchange, c-1's states exchange and c-2's harvest live
+    // simultaneously (slot for chunk c is slot[c % 3]).
+    struct Slot {
+        std::vector<int> send_counts, recv_counts, send_displs, recv_displs;
+        std::vector<state_t> send_buf, recv_buf;
+        MPI_Request count_req = MPI_REQUEST_NULL;
+        MPI_Request data_req  = MPI_REQUEST_NULL;
+        void init(int n) {
+            send_counts.assign(n, 0); recv_counts.assign(n, 0);
+            send_displs.assign(n, 0); recv_displs.assign(n, 0);
+        }
+    };
+    Slot slot[3];
+    for (auto& s : slot) s.init(N);
+
+    std::vector<state_t> next_frontier;
+
+    // Stage A: expand frontier states [lo,hi) into hash-bucketed neighbours and
+    // post the (nonblocking) counts exchange. Two cheap applyState passes over
+    // the range keep only the compacted send buffer resident -- there is no
+    // separate neighbour list -- so peak send memory is chunk x #offdiag states.
+    auto produce = [&](Slot& cc, size_t lo, size_t hi) {
+        std::fill(cc.send_counts.begin(), cc.send_counts.end(), 0);
+        for (size_t i = lo; i < hi; ++i) {
+            for (const auto& term : H.off_diag_terms) {
+                state_t t = frontier[i];
+                if (term.second.applyState(t) != 0)
+                    cc.send_counts[ctx.rank_of_state(t)]++;
+            }
+        }
+        cc.send_displs[0] = 0;
+        for (int r = 1; r < N; ++r)
+            cc.send_displs[r] = cc.send_displs[r-1] + cc.send_counts[r-1];
+        size_t send_total = static_cast<size_t>(cc.send_displs[N-1]) + cc.send_counts[N-1];
+        cc.send_buf.resize(send_total);
+        std::vector<int> cur(cc.send_displs);
+        for (size_t i = lo; i < hi; ++i) {
+            for (const auto& term : H.off_diag_terms) {
+                state_t t = frontier[i];
+                if (term.second.applyState(t) != 0)
+                    cc.send_buf[cur[ctx.rank_of_state(t)]++] = t;
+            }
+        }
+        MPI_Ialltoall(cc.send_counts.data(), 1, get_mpi_type<int>(),
+                      cc.recv_counts.data(), 1, get_mpi_type<int>(),
+                      MPI_COMM_WORLD, &cc.count_req);
+    };
+
+    // Stage B: counts are back -> size the recv buffer and post the states
+    // exchange (nonblocking).
+    auto launch_data = [&](Slot& cc) {
+        MPI_Wait(&cc.count_req, MPI_STATUS_IGNORE);
+        cc.recv_displs[0] = 0;
+        for (int r = 1; r < N; ++r)
+            cc.recv_displs[r] = cc.recv_displs[r-1] + cc.recv_counts[r-1];
+        size_t recv_total =
+            std::accumulate(cc.recv_counts.begin(), cc.recv_counts.end(), size_t{0});
+        cc.recv_buf.resize(recv_total);
+        MPI_Ialltoallv(cc.send_buf.data(), cc.send_counts.data(), cc.send_displs.data(),
+                       get_mpi_type<state_t>(),
+                       cc.recv_buf.data(), cc.recv_counts.data(), cc.recv_displs.data(),
+                       get_mpi_type<state_t>(), MPI_COMM_WORLD, &cc.data_req);
+    };
+
+    // Stage C: states are back -> insert; genuinely new states become the next
+    // round's frontier.
+    auto harvest = [&](Slot& cc) {
+        MPI_Wait(&cc.data_req, MPI_STATUS_IGNORE);
+        for (const auto& r : cc.recv_buf)
+            if (known.insert(r).second) next_frontier.push_back(r);
+    };
 
     size_t round = 0;
     while (true) {
-        // (a) expand the frontier: neighbour = op * state for every off-diag op.
-        std::fill(send_counts.begin(), send_counts.end(), 0);
-        neigh.clear();
-        for (const auto& s : frontier) {
-            for (const auto& term : H.off_diag_terms) {
-                state_t t = s;
-                if (term.second.applyState(t) != 0) {
-                    neigh.push_back(t);
-                    send_counts[ctx.rank_of_state(t)]++;
-                }
-            }
-        }
-        { std::vector<state_t> tmp; std::swap(tmp, frontier); }  // free frontier
-
-        // (b) bucket neighbours by destination rank into the send buffer.
-        send_displs[0] = 0;
-        for (int r = 1; r < N; ++r)
-            send_displs[r] = send_displs[r-1] + send_counts[r-1];
-        send_buf.resize(neigh.size());
-        {
-            std::vector<int> cur(send_displs);
-            for (const auto& t : neigh)
-                send_buf[cur[ctx.rank_of_state(t)]++] = t;
-        }
-        { std::vector<state_t> tmp; std::swap(tmp, neigh); }     // free neigh
-
-        // (c) exchange counts then states (self bucket rides along, like apply).
-        MPI_Alltoall(send_counts.data(), 1, get_mpi_type<int>(),
-                     recv_counts.data(), 1, get_mpi_type<int>(), MPI_COMM_WORLD);
-        recv_displs[0] = 0;
-        for (int r = 1; r < N; ++r)
-            recv_displs[r] = recv_displs[r-1] + recv_counts[r-1];
-        size_t recv_total = std::accumulate(recv_counts.begin(), recv_counts.end(), 0ull);
-        recv_buf.resize(recv_total);
-        MPI_Alltoallv(send_buf.data(), send_counts.data(), send_displs.data(),
-                      get_mpi_type<state_t>(),
-                      recv_buf.data(), recv_counts.data(), recv_displs.data(),
-                      get_mpi_type<state_t>(), MPI_COMM_WORLD);
-        { std::vector<state_t> tmp; std::swap(tmp, send_buf); }  // free send_buf
-
-        // (d) insert received states; the genuinely new ones are next frontier.
-        next_frontier.clear();
-        for (const auto& r : recv_buf)
-            if (known.insert(r).second) next_frontier.push_back(r);
-        { std::vector<state_t> tmp; std::swap(tmp, recv_buf); }  // free recv_buf
-
-        // (e) fixed point when nobody added anything this round.
-        int local_new = next_frontier.empty() ? 0 : 1;
-        int any_new = 0;
-        MPI_Allreduce(&local_new, &any_new, 1, get_mpi_type<int>(),
+        const size_t fsz = frontier.size();
+        size_t local_chunks = (fsz + chunk_frontier - 1) / chunk_frontier;
+        size_t n_chunks = 0;
+        MPI_Allreduce(&local_chunks, &n_chunks, 1, get_mpi_type<size_t>(),
                       MPI_MAX, MPI_COMM_WORLD);
+        if (n_chunks == 0) break;   // no rank has any frontier left: fixed point
+
+        next_frontier.clear();
+
+        // Software-pipelined sweep over the global-max chunk count. Ranks that
+        // exhaust their own frontier pad with empty (zero-send) chunks so every
+        // rank posts the identical collective sequence; +2 trailing iterations
+        // drain the pipeline. Post the new nonblocking ops before the waits so
+        // the network can make progress underneath.
+        for (size_t it = 0; it < n_chunks + 2; ++it) {
+            if (it < n_chunks) {
+                size_t lo = std::min(it * chunk_frontier, fsz);
+                size_t hi = std::min(lo + chunk_frontier, fsz);
+                produce(slot[it % 3], lo, hi);
+            }
+            if (it >= 1 && (it - 1) < n_chunks)
+                launch_data(slot[(it - 1) % 3]);
+            if (it >= 2 && (it - 2) < n_chunks)
+                harvest(slot[(it - 2) % 3]);
+        }
+
         std::swap(frontier, next_frontier);
         ++round;
-        if (!any_new) break;
     }
 
     n_rounds = round;
@@ -235,7 +311,9 @@ inline std::vector<state_t> drain_set_to_vector(std::set<state_t>& s,
 // sorted owned states. The sector must be non-empty (see the file header for
 // why); this is asserted only informally -- callers validate and error out with
 // a helpful message. Rank 0 performs the DFS; milestones are logged via
-// logging::log so both callers report consistently. raw_local is set to this
+// logging::log so both callers report consistently. grow_batch is the frontier
+// states per pipelined redistribution chunk (bounds peak comm memory). raw_local
+// is set to this
 // rank's owned count, raw_global to the summed global dim, n_rounds to the
 // number of growth rounds.
 template <typename coeff_t>
@@ -245,7 +323,7 @@ std::vector<state_t> build_grown_basis_local(
         const std::vector<int>& sector,
         const SymbolicOpSum<coeff_t>& H,
         const MPIHashContext& ctx,
-        size_t seeds_per_rank, size_t drain_chunk,
+        size_t seeds_per_rank, size_t drain_chunk, size_t grow_batch,
         size_t& raw_local, size_t& raw_global, size_t& n_rounds)
 {
     const size_t seed_target = seeds_per_rank * static_cast<size_t>(ctx.world_size);
@@ -270,7 +348,8 @@ std::vector<state_t> build_grown_basis_local(
     { std::vector<state_t> tmp; std::swap(tmp, seeds); }  // free rank-0 seed set
 
     // --- Step 3: grow to the Hamiltonian-closure fixed point ----------------
-    std::set<state_t> grown = grow_basis(std::move(my_seeds), H, ctx, n_rounds);
+    std::set<state_t> grown = grow_basis(std::move(my_seeds), H, ctx,
+                                         grow_batch, n_rounds);
 
     raw_local = grown.size();
     raw_global = 0;

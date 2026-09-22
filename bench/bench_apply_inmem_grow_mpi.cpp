@@ -110,6 +110,12 @@ int main(int argc, char* argv[]){
               "basis vector (larger = fewer iterations, same peak).")
         .default_value(1<<20)
         .scan<'i', int>();
+    prog.add_argument("--grow-batch")
+        .help("frontier states per pipelined redistribution chunk during growth. "
+              "Peak comm memory ~ 3 x this x #offdiag states; bound it at high "
+              "node counts / tight RAM.")
+        .default_value(1<<16)
+        .scan<'i', int>();
 
     // ---- apply/benchmark options (mirror bench_apply_mpi) ------------------
     prog.add_argument("--seed")
@@ -235,6 +241,7 @@ int main(int argc, char* argv[]){
     size_t seeds_per_rank = static_cast<size_t>(std::max(1, prog.get<int>("--seeds-per-rank")));
     size_t seed_target = seeds_per_rank * static_cast<size_t>(ctx.world_size);
     size_t drain_chunk = static_cast<size_t>(std::max(1, prog.get<int>("--drain-chunk")));
+    size_t grow_batch = static_cast<size_t>(std::max(1, prog.get<int>("--grow-batch")));
 
     if (ctx.my_rank == 0)
         std::cout << "[build] growing basis in-memory (sector="
@@ -249,7 +256,7 @@ int main(int argc, char* argv[]){
     size_t raw_local = 0, raw_global = 0, n_rounds = 0;
     std::vector<state_t> found = basis_grow::build_grown_basis_local(
             lat, num_spinon_pairs, perm, target_sector, H_sym, ctx,
-            seeds_per_rank, drain_chunk, raw_local, raw_global, n_rounds);
+            seeds_per_rank, drain_chunk, grow_batch, raw_local, raw_global, n_rounds);
 
     double t_build = MPI_Wtime() - t_build0, t_build_max = 0;
     MPI_Reduce(&t_build, &t_build_max, 1, MPI_DOUBLE, MPI_MAX, 0, MPI_COMM_WORLD);

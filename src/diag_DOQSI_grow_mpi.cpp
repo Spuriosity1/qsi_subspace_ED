@@ -73,6 +73,12 @@ int main(int argc, char* argv[]) {
               "basis vector (larger = fewer iterations, same peak).")
         .default_value(1<<20)
         .scan<'i', int>();
+    prog.add_argument("--grow-batch")
+        .help("frontier states per pipelined redistribution chunk during growth. "
+              "Peak comm memory ~ 3 x this x #offdiag states, so bound it at high "
+              "node counts / tight RAM (smaller = more, smaller collective rounds).")
+        .default_value(1<<16)
+        .scan<'i', int>();
 
     // G specification
     {
@@ -172,6 +178,7 @@ int main(int argc, char* argv[]) {
     auto target_sector = prog.get<std::vector<int>>("--sector");
     size_t seeds_per_rank = static_cast<size_t>(std::max(1, prog.get<int>("--seeds-per-rank")));
     size_t drain_chunk = static_cast<size_t>(std::max(1, prog.get<int>("--drain-chunk")));
+    size_t grow_batch = static_cast<size_t>(std::max(1, prog.get<int>("--grow-batch")));
 
     if (ctx.my_rank == 0)
         logging::log(logging::INFO) << "[Grow] Building basis in-memory by closure "
@@ -183,7 +190,7 @@ int main(int argc, char* argv[]) {
     size_t raw_local = 0, raw_global = 0, n_rounds = 0;
     std::vector<Uint128> found = basis_grow::build_grown_basis_local(
             lat, num_spinon_pairs, perm, target_sector, H_sym, ctx,
-            seeds_per_rank, drain_chunk, raw_local, raw_global, n_rounds);
+            seeds_per_rank, drain_chunk, grow_batch, raw_local, raw_global, n_rounds);
 
     if (ctx.my_rank == 0) {
         logging::log(logging::INFO) << "[Grow] Done! growth converged in "
