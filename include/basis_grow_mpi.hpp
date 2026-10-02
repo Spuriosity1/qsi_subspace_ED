@@ -25,9 +25,13 @@
 //      round's neighbour list and shipping it in one shot -- at ~1 TB over ~500
 //      ranks a single per-round exchange buffer (frontier x #offdiag) dwarfs the
 //      basis itself and OOMs, and any per-rank imbalance is fatal.
-//   4. Stream the discovery set into the plain std::vector that backs the basis,
-//      erasing set nodes as they are copied so the set shrinks while the vector
-//      fills (rather than both being fully resident at once).
+//   4. The discovery structure is a *sorted std::vector* kept deduplicated by
+//      per-round merge, not a node-based std::set: at the target scale a
+//      red-black tree costs ~3-4x the raw slice (three pointers + colour per
+//      16-byte Uint128), and on memory-capped runs that overhead, not the comm
+//      transients, is what bounds the slice that fits. Because the discovery
+//      vector is already the sorted basis slice, it is returned straight to the
+//      caller -- no separate drain step and no second full-size copy.
 //
 // IMPORTANT -- why a --sector is mandatory for callers. Growth reconstructs
 // only the H-connected closure of the seeds. Ring exchange conserves the
@@ -46,7 +50,6 @@
 #include "logging.hpp"
 
 #include <mpi.h>
-#include <set>
 #include <vector>
 #include <algorithm>
 #include <numeric>
@@ -128,10 +131,20 @@ inline std::vector<state_t> scatter_seeds(const std::vector<state_t>& seeds,
 // Frontier-driven distributed BFS over the graph whose edges are the
 // off-diagonal terms of H. Every round each rank turns its current frontier of
 // owned states into neighbours (H * state), routes them to their hash-owners
-// (same routing as the apply), and inserts the received states into `known`;
+// (same routing as the apply), and folds the received states into `known`;
 // states not already present become the next frontier. Terminates when every
 // rank's frontier is empty (a collective MAX-reduction of the per-rank chunk
 // count keeps every rank in lockstep and detects the fixed point).
+//
+// `known` is a *sorted std::vector*, not a std::set: membership is a binary
+// search and incorporation is a single merge of the round's new states at the
+// round boundary. This trades the set's continuous ~3-4x red-black-tree node
+// overhead (fatal on memory-capped runs, since the owned slice is ~1x the raw
+// states) for a cheap, transient per-round merge. Within a round the new
+// states are staged in a second sorted vector `round_new` (received chunks are
+// sorted/uniqued and filtered against both `known` and `round_new` so cross-
+// chunk duplicates are caught), then merged into `known` once and handed to the
+// next round as its frontier.
 //
 // The frontier is *not* expanded into one big per-round send buffer -- at the
 // target scale (~1 TB / ~500 ranks) `frontier x #offdiag` states dwarfs the
@@ -156,22 +169,24 @@ inline std::vector<state_t> scatter_seeds(const std::vector<state_t>& seeds,
 // empty (zero-send) chunks -- it still *receives* neighbours other ranks route
 // to it, which is exactly the on-the-fly redistribution we want.
 //
-// Returns the rank-local sorted set of owned states; n_rounds is set to the
-// number of BFS rounds executed.
+// Returns the rank-local sorted vector of owned states (already deduplicated);
+// n_rounds is set to the number of BFS rounds executed.
 template <typename coeff_t>
-std::set<state_t> grow_basis(std::vector<state_t>&& my_seeds,
-                             const SymbolicOpSum<coeff_t>& H,
-                             const MPIHashContext& ctx,
-                             size_t chunk_frontier,
-                             size_t& n_rounds)
+std::vector<state_t> grow_basis(std::vector<state_t>&& my_seeds,
+                                const SymbolicOpSum<coeff_t>& H,
+                                const MPIHashContext& ctx,
+                                size_t chunk_frontier,
+                                size_t& n_rounds)
 {
     const int N = ctx.world_size;
     if (chunk_frontier == 0) chunk_frontier = (1u << 16);
 
-    std::set<state_t> known;
-    std::vector<state_t> frontier;
-    for (const auto& s : my_seeds)
-        if (known.insert(s).second) frontier.push_back(s);
+    // `known` is kept sorted+unique at all times; it doubles as the frontier
+    // seed. my_seeds are already this rank's hash-owned slice (scatter_seeds).
+    std::sort(my_seeds.begin(), my_seeds.end());
+    my_seeds.erase(std::unique(my_seeds.begin(), my_seeds.end()), my_seeds.end());
+    std::vector<state_t> known = my_seeds;
+    std::vector<state_t> frontier = my_seeds;
     { std::vector<state_t> tmp; std::swap(tmp, my_seeds); }  // free seeds
 
     // One in-flight chunk: its hash-bucketed send/recv buffers and the two
@@ -191,7 +206,7 @@ std::set<state_t> grow_basis(std::vector<state_t>&& my_seeds,
     Slot slot[3];
     for (auto& s : slot) s.init(N);
 
-    std::vector<state_t> next_frontier;
+    std::vector<state_t> round_new;  // sorted+unique, disjoint from `known`
 
     // Stage A: expand frontier states [lo,hi) into hash-bucketed neighbours and
     // post the (nonblocking) counts exchange. Two cheap applyState passes over
@@ -240,12 +255,30 @@ std::set<state_t> grow_basis(std::vector<state_t>&& my_seeds,
                        get_mpi_type<state_t>(), MPI_COMM_WORLD, &cc.data_req);
     };
 
-    // Stage C: states are back -> insert; genuinely new states become the next
-    // round's frontier.
+    // Stage C: states are back -> sort/unique this chunk, drop those already in
+    // `known` or already staged this round, and merge the genuinely new ones
+    // into the sorted `round_new`. Both lookups are binary searches over
+    // contiguous memory; `known` is immutable within a round so its search is
+    // stable, and `round_new` stays sorted via the inplace_merge below.
     auto harvest = [&](Slot& cc) {
         MPI_Wait(&cc.data_req, MPI_STATUS_IGNORE);
-        for (const auto& r : cc.recv_buf)
-            if (known.insert(r).second) next_frontier.push_back(r);
+        auto& buf = cc.recv_buf;
+        if (buf.empty()) return;
+        std::sort(buf.begin(), buf.end());
+        buf.erase(std::unique(buf.begin(), buf.end()), buf.end());
+
+        std::vector<state_t> fresh;
+        fresh.reserve(buf.size());
+        for (const auto& s : buf)
+            if (!std::binary_search(known.begin(), known.end(), s) &&
+                !std::binary_search(round_new.begin(), round_new.end(), s))
+                fresh.push_back(s);
+        if (fresh.empty()) return;
+
+        const size_t old = round_new.size();
+        round_new.insert(round_new.end(), fresh.begin(), fresh.end());
+        std::inplace_merge(round_new.begin(), round_new.begin() + old,
+                           round_new.end());
     };
 
     size_t round = 0;
@@ -257,7 +290,7 @@ std::set<state_t> grow_basis(std::vector<state_t>&& my_seeds,
                       MPI_MAX, MPI_COMM_WORLD);
         if (n_chunks == 0) break;   // no rank has any frontier left: fixed point
 
-        next_frontier.clear();
+        round_new.clear();
 
         // Software-pipelined sweep over the global-max chunk count. Ranks that
         // exhaust their own frontier pad with empty (zero-send) chunks so every
@@ -276,7 +309,15 @@ std::set<state_t> grow_basis(std::vector<state_t>&& my_seeds,
                 harvest(slot[(it - 2) % 3]);
         }
 
-        std::swap(frontier, next_frontier);
+        // Incorporate this round's discoveries: merge `round_new` into the
+        // sorted `known` once, then hand it to the next round as the frontier.
+        // round_new is sorted and disjoint from known, so a single inplace_merge
+        // restores the sorted+unique invariant. The swap also recycles the old
+        // frontier's storage into round_new (cleared at the top of next round).
+        const size_t old = known.size();
+        known.insert(known.end(), round_new.begin(), round_new.end());
+        std::inplace_merge(known.begin(), known.begin() + old, known.end());
+        std::swap(frontier, round_new);
         ++round;
     }
 
@@ -285,29 +326,7 @@ std::set<state_t> grow_basis(std::vector<state_t>&& my_seeds,
 }
 
 
-// Step 4: hand the discovery set off to a plain std::vector.
-// Stream the (sorted) set into the vector in chunks, erasing the copied nodes as
-// we go so the set frees memory while the vector fills, instead of holding both
-// structures at full size simultaneously.
-inline std::vector<state_t> drain_set_to_vector(std::set<state_t>& s,
-                                                size_t chunk_states)
-{
-    if (chunk_states == 0) chunk_states = (1u << 20);
-    std::vector<state_t> out;
-    out.reserve(s.size());
-    while (!s.empty()) {
-        auto it = s.begin();
-        size_t k = 0;
-        for (; k < chunk_states && it != s.end(); ++k) {
-            out.push_back(*it);
-            it = s.erase(it);   // frees this node, returns next
-        }
-    }
-    return out;
-}
-
-
-// Convenience: full seed -> scatter -> grow -> drain, returning this rank's
+// Convenience: full seed -> scatter -> grow, returning this rank's
 // sorted owned states. The sector must be non-empty (see the file header for
 // why); this is asserted only informally -- callers validate and error out with
 // a helpful message. Rank 0 performs the DFS; milestones are logged via
@@ -323,7 +342,7 @@ std::vector<state_t> build_grown_basis_local(
         const std::vector<int>& sector,
         const SymbolicOpSum<coeff_t>& H,
         const MPIHashContext& ctx,
-        size_t seeds_per_rank, size_t drain_chunk, size_t grow_batch,
+        size_t seeds_per_rank, size_t grow_batch,
         size_t& raw_local, size_t& raw_global, size_t& n_rounds)
 {
     const size_t seed_target = seeds_per_rank * static_cast<size_t>(ctx.world_size);
@@ -348,17 +367,16 @@ std::vector<state_t> build_grown_basis_local(
     { std::vector<state_t> tmp; std::swap(tmp, seeds); }  // free rank-0 seed set
 
     // --- Step 3: grow to the Hamiltonian-closure fixed point ----------------
-    std::set<state_t> grown = grow_basis(std::move(my_seeds), H, ctx,
-                                         grow_batch, n_rounds);
+    // The grown structure is already the sorted, deduplicated owned slice, so it
+    // is returned directly -- there is no separate drain.
+    std::vector<state_t> local = grow_basis(std::move(my_seeds), H, ctx,
+                                            grow_batch, n_rounds);
 
-    raw_local = grown.size();
+    raw_local = local.size();
     raw_global = 0;
     MPI_Allreduce(&raw_local, &raw_global, 1, get_mpi_type<size_t>(),
                   MPI_SUM, MPI_COMM_WORLD);
 
-    // --- Step 4: stream the discovery set into a plain vector ---------------
-    std::vector<state_t> local = drain_set_to_vector(grown, drain_chunk);
-    { std::set<state_t> tmp; std::swap(tmp, grown); }  // ensure set fully freed
     return local;
 }
 

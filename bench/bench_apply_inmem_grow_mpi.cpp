@@ -46,7 +46,7 @@
 // in-memory basis-build path
 #include "admin.hpp"              // get_permutation
 #include "basis_io_h5.hpp"        // basis_io::make_sector_string
-#include "basis_grow_mpi.hpp"     // seed DFS + scatter + grow + drain helpers
+#include "basis_grow_mpi.hpp"     // seed DFS + scatter + grow helpers
 
 #include <random>
 #include "timeit.hpp"
@@ -104,11 +104,6 @@ int main(int argc, char* argv[]){
               "DFS (total seeds >= this x world_size). The remaining incomplete "
               "DFS nodes are discarded.")
         .default_value(1000)
-        .scan<'i', int>();
-    prog.add_argument("--drain-chunk")
-        .help("states copied per chunk when streaming the discovery set into the "
-              "basis vector (larger = fewer iterations, same peak).")
-        .default_value(1<<20)
         .scan<'i', int>();
     prog.add_argument("--grow-batch")
         .help("frontier states per pipelined redistribution chunk during growth. "
@@ -240,7 +235,6 @@ int main(int argc, char* argv[]){
     auto target_sector = prog.get<std::vector<int>>("--sector");
     size_t seeds_per_rank = static_cast<size_t>(std::max(1, prog.get<int>("--seeds-per-rank")));
     size_t seed_target = seeds_per_rank * static_cast<size_t>(ctx.world_size);
-    size_t drain_chunk = static_cast<size_t>(std::max(1, prog.get<int>("--drain-chunk")));
     size_t grow_batch = static_cast<size_t>(std::max(1, prog.get<int>("--grow-batch")));
 
     if (ctx.my_rank == 0)
@@ -251,19 +245,20 @@ int main(int argc, char* argv[]){
     print_mem(ctx, "before seed DFS");
 
     // Seed DFS (rank 0) -> hash-scatter -> grow to the Hamiltonian-closure fixed
-    // point -> stream the discovery set into a plain vector. See basis_grow_mpi.hpp.
+    // point. The grown structure is already the sorted owned slice. See
+    // basis_grow_mpi.hpp.
     double t_build0 = MPI_Wtime();
     size_t raw_local = 0, raw_global = 0, n_rounds = 0;
     std::vector<state_t> found = basis_grow::build_grown_basis_local(
             lat, num_spinon_pairs, perm, target_sector, H_sym, ctx,
-            seeds_per_rank, drain_chunk, grow_batch, raw_local, raw_global, n_rounds);
+            seeds_per_rank, grow_batch, raw_local, raw_global, n_rounds);
 
     double t_build = MPI_Wtime() - t_build0, t_build_max = 0;
     MPI_Reduce(&t_build, &t_build_max, 1, MPI_DOUBLE, MPI_MAX, 0, MPI_COMM_WORLD);
     if (ctx.my_rank == 0)
         std::cout << "[build] growth converged in " << n_rounds << " rounds, "
                   << t_build_max << " s; raw basis dim=" << raw_global << "\n";
-    print_mem(ctx, "after drain (states in vector)");
+    print_mem(ctx, "after grow (states in vector)");
 
     // bench_one: adopt the given state slab into the basis structure, trim,
     // redistribute (which also sorts and rebuilds the search structures), then

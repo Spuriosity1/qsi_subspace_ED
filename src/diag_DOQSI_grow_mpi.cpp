@@ -6,7 +6,7 @@
 #include <mpi.h>
 
 #include "admin.hpp"               // get_permutation
-#include "basis_grow_mpi.hpp"      // seed DFS + scatter + grow + drain helpers
+#include "basis_grow_mpi.hpp"      // seed DFS + scatter + grow helpers
 #include "physics/geometry.hpp"
 
 #include "hamiltonian_setup.hpp"
@@ -67,11 +67,6 @@ int main(int argc, char* argv[]) {
               "DFS (total seeds >= this x world_size). The remaining incomplete "
               "DFS nodes are discarded.")
         .default_value(1000)
-        .scan<'i', int>();
-    prog.add_argument("--drain-chunk")
-        .help("states copied per chunk when streaming the discovery set into the "
-              "basis vector (larger = fewer iterations, same peak).")
-        .default_value(1<<20)
         .scan<'i', int>();
     prog.add_argument("--grow-batch")
         .help("frontier states per pipelined redistribution chunk during growth. "
@@ -177,7 +172,6 @@ int main(int argc, char* argv[]) {
     auto num_spinon_pairs = prog.get<int>("n_spinon_pairs");
     auto target_sector = prog.get<std::vector<int>>("--sector");
     size_t seeds_per_rank = static_cast<size_t>(std::max(1, prog.get<int>("--seeds-per-rank")));
-    size_t drain_chunk = static_cast<size_t>(std::max(1, prog.get<int>("--drain-chunk")));
     size_t grow_batch = static_cast<size_t>(std::max(1, prog.get<int>("--grow-batch")));
 
     if (ctx.my_rank == 0)
@@ -186,11 +180,11 @@ int main(int argc, char* argv[]) {
             << ", seeds/rank=" << seeds_per_rank << ") ...\n";
 
     // Seed DFS (rank 0) -> hash-scatter -> grow to the Hamiltonian-closure fixed
-    // point -> stream the discovery set into a plain vector.
+    // point. The grown structure is already the sorted owned slice.
     size_t raw_local = 0, raw_global = 0, n_rounds = 0;
     std::vector<Uint128> found = basis_grow::build_grown_basis_local(
             lat, num_spinon_pairs, perm, target_sector, H_sym, ctx,
-            seeds_per_rank, drain_chunk, grow_batch, raw_local, raw_global, n_rounds);
+            seeds_per_rank, grow_batch, raw_local, raw_global, n_rounds);
 
     if (ctx.my_rank == 0) {
         logging::log(logging::INFO) << "[Grow] Done! growth converged in "
