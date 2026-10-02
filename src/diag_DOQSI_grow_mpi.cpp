@@ -75,10 +75,10 @@ int main(int argc, char* argv[]) {
         .default_value(1<<16)
         .scan<'i', int>();
     prog.add_argument("--reserve-global")
-        .help("expected global basis dimension; if given, each rank reserves its "
-              "known-states vector up front (dim/world_size x1.5) so the build-time "
-              "memory peak stays near 1x the slice instead of the ~2x floor. "
-              "Over-estimates are RSS-free; 0 (default) disables.")
+        .help("expected global basis dimension; each rank reserves its known-states "
+              "vector up front (dim/world_size x1.5) so the build-time memory peak "
+              "stays near 1x the slice instead of the ~2x floor. Over-estimates are "
+              "RSS-free; 0 (default) uses the Pauling estimate (3/2)^(N/2).")
         .default_value(size_t{0})
         .scan<'u', size_t>();
 

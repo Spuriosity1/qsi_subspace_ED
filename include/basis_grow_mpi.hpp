@@ -53,6 +53,7 @@
 #include <vector>
 #include <algorithm>
 #include <numeric>
+#include <cmath>
 
 namespace projED {
 namespace basis_grow {
@@ -357,11 +358,12 @@ std::vector<state_t> grow_basis(std::vector<state_t>&& my_seeds,
 // states per pipelined redistribution chunk (bounds peak comm memory). raw_local
 // is set to this
 // rank's owned count, raw_global to the summed global dim, n_rounds to the
-// number of growth rounds. expected_global, if non-zero, is the anticipated
-// global basis dimension; it is used only to reserve each rank's `known` vector
-// up front (expected_global / world_size, with margin for hash imbalance) so the
+// number of growth rounds. expected_global is the anticipated global basis
+// dimension; it is used only to reserve each rank's `known` vector up front
+// (expected_global / world_size, with margin for hash imbalance) so the
 // build-time memory peak stays near 1x the slice instead of the ~2x floor -- an
 // over-estimate is harmless (RSS-free), an under-estimate merely reallocates.
+// If zero, it defaults to Pauling's ice-rule degeneracy (3/2)^(N/2).
 template <typename coeff_t>
 std::vector<state_t> build_grown_basis_local(
         const lattice& lat, int num_spinon_pairs,
@@ -395,12 +397,30 @@ std::vector<state_t> build_grown_basis_local(
 
     // --- Step 3: grow to the Hamiltonian-closure fixed point ----------------
     // The grown structure is already the sorted, deduplicated owned slice, so it
-    // is returned directly -- there is no separate drain. Reserve to the expected
-    // per-rank share (x1.5 margin for hash imbalance) when a global estimate is
-    // given; over-reservation costs only VSZ, not RSS.
-    const size_t reserve_local = expected_global
-        ? static_cast<size_t>((expected_global / static_cast<double>(ctx.world_size)) * 1.5)
+    // is returned directly -- there is no separate drain.
+    //
+    // Reserve `known` to the expected per-rank share (x1.5 margin for hash
+    // imbalance); over-reservation costs only VSZ, not RSS. When the caller gives
+    // no explicit estimate, default to Pauling's ice-rule degeneracy
+    // W = (3/2)^(N/2) (N = number of spins) -- the mean-field count of 2-in-2-out
+    // states. It estimates the whole ice manifold, so it is a safe, slightly
+    // loose over-estimate of any single polarization sector and thus a good
+    // reserve target. Guard against lattices so large the estimate overflows:
+    // above ~1e13 states the basis could never fit in memory anyway, so fall back
+    // to no reserve (the backward merge still works, at the ~2x floor).
+    size_t estimate = expected_global;
+    if (estimate == 0) {
+        const double W = std::pow(1.5, lat.spins.size() / 2.0);
+        if (std::isfinite(W) && W < 1e13) estimate = static_cast<size_t>(W);
+    }
+    const size_t reserve_local = estimate
+        ? static_cast<size_t>((estimate / static_cast<double>(ctx.world_size)) * 1.5)
         : 0;
+    if (ctx.my_rank == 0)
+        logging::log(logging::INFO)
+            << "[grow] reserving known to " << reserve_local << " states/rank"
+            << (expected_global ? " (from --reserve-global)"
+                                : " (Pauling (3/2)^(N/2) default)") << "\n";
     std::vector<state_t> local = grow_basis(std::move(my_seeds), H, ctx,
                                             grow_batch, reserve_local, n_rounds);
 
