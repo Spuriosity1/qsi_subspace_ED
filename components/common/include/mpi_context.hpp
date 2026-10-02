@@ -25,6 +25,22 @@ inline size_t rss_bytes() {
     return 0;
 }
 
+// Returns the peak resident set size (high-water mark) in bytes from
+// /proc/self/status (Linux). Unlike rss_bytes() this is monotonic over the
+// process lifetime, so it captures transient allocation spikes that occur
+// between sample points. Returns 0 where unsupported (e.g. macOS).
+inline size_t rss_peak_bytes() {
+    std::ifstream f("/proc/self/status");
+    std::string line;
+    while (std::getline(f, line)) {
+        if (line.rfind("VmHWM:", 0) == 0) {
+            size_t kb = std::stoull(line.substr(6));
+            return kb * 1024;
+        }
+    }
+    return 0;
+}
+
 // MPI datatype helper
 template<typename T>
 MPI_Datatype get_mpi_type();

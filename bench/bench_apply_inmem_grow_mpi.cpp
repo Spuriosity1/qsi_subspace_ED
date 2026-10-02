@@ -59,14 +59,16 @@
 
 static void print_mem(const MPIHashContext& ctx, const char* label) {
     size_t rss = rss_bytes();
-    size_t rss_max = 0;
-    MPI_Reduce(&rss, &rss_max, 1, get_mpi_type<size_t>(), MPI_MAX, 0, MPI_COMM_WORLD);
-    size_t rss_sum = 0;
-    MPI_Reduce(&rss, &rss_sum, 1, get_mpi_type<size_t>(), MPI_SUM, 0, MPI_COMM_WORLD);
+    size_t peak = rss_peak_bytes();
+    size_t rss_max = 0, peak_max = 0, rss_sum = 0;
+    MPI_Reduce(&rss,  &rss_max,  1, get_mpi_type<size_t>(), MPI_MAX, 0, MPI_COMM_WORLD);
+    MPI_Reduce(&peak, &peak_max, 1, get_mpi_type<size_t>(), MPI_MAX, 0, MPI_COMM_WORLD);
+    MPI_Reduce(&rss,  &rss_sum,  1, get_mpi_type<size_t>(), MPI_SUM, 0, MPI_COMM_WORLD);
     if (ctx.my_rank == 0)
         std::cout << "[mem] " << label
-                  << "  max=" << rss_max / (1<<20) << " MiB"
-                  << "  total=" << rss_sum / (1<<20) << " MiB\n";
+                  << "  cur_max=" << rss_max / (1<<20) << " MiB"
+                  << "  peak_max=" << peak_max / (1<<20) << " MiB"
+                  << "  cur_total=" << rss_sum / (1<<20) << " MiB\n";
 }
 
 
@@ -111,6 +113,13 @@ int main(int argc, char* argv[]){
               "node counts / tight RAM.")
         .default_value(1<<16)
         .scan<'i', int>();
+    prog.add_argument("--reserve-global")
+        .help("expected global basis dimension; if given, each rank reserves its "
+              "known-states vector up front (dim/world_size x1.5) so the build-time "
+              "memory peak stays near 1x the slice instead of the ~2x floor. "
+              "Over-estimates are RSS-free; 0 (default) disables.")
+        .default_value(size_t{0})
+        .scan<'u', size_t>();
 
     // ---- apply/benchmark options (mirror bench_apply_mpi) ------------------
     prog.add_argument("--seed")
@@ -123,7 +132,7 @@ int main(int argc, char* argv[]){
     // under conjugation it would drop states that are still images of kept
     // states, breaking the apply.
     prog.add_argument("--basis-type")
-        .help("Basis search structure: bst | interp | fast  (default: run all three)")
+        .help("Basis search structure: bst | interp | fast | none  (default: run all three; none=build basis only)")
         .default_value(std::string("all"));
     prog.add_argument("--interp-bits")
         .help("For interp basis: high bits of uint64[1] used as bounds-map key (1-64, default 64).")
@@ -160,8 +169,8 @@ int main(int argc, char* argv[]){
     }
 
     auto bt = prog.get<std::string>("--basis-type");
-    if (bt != "all" && bt != "bst" && bt != "interp" && bt != "fast") {
-        std::cerr << "Invalid --basis-type '" << bt << "'. Must be one of: bst, interp, fast, all\n";
+    if (bt != "all" && bt != "bst" && bt != "interp" && bt != "fast" && bt != "none") {
+        std::cerr << "Invalid --basis-type '" << bt << "'. Must be one of: bst, interp, fast, all, none\n";
         std::cerr << prog;
         return 1;
     }
@@ -236,6 +245,7 @@ int main(int argc, char* argv[]){
     size_t seeds_per_rank = static_cast<size_t>(std::max(1, prog.get<int>("--seeds-per-rank")));
     size_t seed_target = seeds_per_rank * static_cast<size_t>(ctx.world_size);
     size_t grow_batch = static_cast<size_t>(std::max(1, prog.get<int>("--grow-batch")));
+    size_t reserve_global = prog.get<size_t>("--reserve-global");
 
     if (ctx.my_rank == 0)
         std::cout << "[build] growing basis in-memory (sector="
@@ -251,7 +261,7 @@ int main(int argc, char* argv[]){
     size_t raw_local = 0, raw_global = 0, n_rounds = 0;
     std::vector<state_t> found = basis_grow::build_grown_basis_local(
             lat, num_spinon_pairs, perm, target_sector, H_sym, ctx,
-            seeds_per_rank, grow_batch, raw_local, raw_global, n_rounds);
+            seeds_per_rank, grow_batch, reserve_global, raw_local, raw_global, n_rounds);
 
     double t_build = MPI_Wtime() - t_build0, t_build_max = 0;
     MPI_Reduce(&t_build, &t_build_max, 1, MPI_DOUBLE, MPI_MAX, 0, MPI_COMM_WORLD);
@@ -259,6 +269,30 @@ int main(int argc, char* argv[]){
         std::cout << "[build] growth converged in " << n_rounds << " rounds, "
                   << t_build_max << " s; raw basis dim=" << raw_global << "\n";
     print_mem(ctx, "after grow (states in vector)");
+
+    // Memory validation: peak RSS during the build must stay below 2x the owned
+    // basis-vector size. VmHWM is monotonic, so read right after grow (before
+    // adopt/apply allocate more) it is exactly the build-phase high-water mark.
+    // Report the worst per-rank ratio -- the tightest statement -- alongside the
+    // global basis-vector footprint so the absolute scale is visible too.
+    {
+        const size_t vec_bytes  = raw_local * sizeof(state_t);
+        const size_t peak_bytes = rss_peak_bytes();
+        double ratio = vec_bytes ? static_cast<double>(peak_bytes) / vec_bytes : 0.0;
+        double ratio_max = 0.0;
+        size_t vec_bytes_sum = 0, peak_max = 0;
+        MPI_Reduce(&ratio,      &ratio_max,     1, MPI_DOUBLE,            MPI_MAX, 0, MPI_COMM_WORLD);
+        MPI_Reduce(&peak_bytes, &peak_max,      1, get_mpi_type<size_t>(), MPI_MAX, 0, MPI_COMM_WORLD);
+        MPI_Reduce(&vec_bytes,  &vec_bytes_sum, 1, get_mpi_type<size_t>(), MPI_SUM, 0, MPI_COMM_WORLD);
+        if (ctx.my_rank == 0) {
+            std::cout << "[mem-check] basis vector = " << vec_bytes_sum / (1<<20)
+                      << " MiB global (" << raw_global << " states x "
+                      << sizeof(state_t) << " B); worst per-rank peak/vector = "
+                      << ratio_max << "x; peak_max=" << peak_max / (1<<20) << " MiB\n"
+                      << "[mem-check] " << (ratio_max <= 2.0 ? "PASS" : "FAIL")
+                      << " (budget 2.0x)\n";
+        }
+    }
 
     // bench_one: adopt the given state slab into the basis structure, trim,
     // redistribute (which also sorts and rebuilds the search structures), then

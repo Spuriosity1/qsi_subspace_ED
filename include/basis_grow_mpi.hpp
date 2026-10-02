@@ -176,6 +176,7 @@ std::vector<state_t> grow_basis(std::vector<state_t>&& my_seeds,
                                 const SymbolicOpSum<coeff_t>& H,
                                 const MPIHashContext& ctx,
                                 size_t chunk_frontier,
+                                size_t reserve_local,
                                 size_t& n_rounds)
 {
     const int N = ctx.world_size;
@@ -188,6 +189,16 @@ std::vector<state_t> grow_basis(std::vector<state_t>&& my_seeds,
     std::vector<state_t> known = my_seeds;
     std::vector<state_t> frontier = my_seeds;
     { std::vector<state_t> tmp; std::swap(tmp, my_seeds); }  // free seeds
+
+    // If the caller supplied an expected owned-slice size, reserve `known` to it
+    // up front. Over-reservation is RSS-free (untouched pages are VSZ, not RSS),
+    // so this never inflates resident memory, but it ensures the per-round growth
+    // below never reallocates across the final size -- the reallocation that
+    // crosses B is what transiently doubles `known` and sets the ~2x build-time
+    // peak. With the reserve in place the peak is ~1x the slice plus one
+    // wavefront. Without it (reserve_local == 0) growth still works, falling back
+    // to the 2x floor.
+    if (reserve_local > known.capacity()) known.reserve(reserve_local);
 
     // One in-flight chunk: its hash-bucketed send/recv buffers and the two
     // nonblocking-collective requests it owns. Three slots are enough to keep
@@ -309,14 +320,26 @@ std::vector<state_t> grow_basis(std::vector<state_t>&& my_seeds,
                 harvest(slot[(it - 2) % 3]);
         }
 
-        // Incorporate this round's discoveries: merge `round_new` into the
-        // sorted `known` once, then hand it to the next round as the frontier.
-        // round_new is sorted and disjoint from known, so a single inplace_merge
-        // restores the sorted+unique invariant. The swap also recycles the old
-        // frontier's storage into round_new (cleared at the top of next round).
-        const size_t old = known.size();
-        known.insert(known.end(), round_new.begin(), round_new.end());
-        std::inplace_merge(known.begin(), known.begin() + old, known.end());
+        // Incorporate this round's discoveries into the sorted `known`, then hand
+        // them to the next round as the frontier. round_new is sorted and
+        // disjoint from known, so we merge the two sorted runs *backwards* in
+        // place: grow known to K+R (no reallocation when the reserve above has
+        // sized it past the final slice) and fill it from the high end, reading
+        // the old known prefix and round_new and never overwriting an unread
+        // element (out >= i throughout). This replaces std::inplace_merge, whose
+        // temp buffer scales with the whole merged range (~B at the last round)
+        // and is the other half of the 2x floor; here the only extra memory is
+        // round_new itself (one wavefront), which we then reuse as the frontier.
+        const size_t K = known.size();
+        const size_t R = round_new.size();
+        known.resize(K + R);
+        size_t i = K, j = R, out = K + R;
+        while (j > 0) {
+            if (i > 0 && round_new[j - 1] < known[i - 1])
+                known[--out] = known[--i];
+            else
+                known[--out] = round_new[--j];
+        }
         std::swap(frontier, round_new);
         ++round;
     }
@@ -334,7 +357,11 @@ std::vector<state_t> grow_basis(std::vector<state_t>&& my_seeds,
 // states per pipelined redistribution chunk (bounds peak comm memory). raw_local
 // is set to this
 // rank's owned count, raw_global to the summed global dim, n_rounds to the
-// number of growth rounds.
+// number of growth rounds. expected_global, if non-zero, is the anticipated
+// global basis dimension; it is used only to reserve each rank's `known` vector
+// up front (expected_global / world_size, with margin for hash imbalance) so the
+// build-time memory peak stays near 1x the slice instead of the ~2x floor -- an
+// over-estimate is harmless (RSS-free), an under-estimate merely reallocates.
 template <typename coeff_t>
 std::vector<state_t> build_grown_basis_local(
         const lattice& lat, int num_spinon_pairs,
@@ -342,7 +369,7 @@ std::vector<state_t> build_grown_basis_local(
         const std::vector<int>& sector,
         const SymbolicOpSum<coeff_t>& H,
         const MPIHashContext& ctx,
-        size_t seeds_per_rank, size_t grow_batch,
+        size_t seeds_per_rank, size_t grow_batch, size_t expected_global,
         size_t& raw_local, size_t& raw_global, size_t& n_rounds)
 {
     const size_t seed_target = seeds_per_rank * static_cast<size_t>(ctx.world_size);
@@ -368,9 +395,14 @@ std::vector<state_t> build_grown_basis_local(
 
     // --- Step 3: grow to the Hamiltonian-closure fixed point ----------------
     // The grown structure is already the sorted, deduplicated owned slice, so it
-    // is returned directly -- there is no separate drain.
+    // is returned directly -- there is no separate drain. Reserve to the expected
+    // per-rank share (x1.5 margin for hash imbalance) when a global estimate is
+    // given; over-reservation costs only VSZ, not RSS.
+    const size_t reserve_local = expected_global
+        ? static_cast<size_t>((expected_global / static_cast<double>(ctx.world_size)) * 1.5)
+        : 0;
     std::vector<state_t> local = grow_basis(std::move(my_seeds), H, ctx,
-                                            grow_batch, n_rounds);
+                                            grow_batch, reserve_local, n_rounds);
 
     raw_local = local.size();
     raw_global = 0;
