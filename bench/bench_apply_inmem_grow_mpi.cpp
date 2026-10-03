@@ -352,17 +352,23 @@ int main(int argc, char* argv[]){
         int n_counted = 0;
         for (int rep = 0; rep < repeats; rep++) {
             std::fill(u.begin(), u.end(), 0.0);
+            bool warmup = (repeats > 1 && rep == 0);
+            // Flushed start marker: a single matvec here is a build-sized
+            // operation, so without this the run is opaque until the rep
+            // returns (and the line is lost entirely on a wall-clock SIGKILL).
             if (ctx.my_rank == 0)
-                std::cout << "[" << tag << "] u += Av rep " << rep << ": ";
+                std::cout << "[" << tag << "] u += Av rep " << rep
+                          << (warmup ? " (warm-up)" : "") << " started..." << std::endl;
             MPI_Barrier(MPI_COMM_WORLD);
             double t0 = MPI_Wtime();
             H.evaluate_add(v.data(), u.data());
             double dt = MPI_Wtime() - t0, dt_max = 0;
             MPI_Reduce(&dt, &dt_max, 1, MPI_DOUBLE, MPI_MAX, 0, MPI_COMM_WORLD);
 
-            bool warmup = (repeats > 1 && rep == 0);
             if (ctx.my_rank == 0)
-                std::cout << dt_max * 1e3 << " ms" << (warmup ? " (warm-up)" : "") << "\n";
+                std::cout << "[" << tag << "] u += Av rep " << rep << ": "
+                          << dt_max * 1e3 << " ms" << (warmup ? " (warm-up)" : "")
+                          << std::endl;
 
             if (!warmup) {
                 t_min = (n_counted == 0) ? dt_max : std::min(t_min, dt_max);

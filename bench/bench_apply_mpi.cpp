@@ -172,7 +172,7 @@ int main(int argc, char* argv[]){
                 std::cout << "[" << tag << "] hi_mask=0x" << std::hex << interp_hi_mask
                           << std::dec << " (" << interp_bits << " bits, max "
                           << (1ULL << std::min(interp_bits, 20)) << (interp_bits > 20 ? "..." : "")
-                          << " entries)\n";
+                          << " entries)" <<std::endl;
         }
         print_mem(ctx, (std::string(tag) + " before load").c_str());
         TIMEIT((std::string("[") + tag + "] load raw").c_str(), load_basis_raw(basis, prog);)
@@ -241,7 +241,7 @@ int main(int argc, char* argv[]){
         if (ctx.my_rank == 0 && n_counted > 1)
             std::cout << "[" << tag << "] u += Av summary over " << n_counted
                       << " repeats: min=" << t_min * 1e3
-                      << " ms  avg=" << t_sum / n_counted * 1e3 << " ms\n";
+                      << " ms  avg=" << t_sum / n_counted * 1e3 << " ms"<<std::endl;
 
         // Global checksum of u so different strategies can be cross-checked:
         // sum and sum-of-squares over the whole distributed vector. Parallel
@@ -271,7 +271,7 @@ int main(int argc, char* argv[]){
                       << " avg_ms=" << t_sum / n_counted * 1e3
                       << " sum=" << std::setprecision(12) << glob_sum
                       << " sumsq=" << std::setprecision(12) << glob_sq
-                      << "\n";
+                      << std::endl;
         }
         print_mem(ctx, (std::string(tag) + " after apply").c_str());
     };
