@@ -311,7 +311,7 @@ int main(int argc, char* argv[]){
         // No trim: the grown basis is already the exact H-closure of the seeds.
         print_mem(ctx, (std::string(tag) + " after adopt").c_str());
 
-        TIMEIT((std::string("[") + tag + "] redistribute").c_str(), basis.redistribute();)
+        basis.redistribute();
         print_mem(ctx, (std::string(tag) + " after redistribute").c_str());
 
         if (ctx.my_rank == 0)

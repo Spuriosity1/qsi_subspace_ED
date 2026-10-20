@@ -328,7 +328,7 @@ int main(int argc, char* argv[]){
         if (!prog.get<bool>("--notrim")) basis.remove_null_states(H_sym);
         print_mem(ctx, (std::string(tag) + " after trim").c_str());
 
-        TIMEIT((std::string("[") + tag + "] redistribute").c_str(), basis.redistribute();)
+        BENCH_TIMER_TIMEIT((std::string("[") + tag + "] redistribute").c_str(), basis.redistribute();)
         print_mem(ctx, (std::string(tag) + " after redistribute").c_str());
 
         if (ctx.my_rank == 0)

@@ -106,6 +106,57 @@ int ZBasisInterp::search(const state_t& state, idx_t& J) const {
 }
 
 
+void ZBasisInterp::search_batch(const state_t* q, idx_t n, idx_t* out) const {
+    const __uint128_t* arr = reinterpret_cast<const __uint128_t*>(states.data());
+    const idx_t N = (idx_t)states.size();
+    if (N == 0) { for (idx_t i = 0; i < n; ++i) out[i] = -1; return; }
+
+    constexpr int MAX_GROUP = 32;
+    static const int GROUP = [] {
+        const char* e = std::getenv("APPLY_SEARCH_GROUP");
+        int g = e ? std::atoi(e) : 8;
+        return g < 1 ? 1 : (g > MAX_GROUP ? MAX_GROUP : g);
+    }();
+
+    // One iteration count covers the widest possible window. Queries converge in
+    // place; already-converged lanes (lo>=hi) are skipped, so narrow windows --
+    // the common case with the default mask -- cost only the branch.
+    int iters = 1;
+    while ((idx_t(1) << iters) < N) ++iters;
+    ++iters;
+
+    idx_t lo[MAX_GROUP], hi[MAX_GROUP], mid[MAX_GROUP];
+    for (idx_t base = 0; base < n; base += GROUP) {
+        const int g = (int)std::min<idx_t>(GROUP, n - base);
+        // Phase 1: hash the window bounds (scalar; the map is small/warm). An
+        // absent key means no state shares those high bits -> no match possible;
+        // park the lane at [0,0) so it is skipped and fails the final compare.
+        for (int k = 0; k < g; ++k) {
+            uint64_t key = q[base + k].uint64[1] & hi_mask;
+            auto it = bounds.find(key);
+            if (it == bounds.end()) { lo[k] = 0; hi[k] = 0; }
+            else { lo[k] = it->second.first; hi[k] = it->second.second + 1; }
+        }
+        // Phase 2: interleaved prefetched binary search over the windows.
+        for (int it = 0; it < iters; ++it) {
+            for (int k = 0; k < g; ++k) {
+                mid[k] = (lo[k] + hi[k]) >> 1;
+                __builtin_prefetch(arr + mid[k], 0, 0);
+            }
+            for (int k = 0; k < g; ++k) {
+                if (lo[k] >= hi[k]) continue;
+                if (arr[mid[k]] < q[base + k].uint128) lo[k] = mid[k] + 1;
+                else                                   hi[k] = mid[k];
+            }
+        }
+        for (int k = 0; k < g; ++k) {
+            const idx_t p = lo[k];
+            out[base + k] = (p < N && arr[p] == q[base + k].uint128) ? p : -1;
+        }
+    }
+}
+
+
 void ZBasisInterp::find_bounds(){
     bounds.clear();
     for (idx_t J = 0; J < dim(); J++) {
@@ -236,6 +287,65 @@ int ZBasisBSTFast::search(const state_t& state, idx_t& J) const {
         if (arr[J] == state) return 1;
     }
     return 0;
+}
+
+
+void ZBasisBSTFast::search_batch(const state_t* q, idx_t n, idx_t* out) const {
+    const __uint128_t* arr  = reinterpret_cast<const __uint128_t*>(states.data());
+    const __uint128_t* sarr = reinterpret_cast<const __uint128_t*>(sentinels.data());
+    const idx_t N = (idx_t)states.size();
+    if (N == 0) { for (idx_t i = 0; i < n; ++i) out[i] = -1; return; }
+    const idx_t S = (idx_t)sentinels.size();
+
+    constexpr int MAX_GROUP = 32;
+    static const int GROUP = [] {
+        const char* e = std::getenv("APPLY_SEARCH_GROUP");
+        int g = e ? std::atoi(e) : 8;
+        return g < 1 ? 1 : (g > MAX_GROUP ? MAX_GROUP : g);
+    }();
+
+    // The in-array window is at most `stride` wide, except below the last
+    // sentinel where it runs to the end of the array and can reach ~2*stride.
+    // Size the (shared) iteration count to that worst case, clamped to N.
+    const idx_t wmax = std::min<idx_t>(2 * stride + 1, N);
+    int iters = 1;
+    while ((idx_t(1) << iters) < wmax) ++iters;
+    ++iters;
+
+    idx_t lo[MAX_GROUP], hi[MAX_GROUP], mid[MAX_GROUP];
+    for (idx_t base = 0; base < n; base += GROUP) {
+        const int g = (int)std::min<idx_t>(GROUP, n - base);
+        // Phase 1: warm sentinel search per query -> [lo, hi) window in states.
+        // sentinels live in L3, so this scalar pass is effectively free.
+        for (int k = 0; k < g; ++k) {
+            const __uint128_t key = q[base + k].uint128;
+            idx_t sl = 0, sr = S - 1;
+            while (sl < sr) {
+                idx_t sm = sl + (sr - sl) / 2;
+                if (sarr[sm] < key) sl = sm + 1;
+                else                sr = sm;
+            }
+            lo[k] = (sl > 0) ? (sl - 1) * stride : 0;
+            // Below the last sentinel the window runs to the end of the array.
+            hi[k] = (sl < S - 1) ? (sl * stride + 1) : N;
+        }
+        // Phase 2: interleaved prefetched binary search within each window.
+        for (int it = 0; it < iters; ++it) {
+            for (int k = 0; k < g; ++k) {
+                mid[k] = (lo[k] + hi[k]) >> 1;
+                __builtin_prefetch(arr + mid[k], 0, 0);
+            }
+            for (int k = 0; k < g; ++k) {
+                if (lo[k] >= hi[k]) continue;
+                if (arr[mid[k]] < q[base + k].uint128) lo[k] = mid[k] + 1;
+                else                                   hi[k] = mid[k];
+            }
+        }
+        for (int k = 0; k < g; ++k) {
+            const idx_t p = lo[k];
+            out[base + k] = (p < N && arr[p] == q[base + k].uint128) ? p : -1;
+        }
+    }
 }
 
 

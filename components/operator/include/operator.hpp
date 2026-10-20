@@ -127,10 +127,18 @@ struct ZBasisBase {
 	// search: several independent probes are kept in flight so their DRAM
 	// misses overlap (memory-level parallelism) instead of stalling one
 	// dependent miss at a time. out[i] = index of q[i] in the sorted array, or
-	// -1 if absent. Operates on the raw sorted array (bypasses the derived
-	// acceleration structures). Single-threaded; the parallelism is over
-	// outstanding memory requests, not cores.
-	void search_batch(const state_t* q, idx_t n, idx_t* out) const;
+	// -1 if absent. Single-threaded; the parallelism is over outstanding memory
+	// requests, not cores.
+	//
+	// The base implementation is a plain grouped binary search over the raw
+	// sorted array (this is exactly ZBasisBST's algorithm). Derived types that
+	// carry an acceleration structure (ZBasisInterp, ZBasisBSTFast) override it
+	// to fold that structure into the batched probe schedule, so the MLP win and
+	// the algorithmic win compose instead of being mutually exclusive. Calls go
+	// through the concrete basis type (the apply is templated on it), so this
+	// devirtualises -- `virtual` is only here so a ZBasisBase* would still pick
+	// the right override.
+	virtual void search_batch(const state_t* q, idx_t n, idx_t* out) const;
 
 	void load_from_file(const fs::path& bfile, const std::string& dataset="basis");
 
@@ -170,6 +178,10 @@ size_t insert_states(std::vector<ZBasisBST::state_t>& states,
 
 struct ZBasisInterp : public ZBasisBST {
     int search(const state_t& state, idx_t& J) const;
+    // Batched interpolation: resolve each query's [left,right) window from the
+    // bounds map, then run one prefetched interleaved binary search over all the
+    // (narrow) windows in the group at once.
+    void search_batch(const state_t* q, idx_t n, idx_t* out) const override;
     // Number of bounds map entries. Each entry costs ~56 bytes of unordered_map overhead.
     // With the default mask (~0ULL) this equals the number of distinct upper-64-bit values.
     // Reducing hi_mask (fewer set bits) collapses multiple keys into one, trading map
@@ -205,6 +217,11 @@ struct ZBasisInterp : public ZBasisBST {
 // For N = 1e9, stride ~ 4096: cold DRAM accesses drop from 30 to ~12.
 struct ZBasisBSTFast : public ZBasisBST {
     int search(const state_t& state, idx_t& J) const;
+    // Batched sentinel search: resolve each query to its stride-sized window via
+    // the warm (L3-resident) sentinel index -- done scalar, it is cache-hot --
+    // then run one prefetched interleaved binary search over all the windows in
+    // the group, so only the ~log2(stride) cold in-array probes are stacked.
+    void search_batch(const state_t* q, idx_t n, idx_t* out) const override;
     protected:
     void on_states_changed() noexcept override { build_sentinels(); }
     private:

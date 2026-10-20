@@ -22,6 +22,18 @@
 #define ASSERT_STATE_FOUND(error_msg, state, result) result
 #endif
 
+// Scatter prefetch distance for the batched resolve-and-accumulate: how many
+// records ahead to prefetch the random y[idx] write target. Read once from
+// APPLY_SCATTER_PD (0 disables); shared by every batched apply path.
+static inline int scatter_prefetch_distance() {
+    static const int PD = [] {
+        const char* e = std::getenv("APPLY_SCATTER_PD");
+        int d = e ? std::atoi(e) : 16;
+        return d < 0 ? 0 : d;
+    }();
+    return PD;
+}
+
 #ifdef DEBUG
 #define DEBUG_PRINT_VEC(msg, op_index, vector, ctx) \
             ctx.log(logging::DEBUG) << msg<<" (op "<<op_index<<") [node "<<ctx.my_rank<< "]\n";\
@@ -753,12 +765,28 @@ void MPILazyOpSum<coeff_t, B>::apply_recvs(int slot, size_t oi,
     const auto& rstate = recv_state_ring[slot];
     const auto& rdy    = recv_dy_ring[slot];
     const int64_t n = op_comm_metadata[oi].recv_total;
-    _Pragma("omp parallel for schedule(static)")
-    for (int64_t j = 0; j < n; ++j) {
-        idx_t idx;
-        ASSERT_STATE_FOUND("remote", rstate[j],
-                basis.search(rstate[j], idx));
-        y[idx] += rdy[j];
+    const int64_t PD = scatter_prefetch_distance();
+    // Batched, prefetched resolve-and-accumulate. The search keeps GROUP probes
+    // in flight (search_batch); the scatter prefetches the random y write PD
+    // records ahead. Injectivity of a single off-diagonal operator means no two
+    // records resolve to the same y[idx], so disjoint CHUNKs are race-free and
+    // threadable with no atomics; each thread batches its own CHUNK.
+    constexpr int64_t CHUNK = 8192;
+    _Pragma("omp parallel")
+    {
+        std::vector<idx_t> idxbuf(CHUNK);
+        _Pragma("omp for schedule(static)")
+        for (int64_t c = 0; c < n; c += CHUNK) {
+            const int64_t m = std::min<int64_t>(CHUNK, n - c);
+            basis.search_batch(&rstate[c], m, idxbuf.data());
+            for (int64_t k = 0; k < m; ++k) {
+                if (k + PD < m && idxbuf[k + PD] >= 0)
+                    __builtin_prefetch(&y[idxbuf[k + PD]], 1, 0);
+                const idx_t p = idxbuf[k];
+                ASSERT_STATE_FOUND("remote", rstate[c + k], (p >= 0));
+                if (p >= 0) y[p] += rdy[c + k];
+            }
+        }
     }
     )
 }
@@ -919,12 +947,26 @@ evaluate_add_off_diag_prealloc_p2p(const coeff_t* x, coeff_t* y) const
         const int cnt  = md.recv_sizes[peer];
         const auto& rstate = recv_state_ring[slot];
         const auto& rdy    = recv_dy_ring[slot];
-        _Pragma("omp parallel for schedule(static)")
-        for (int k = 0; k < cnt; ++k) {
-            ZBasisBase::idx_t idx;
-            ASSERT_STATE_FOUND("remote", rstate[base + k],
-                    basis.search(rstate[base + k], idx));
-            y[idx] += rdy[base + k];
+        const int PD = scatter_prefetch_distance();
+        // Batched, prefetched resolve-and-accumulate over this peer's contiguous
+        // recv slice (see apply_recvs for the injectivity/race argument). Each
+        // thread batches its own CHUNK of the slice.
+        constexpr int CHUNK = 8192;
+        _Pragma("omp parallel")
+        {
+            std::vector<ZBasisBase::idx_t> idxbuf(CHUNK);
+            _Pragma("omp for schedule(static)")
+            for (int c = 0; c < cnt; c += CHUNK) {
+                const int m = std::min(CHUNK, cnt - c);
+                basis.search_batch(&rstate[base + c], m, idxbuf.data());
+                for (int k = 0; k < m; ++k) {
+                    if (k + PD < m && idxbuf[k + PD] >= 0)
+                        __builtin_prefetch(&y[idxbuf[k + PD]], 1, 0);
+                    const ZBasisBase::idx_t p = idxbuf[k];
+                    ASSERT_STATE_FOUND("remote", rstate[base + c + k], (p >= 0));
+                    if (p >= 0) y[p] += rdy[base + c + k];
+                }
+            }
         }
         )
     };
