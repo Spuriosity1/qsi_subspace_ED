@@ -4,6 +4,7 @@
 #include <nlohmann/json.hpp>
 #include "hamiltonian_setup.hpp"
 #include "lanczos_cli.hpp"
+#include "basis_cli.hpp"
 #include "operator_matrix.hpp"
 #include "hamiltonian_setup.hpp"
 #include "matrix_diag_bits.hpp"
@@ -72,7 +73,8 @@ int main(int argc, char* argv[]) {
 
     // more numerical options:
     provide_lanczos_options(prog);
-		
+    provide_basis_options(prog);
+
     try {
         prog.parse_args(argc, argv);
     } catch (const std::exception& err){
@@ -93,8 +95,12 @@ int main(int argc, char* argv[]) {
 	jfile >> jdata;
 
 	// Step 2: Load basis from H5
+    BasisType basis_type = parse_basis_type(prog);
+    int n_spins = jdata.at("atoms").size();
+    uint64_t interp_hi_mask = compute_interp_hi_mask(n_spins, prog.get<int>("--interp-bits"));
+
+    auto run = [&](auto& basis) -> int {
     std::cout<<"Loading basis..."<<std::endl;
-	ZBasisInterp basis;
 
     load_basis(basis, prog);
 
@@ -168,13 +174,15 @@ int main(int argc, char* argv[]) {
                 latfile.filename() );
         std::string dset_name = prog.is_used("--sector") ?
              prog.get<std::string>("--sector") : "basis";
-        write_string_to_hdf5(file_id, "dset_name", 
+        write_string_to_hdf5(file_id, "dset_name",
                 dset_name );
     }
 
+    H5Fclose(file_id);
 
+    return 0;
+    }; // end run lambda
 
-
-	return 0;
+    return with_serial_basis(basis_type, interp_hi_mask, run);
 }
 

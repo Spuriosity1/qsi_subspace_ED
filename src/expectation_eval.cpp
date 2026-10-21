@@ -68,6 +68,20 @@ compute_all_expectations<LazyOpSum<double, ZBasisBST>>(
     );
 
 
+template std::vector<double>
+compute_all_expectations<LazyOpSum<double, ZBasisInterp>>(
+    const Eigen::MatrixXd& eigenvectors,
+    const std::vector<LazyOpSum<double, ZBasisInterp>>& ops
+    );
+
+
+template std::vector<double>
+compute_all_expectations<LazyOpSum<double, ZBasisBSTFast>>(
+    const Eigen::MatrixXd& eigenvectors,
+    const std::vector<LazyOpSum<double, ZBasisBSTFast>>& ops
+    );
+
+
 
 
 template<typename T>
@@ -118,6 +132,20 @@ template std::vector<double>
 compute_cross_correlation<LazyOpSum<double, ZBasisBST>>(
     const Eigen::MatrixXd& eigenvectors,
     const std::vector<LazyOpSum<double, ZBasisBST>>& ops
+    );
+
+
+template std::vector<double>
+compute_cross_correlation<LazyOpSum<double, ZBasisInterp>>(
+    const Eigen::MatrixXd& eigenvectors,
+    const std::vector<LazyOpSum<double, ZBasisInterp>>& ops
+    );
+
+
+template std::vector<double>
+compute_cross_correlation<LazyOpSum<double, ZBasisBSTFast>>(
+    const Eigen::MatrixXd& eigenvectors,
+    const std::vector<LazyOpSum<double, ZBasisBSTFast>>& ops
     );
 
 

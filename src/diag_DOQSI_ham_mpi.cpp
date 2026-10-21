@@ -7,6 +7,7 @@
 #include "lanczos_mpi.hpp"
 #include "lanczos_cli.hpp"
 #include "logging_cli.hpp"
+#include "basis_cli_mpi.hpp"
 #include "expectation_eval.hpp"
 #include <fstream>
 #include <filesystem>
@@ -64,6 +65,7 @@ int main(int argc, char* argv[]) {
 
     provide_lanczos_options(prog);
     provide_logging_options(prog);
+    provide_basis_options(prog);
     prog.add_argument("--n_spinons")
         .default_value(0)
         .scan<'i', int>();
@@ -143,7 +145,11 @@ int main(int argc, char* argv[]) {
     }
 
 	// Step 2: Load raw slab, trim locally, then redistribute to hash-correct ranks
-    ZBasisBSTFast_HashMPI basis;
+    BasisType basis_type = parse_basis_type(prog);
+    int n_spins = jdata.at("atoms").size();
+    uint64_t interp_hi_mask = compute_interp_hi_mask(n_spins, prog.get<int>("--interp-bits"));
+
+    auto run = [&](auto& basis) -> int {
     logging::log(logging::INFO)<<"[MPI_BST]  Loading basis..."<<std::endl;
     load_basis_raw(basis, prog);
     if (!prog.get<bool>("--notrim")) basis.remove_null_states(H_sym);
@@ -183,7 +189,6 @@ int main(int argc, char* argv[]) {
             logging::log(logging::INFO) << "[Main] Exited initial iteration at n="<<
                 res.n_iterations<<" due to time limit. Restart to continue.\n";
         }
-        MPI_Finalize();
         return 0; // Clean exit for restart
     }
 
@@ -214,7 +219,6 @@ int main(int argc, char* argv[]) {
             logging::log(logging::INFO) << "[Main] Exited second iteration at n="<<
                 res.n_iterations<<" due to time limit. Restart to continue.\n";
             }
-            MPI_Finalize();
             return 0; // Clean exit for restart
         }
     }
@@ -297,10 +301,13 @@ int main(int argc, char* argv[]) {
         H5Fclose(serial_file_id);
     }
 
+    return 0;
+    }; // end run lambda
+
+    int rc = with_mpi_basis(basis_type, interp_hi_mask, run);
+
     MPI_Finalize();
 
-
-
-	return 0;
+	return rc;
 }
 

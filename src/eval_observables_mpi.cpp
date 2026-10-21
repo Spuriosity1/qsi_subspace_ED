@@ -14,6 +14,7 @@
 //#include "matrix_diag_bits.hpp"
 #include "expectation_eval.hpp"
 #include "basis_format_bits.hpp"
+#include "basis_cli_mpi.hpp"
 #include "operator_mpi.hpp"
 //#include "admin.hpp"
 
@@ -22,10 +23,8 @@ using json=nlohmann::json;
 using namespace std;
 
 
-//typedef ZBasisBST_HashMPI basis_t;
-//
-
-void load_state(std::vector<double>& psi, const ZBasisBST_HashMPI& basis, const std::filesystem::path& infile, const MPIctx& ctx, int col=0){
+template<class B>
+void load_state(std::vector<double>& psi, const B& basis, const std::filesystem::path& infile, const MPIctx& ctx, int col=0){
     
 	hid_t file_id = -1, dataset_id = -1, dataspace_id = -1;
 	hid_t plist_id = -1, dxpl_id = -1;
@@ -139,8 +138,6 @@ void load_state(std::vector<double>& psi, const ZBasisBST_HashMPI& basis, const 
 
 
 
-typedef ZBasisBST_HashMPI basis_t;
-    
 int main(int argc, char* argv[]) {
 	argparse::ArgumentParser prog("eval_observables");
 	prog.add_argument("eigenvalue_datafile")
@@ -154,6 +151,7 @@ int main(int argc, char* argv[]) {
     prog.add_argument("--notrim")
         .default_value(false)
         .implicit_value(true);
+    provide_basis_options(prog);
 //	prog.add_argument("--n_eigvecs", "-N")
 //		.help("Number of eigenvectors to check")
 //		.default_value(2)
@@ -203,10 +201,16 @@ int main(int argc, char* argv[]) {
 
     // Step 2: Build Hamiltonian structure (needed for trimming)
     MPIctx ctx;
-    auto [ringL, ringR, sl] = get_ring_ops(jdata);
 
     // Step 3: Load raw slab, trim locally, then redistribute
-    basis_t basis;
+    BasisType basis_type = parse_basis_type(prog);
+    int n_spins = jdata.at("atoms").size();
+    uint64_t interp_hi_mask = compute_interp_hi_mask(n_spins, prog.get<int>("--interp-bits"));
+
+    auto run = [&](auto& basis) -> int {
+    // Structured bindings are declared inside the lambda (capturing them is a
+    // C++20 extension).
+    auto [ringL, ringR, sl] = get_ring_ops(jdata);
     std::cout<<"[MPI_BST]  Loading basis..."<<std::endl;
     // NOTE n_spinons not handled properly
     basis.load_raw( get_basis_file(latfile, 0, dset_name!="basis"), dset_name );
@@ -223,12 +227,12 @@ int main(int argc, char* argv[]) {
     load_state(psi, basis, in_datafile, ctx, 0);
 
     // Step 5: the rings
-    std::vector<MPILazyOpSum<double, basis_t>> lazy_ring_operators;
+    std::vector<MPILazyOpSum<double, std::decay_t<decltype(basis)>>> lazy_ring_operators;
     for (auto& O : ringL){
         lazy_ring_operators.emplace_back(basis, O, ctx);
     }
 
-    auto lazy_ringR_0 = MPILazyOpSum<double, basis_t>(basis, ringR[0], ctx);
+    auto lazy_ringR_0 = MPILazyOpSum<double, std::decay_t<decltype(basis)>>(basis, ringR[0], ctx);
 
     std::vector<double> chi, u;
     chi.resize(basis.dim());
@@ -298,7 +302,12 @@ int main(int argc, char* argv[]) {
         }
     }
 
+    return 0;
+    }; // end run lambda
+
+    int rc = with_mpi_basis(basis_type, interp_hi_mask, run);
+
     MPI_Finalize();
 
-    return 0;
+    return rc;
 }

@@ -10,6 +10,7 @@
 //#include "matrix_diag_bits.hpp"
 #include "expectation_eval.hpp"
 #include "basis_format_bits.hpp"
+#include "basis_cli.hpp"
 #include "operator.hpp"
 //#include "admin.hpp"
 
@@ -29,9 +30,6 @@ void obtain_flags(
 
 }
 
-typedef ZBasisBST basis_t;
-
-    
 int main(int argc, char* argv[]) {
 	argparse::ArgumentParser prog("eval_observables");
 	prog.add_argument("output_file");
@@ -44,6 +42,7 @@ int main(int argc, char* argv[]) {
 		.help("Number of eigenvectors to check")
 		.default_value(2)
 		.scan<'i', int>();
+    provide_basis_options(prog);
 
     try {
         prog.parse_args(argc, argv);
@@ -90,16 +89,21 @@ int main(int argc, char* argv[]) {
 
     cout<<"Importing basis... "<<flush;
 
-	basis_t basis;
+    BasisType basis_type = parse_basis_type(prog);
+    int n_spins = jdata.at("atoms").size();
+    uint64_t interp_hi_mask = compute_interp_hi_mask(n_spins, prog.get<int>("--interp-bits"));
+
+    auto run = [&](auto& basis) -> int {
     // NOTE n_spinons not handled properly
-    basis.load_from_file( get_basis_file(latfile, 0, dset_name!="basis"), 
+    basis.load_from_file( get_basis_file(latfile, 0, dset_name!="basis"),
             dset_name
             );
-    
+
     cout<<"Done!"<<endl;
-    
+
 
     // build the matrix free operators
+    using basis_t = std::decay_t<decltype(basis)>;
     auto [ringL, ringR, sl] = get_ring_ops(jdata);
     std::vector<LazyOpSum<double, basis_t>> lazy_ringL_Op;
     std::vector<LazyOpSum<double, basis_t>> lazy_ringR_Op;
@@ -145,10 +149,13 @@ int main(int argc, char* argv[]) {
 
     cout<<"Compute <O'_0 O_j>... "<<endl;
     auto ring_ring = compute_all_expectations(eigvecs.leftCols(n_eigvecs), lazy_OO);
-    write_expectation_vals_h5(out_fid, "ringR_0 ringL_i", ring_ring, ring_ring.size(), n_eigvecs); 
+    write_expectation_vals_h5(out_fid, "ringR_0 ringL_i", ring_ring, ring_ring.size(), n_eigvecs);
     cout<<"Done!"<<endl;
 
+    H5Fclose(out_fid);
 
-            
     return 0;
+    }; // end run lambda
+
+    return with_serial_basis(basis_type, interp_hi_mask, run);
 }

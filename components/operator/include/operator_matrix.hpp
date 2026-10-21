@@ -162,5 +162,16 @@ namespace Eigen {
 			op.applyTo(rhs, *this);
 		}
 	};
+
+	template<typename coeff_t, typename Rhs>
+	struct Product<LazyOpSum<coeff_t, ZBasisBSTFast>, Rhs, AliasFreeProduct> :
+		public Matrix<coeff_t, Dynamic, 1>
+	{
+		Product(const LazyOpSum<coeff_t, ZBasisBSTFast>& op, const Rhs& rhs)
+			: Matrix<coeff_t, Dynamic, 1>(op.rows())
+		{
+			op.applyTo(rhs, *this);
+		}
+	};
 }
 

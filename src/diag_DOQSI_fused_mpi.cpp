@@ -17,11 +17,11 @@
 #include "lanczos_mpi.hpp"
 #include "lanczos_cli.hpp"
 #include "logging_cli.hpp"
+#include "basis_cli_mpi.hpp"
 #include "expectation_eval.hpp"
 
 using json = nlohmann::json;
 using namespace projED;
-using basis_t = ZBasisBSTFast_HashMPI;
 
 // Fused pipeline: gen_spinon_basis/sbsearch_mpi + merge_shards +
 // diag_DOQSI_ham_mpi in one process, without the basis ever landing on the
@@ -186,6 +186,7 @@ int main(int argc, char* argv[]) {
 
     provide_lanczos_options(prog);
     provide_logging_options(prog);
+    provide_basis_options(prog);
 
     try {
         prog.parse_args(argc, argv);
@@ -308,7 +309,11 @@ int main(int argc, char* argv[]) {
 	// term of H (--notrim to skip), then hash-redistribute to the owning ranks.
 	// Periodic in-search redistribution has already kept each rank's found set
 	// near its owned share, so this final pass is on owned-size data.
-    basis_t basis;
+    BasisType basis_type = parse_basis_type(prog);
+    int n_spins = jdata.at("atoms").size();
+    uint64_t interp_hi_mask = compute_interp_hi_mask(n_spins, prog.get<int>("--interp-bits"));
+
+    auto run = [&](auto& basis) -> int {
     basis.adopt_states(std::move(found));
     if (!prog.get<bool>("--notrim")) {
         basis.remove_null_states(H_sym);
@@ -395,7 +400,6 @@ int main(int argc, char* argv[]) {
                 logging::log(logging::INFO) << "[Main] Exited initial iteration at n="<<
                     res.n_iterations<<" due to time limit. Restart to continue.\n";
             }
-            MPI_Finalize();
             return 0; // Clean exit for restart
         }
 
@@ -427,7 +431,6 @@ int main(int argc, char* argv[]) {
             logging::log(logging::INFO) << "[Main] Exited second iteration at n="<<
                 res.n_iterations<<" due to time limit. Restart to continue.\n";
             }
-            MPI_Finalize();
             return 0; // Clean exit for restart
         }
     } // H freed here
@@ -465,7 +468,7 @@ int main(int argc, char* argv[]) {
             if (ctx.my_rank == 0) logging::log(logging::INFO)<<opi<<" " <<std::flush;
             // Constructed per iteration so each operator's comm buffers are
             // freed again before the next one.
-            MPILazyOpSum<double, basis_t> op(basis, ringL[opi], ctx);
+            MPILazyOpSum<double, std::decay_t<decltype(basis)>> op(basis, ringL[opi], ctx);
             op.evaluate(evector.data(), chi.data());
             if (opi == 0){
                 u = chi; // copies into the existing buffer, no new allocation
@@ -504,7 +507,7 @@ int main(int argc, char* argv[]) {
                 for (size_t opi=0; opi<par_vol_operators.size(); opi++){
                     if (ctx.my_rank == 0) logging::log(logging::INFO)<<opi<<" "<<std::flush;
                     // Per-iteration construction, as in the ring loop.
-                    MPILazyOpSum<double, basis_t> op(basis, par_vol_operators[opi], ctx);
+                    MPILazyOpSum<double, std::decay_t<decltype(basis)>> op(basis, par_vol_operators[opi], ctx);
                     op.evaluate(evector.data(), chi.data());
                     double res = 0;
                     double res_local = projED::inner(chi, evector);
@@ -561,8 +564,12 @@ int main(int argc, char* argv[]) {
         H5Fclose(out_fid);
     }
 
+    return 0;
+    }; // end run lambda
+
+    int rc = with_mpi_basis(basis_type, interp_hi_mask, run);
 
     MPI_Finalize();
 
-	return 0;
+	return rc;
 }
