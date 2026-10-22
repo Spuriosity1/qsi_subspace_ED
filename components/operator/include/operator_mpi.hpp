@@ -102,13 +102,22 @@ template<RealOrCplx coeff_t, Basis B>
 struct MPILazyOpSum {
 
     const MPILazyOpSumStrategy apply_strat;
+    // Max source states per exchange round in the tiled prealloc_p2p path: the
+    // send/recv rings are sized to one tile instead of the whole per-operator
+    // slab, bounding comm memory. 0 == unbounded (a single round spanning the
+    // whole local slab, reproducing the original full-per-operator behaviour).
+    // Ignored by the other strategies.
+    const size_t apply_batch;
 
     using Scalar = coeff_t;
     explicit MPILazyOpSum(
             const B& local_basis_, const SymbolicOpSum<coeff_t>& ops_,
             MPIctx& context_,
-            MPILazyOpSumStrategy strat=MPILazyOpSumStrategy::PIPE
-            ) : apply_strat(strat), basis(local_basis_), ops(ops_), ctx(context_)  {
+            MPILazyOpSumStrategy strat=MPILazyOpSumStrategy::PIPE,
+            int64_t apply_batch_=(int64_t(1)<<20)
+            ) : apply_strat(strat),
+                apply_batch(apply_batch_ <= 0 ? size_t(0) : size_t(apply_batch_)),
+                basis(local_basis_), ops(ops_), ctx(context_)  {
     }
 
     MPILazyOpSum operator=(const MPILazyOpSum& other) = delete;
@@ -148,6 +157,14 @@ protected:
     };
     mutable std::vector<OperatorMetadata> op_comm_metadata;
 
+    // Tiled comm plan for the bounded prealloc_p2p path: op_comm_metadata_tiled
+    // [oi][round] is the per-peer send/recv plan for source states in round
+    // round's tile ([round*T, (round+1)*T), T = apply_batch). Rounds march in
+    // lockstep across ranks (apply_n_rounds = ceil(max_local_dim / T) globally)
+    // so the counts exchange and the matched point-to-point transport align.
+    mutable std::vector<std::vector<OperatorMetadata>> op_comm_metadata_tiled;
+    mutable size_t apply_n_rounds = 0;
+
     // Double-buffered send/recv buffers (coeff + state, parallel arrays), so op
     // i's exchange can be in flight while op i-1's records are searched into y
     // and op i+1's sends are filled. Sized once to the largest per-operator
@@ -161,9 +178,20 @@ protected:
     // once built (basis/H are const for the object's lifetime).
     void build_apply_metadata() const;
 
+    // Populate op_comm_metadata_tiled + apply_n_rounds and size the ring buffers
+    // to one tile. Idempotent; used by the bounded prealloc_p2p path.
+    void build_apply_metadata_tiled() const;
+
     // Shared building blocks of the prealloc apply variants (threaded).
     // fill_sends: counting-sort operator oi's records into send_{dy,state}_ring[slot].
     // apply_recvs: search recv_state_ring[slot] into the basis and accumulate recv_dy_ring.
+    // fill_sends_range: same, but only over source states [s0,s1) and using the
+    //   supplied comm plan (the per-round tile plan for the bounded path). md's
+    //   send_displs must match a counting over exactly [s0,s1).
+    void fill_sends_range(int slot, size_t oi,
+                          ZBasisBase::idx_t s0, ZBasisBase::idx_t s1,
+                          const OperatorMetadata& md,
+                          const coeff_t* x, Timer& timer) const;
     void fill_sends(int slot, size_t oi, const coeff_t* x, Timer& timer) const;
     void apply_recvs(int slot, size_t oi, coeff_t* y, Timer& timer) const;
 

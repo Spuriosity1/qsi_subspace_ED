@@ -687,6 +687,88 @@ void MPILazyOpSum<coeff_t, B>::build_apply_metadata() const {
 }
 
 
+// Tiled variant of build_apply_metadata for the bounded prealloc_p2p path.
+// Partitions each rank's local slab into rounds of apply_batch source states
+// and precomputes, per (operator, round), the per-peer send/recv plan. The
+// send/recv rings are then sized to the largest single tile rather than the
+// largest whole-operator slab, which is what bounds comm memory. The counts
+// exchange (one Alltoall per (op,round)) happens here, at setup, so the timed
+// apply stays collective-free -- faithful to why the p2p path exists.
+template <RealOrCplx coeff_t, Basis B>
+void MPILazyOpSum<coeff_t, B>::build_apply_metadata_tiled() const {
+    using idx_t = ZBasisBase::idx_t;
+    const int N = ctx.world_size;
+    const size_t n_ops = ops.off_diag_terms.size();
+
+    // Rounds must march in lockstep across ranks so the per-round Alltoall and
+    // the matched point-to-point transport line up. Base the common round count
+    // on the global max local dimension; ranks that run out of states early
+    // simply contribute empty tiles (all-zero send counts) in later rounds.
+    // apply_batch == 0 means unbounded: a single round spanning the whole slab,
+    // which reproduces build_apply_metadata's per-operator plan exactly.
+    const idx_t my_dim = basis.dim();
+    idx_t max_dim = 0;
+    MPI_Allreduce(&my_dim, &max_dim, 1, get_mpi_type<idx_t>(), MPI_MAX, MPI_COMM_WORLD);
+    const idx_t T = (apply_batch == 0) ? std::max<idx_t>(max_dim, 1)
+                                       : (idx_t)apply_batch;
+    apply_n_rounds = std::max<size_t>(1, (size_t)((max_dim + T - 1) / T));
+
+    op_comm_metadata_tiled.assign(n_ops, {});
+    int64_t max_send = 0, max_recv = 0;
+
+    for (size_t oi = 0; oi < n_ops; ++oi) {
+        const auto& op = ops.off_diag_terms[oi].second;
+        auto& rounds = op_comm_metadata_tiled[oi];
+        rounds.resize(apply_n_rounds);
+        for (auto& md : rounds) {
+            md.send_sizes.assign(N, 0);
+            md.send_displs.assign(N, 0);
+            md.recv_sizes.assign(N, 0);
+            md.recv_displs.assign(N, 0);
+        }
+
+        // One pass over the local slab: bucket each produced record by its
+        // source round (il / T) and destination rank.
+        for (idx_t il = 0; il < my_dim; ++il) {
+            ZBasisBase::state_t state = basis[il];
+            if (op.applyState(state) == 0) continue;
+            rounds[(size_t)(il / T)].send_sizes[ctx.rank_of_state(state)]++;
+        }
+
+        for (size_t k = 0; k < apply_n_rounds; ++k) {
+            auto& md = rounds[k];
+            MPI_Alltoall(md.send_sizes.data(), 1, get_mpi_type<int>(),
+                         md.recv_sizes.data(), 1, get_mpi_type<int>(), MPI_COMM_WORLD);
+
+            for (int r = 1; r < N; ++r) {
+                md.send_displs[r] = md.send_displs[r-1] + md.send_sizes[r-1];
+                md.recv_displs[r] = md.recv_displs[r-1] + md.recv_sizes[r-1];
+            }
+            md.send_total = md.send_displs[N-1] + md.send_sizes[N-1];
+            md.recv_total = md.recv_displs[N-1] + md.recv_sizes[N-1];
+            max_send = std::max(max_send, md.send_total);
+            max_recv = std::max(max_recv, md.recv_total);
+
+            md.send_sizes_u64.resize(N);  md.send_displs_u64.resize(N);
+            md.recv_sizes_u64.resize(N);  md.recv_displs_u64.resize(N);
+            for (int r = 0; r < N; ++r) {
+                md.send_sizes_u64[r]  = 2 * md.send_sizes[r];
+                md.send_displs_u64[r] = 2 * md.send_displs[r];
+                md.recv_sizes_u64[r]  = 2 * md.recv_sizes[r];
+                md.recv_displs_u64[r] = 2 * md.recv_displs[r];
+            }
+        }
+    }
+
+    for (int s = 0; s < 2; ++s) {
+        send_dy_ring[s].resize(max_send);
+        send_state_ring[s].resize(max_send);
+        recv_dy_ring[s].resize(max_recv);
+        recv_state_ring[s].resize(max_recv);
+    }
+}
+
+
 // ---- Shared prealloc building blocks (threaded) --------------------------
 
 // Counting-sort operator oi's (coeff, target-state) records into the parallel
@@ -699,19 +781,21 @@ void MPILazyOpSum<coeff_t, B>::build_apply_metadata() const {
 // those slots. applyState is recomputed in pass 2 rather than stashing an
 // O(dim) per-state scratch (prohibitive at the target scale).
 template <RealOrCplx coeff_t, Basis B>
-void MPILazyOpSum<coeff_t, B>::fill_sends(int slot, size_t oi,
-                                          const coeff_t* x, Timer& timer) const {
+void MPILazyOpSum<coeff_t, B>::fill_sends_range(int slot, size_t oi,
+                                                ZBasisBase::idx_t s0_range,
+                                                ZBasisBase::idx_t s1_range,
+                                                const OperatorMetadata& md,
+                                                const coeff_t* x, Timer& timer) const {
     using idx_t = ZBasisBase::idx_t;
     BENCH_TIMER_TIMEIT(timer,
     // Plain locals, not a structured binding: Clang cannot capture a
     // structured binding into an OpenMP region.
     const coeff_t c  = ops.off_diag_terms[oi].first;
     const auto&   op = ops.off_diag_terms[oi].second;
-    const auto& md = op_comm_metadata[oi];
     auto& dbuf = send_dy_ring[slot];
     auto& tbuf = send_state_ring[slot];
     const int N = ctx.world_size;
-    const idx_t dim = basis.dim();
+    const idx_t r0 = s0_range, r1 = s1_range;
     const int T = omp_get_max_threads();
 
     std::vector<int> hist((size_t)T * N, 0);   // [t*N + r], tiny (T*N)
@@ -719,9 +803,11 @@ void MPILazyOpSum<coeff_t, B>::fill_sends(int slot, size_t oi,
     {
         const int t = omp_get_thread_num();
         const int nth = omp_get_num_threads();
-        const idx_t chunk = (dim + nth - 1) / nth;
-        const idx_t s0 = std::min<idx_t>((idx_t)t * chunk, dim);
-        const idx_t s1 = std::min<idx_t>(s0 + chunk, dim);
+        // Partition only the [r0,r1) source window across threads; md's displs
+        // are relative to this window (counting over exactly these states).
+        const idx_t chunk = (r1 - r0 + nth - 1) / nth;
+        const idx_t s0 = std::min<idx_t>(r0 + (idx_t)t * chunk, r1);
+        const idx_t s1 = std::min<idx_t>(s0 + chunk, r1);
 
         int* h = &hist[(size_t)t * N];
         for (idx_t il = s0; il < s1; ++il) {
@@ -749,6 +835,13 @@ void MPILazyOpSum<coeff_t, B>::fill_sends(int slot, size_t oi,
         }
     }
     )
+}
+
+// Whole-slab fill for the (untiled) prealloc path.
+template <RealOrCplx coeff_t, Basis B>
+void MPILazyOpSum<coeff_t, B>::fill_sends(int slot, size_t oi,
+                                          const coeff_t* x, Timer& timer) const {
+    fill_sends_range(slot, oi, 0, basis.dim(), op_comm_metadata[oi], x, timer);
 }
 
 // Search each received target into the local basis and accumulate. A single
@@ -882,20 +975,30 @@ evaluate_add_off_diag_prealloc_p2p(const coeff_t* x, coeff_t* y) const
     std::vector<const Timer*> timers {&prealloc_timer, &fill_sends_timer, &post_timer, &wait_timer, &apply_recvs_timer};
 
     BENCH_TIMER_TIMEIT(prealloc_timer,
-    if (op_comm_metadata.empty()) build_apply_metadata();
+    if (op_comm_metadata_tiled.empty()) build_apply_metadata_tiled();
     )
 
     const size_t n_ops = ops.off_diag_terms.size();
     if (n_ops == 0) return;
+
+    // Source states are processed in rounds of T so the send/recv rings stay
+    // bounded to one tile (see build_apply_metadata_tiled). The exchange is
+    // pipelined over the flattened (operator, round) step sequence, double-
+    // buffered across slots exactly as the untiled path pipelines over ops.
+    const size_t n_rounds = apply_n_rounds;
+    const ZBasisBase::idx_t dim = basis.dim();
+    const ZBasisBase::idx_t T =
+        (apply_batch == 0) ? std::max<ZBasisBase::idx_t>(dim, 1)
+                           : (ZBasisBase::idx_t)apply_batch;
 
     std::array<std::vector<MPI_Request>, 2> reqs;
     // Parallel to reqs[slot]: the source rank of each recv request, or -1 for a
     // send request. Used to route Waitany completions to per-peer processing.
     std::array<std::vector<int>, 2> req_peer;
 
-    auto post_p2p = [&](int slot, size_t oi) {
+    auto post_p2p = [&](int slot, size_t oi, size_t round) {
         BENCH_TIMER_TIMEIT(post_timer,
-        const auto& md = op_comm_metadata[oi];
+        const auto& md = op_comm_metadata_tiled[oi][round];
         auto* sdy = send_dy_ring[slot].data();
         auto* rdy = recv_dy_ring[slot].data();
         auto* sst = reinterpret_cast<uint64_t*>(send_state_ring[slot].data());
@@ -940,9 +1043,9 @@ evaluate_add_off_diag_prealloc_p2p(const coeff_t* x, coeff_t* y) const
     // target indices are distinct (injectivity), and each peer lands in a
     // disjoint buffer region, so the slice is threadable and never collides with
     // another slice.
-    auto process_slice = [&](int slot, size_t oi, int peer) {
+    auto process_slice = [&](int slot, size_t oi, size_t round, int peer) {
         BENCH_TIMER_TIMEIT(apply_recvs_timer,
-        const auto& md = op_comm_metadata[oi];
+        const auto& md = op_comm_metadata_tiled[oi][round];
         const int base = md.recv_displs[peer];
         const int cnt  = md.recv_sizes[peer];
         const auto& rstate = recv_state_ring[slot];
@@ -975,8 +1078,8 @@ evaluate_add_off_diag_prealloc_p2p(const coeff_t* x, coeff_t* y) const
     // soon as BOTH its (dy, state) recvs land, overlapping the search with the
     // still-incoming transfers. Sends drain through the same loop (peer -1,
     // skipped) so all requests are complete before the buffers are reused.
-    auto drain = [&](int slot, size_t oi) {
-        process_slice(slot, oi, me);           // self block: ready immediately
+    auto drain = [&](int slot, size_t oi, size_t round) {
+        process_slice(slot, oi, round, me);    // self block: ready immediately
         auto& rq = reqs[slot];
         auto& rp = req_peer[slot];
         std::vector<int> ready(N, 0);          // recvs completed per peer (0..2)
@@ -988,19 +1091,37 @@ evaluate_add_off_diag_prealloc_p2p(const coeff_t* x, coeff_t* y) const
             if (k == MPI_UNDEFINED) break;
             const int p = rp[k];
             if (p < 0) continue;               // a send completed
-            if (++ready[p] == 2) process_slice(slot, oi, p);
+            if (++ready[p] == 2) process_slice(slot, oi, round, p);
         }
     };
 
-    fill_sends(0, 0, x, fill_sends_timer);
-    post_p2p(0, 0);
-    for (size_t i = 1; i < n_ops; ++i) {
-        const int cur = i & 1, prev = (i - 1) & 1;
-        fill_sends(cur, i, x, fill_sends_timer);
-        post_p2p(cur, i);
-        drain(prev, i - 1);
+    // Fill this step's send ring from its source tile [round*T, (round+1)*T).
+    auto do_fill = [&](int slot, size_t oi, size_t round) {
+        const ZBasisBase::idx_t s0 = std::min<ZBasisBase::idx_t>((ZBasisBase::idx_t)round * T, dim);
+        const ZBasisBase::idx_t s1 = std::min<ZBasisBase::idx_t>(s0 + T, dim);
+        fill_sends_range(slot, oi, s0, s1, op_comm_metadata_tiled[oi][round], x, fill_sends_timer);
+    };
+
+    // Flattened pipeline over (operator, round): step j -> (j / n_rounds,
+    // j % n_rounds). Slot parity is on the flat step index, so a slot is always
+    // drained one step before it is refilled (two steps back on that parity),
+    // exactly as in the untiled per-operator pipeline.
+    const size_t n_steps = n_ops * n_rounds;
+    auto oi_of   = [&](size_t j){ return j / n_rounds; };
+    auto round_of= [&](size_t j){ return j % n_rounds; };
+
+    do_fill(0, oi_of(0), round_of(0));
+    post_p2p(0, oi_of(0), round_of(0));
+    for (size_t j = 1; j < n_steps; ++j) {
+        const int cur = j & 1, prev = (j - 1) & 1;
+        do_fill(cur, oi_of(j), round_of(j));
+        post_p2p(cur, oi_of(j), round_of(j));
+        drain(prev, oi_of(j - 1), round_of(j - 1));
     }
-    drain((n_ops - 1) & 1, n_ops - 1);
+    {
+        const size_t j = n_steps - 1;
+        drain(j & 1, oi_of(j), round_of(j));
+    }
 
 #ifdef SUBSPACE_ED_BENCHMARK_OPERATIONS
         for (auto t : timers){

@@ -159,6 +159,13 @@ int main(int argc, char* argv[]){
         .help("Choice of apply kernel")
         .choices("prealloc", "pipe", "pipe_plain", "prealloc_p2p")
         .default_value("pipe");
+    prog.add_argument("--apply-batch")
+        .help("prealloc_p2p only: max source states per exchange round. The "
+              "send/recv rings are sized to one tile, so peak comm memory ~ "
+              "3 x this x #offdiag x 24 B instead of scaling with the whole "
+              "local slab. -1 = unbounded (one round, original behaviour).")
+        .default_value(1<<20)
+        .scan<'i', int>();
 
     try {
         prog.parse_args(argc, argv);
@@ -340,7 +347,8 @@ int main(int argc, char* argv[]){
         }
         if (ctx.my_rank == 0) std::cout << "\n";
 
-        auto H = MPILazyOpSum(basis, H_sym, ctx, strat);
+        auto H = MPILazyOpSum(basis, H_sym, ctx, strat,
+                              (int64_t)prog.get<int>("--apply-batch"));
 
         std::vector<double> v(basis.dim()), u(basis.dim(), 0.0);
         std::mt19937 rng(seed);
@@ -395,6 +403,7 @@ int main(int argc, char* argv[]){
             std::cout << "[result]"
                       << " tag=" << tag
                       << " strategy=" << strat
+                      << " apply_batch=" << prog.get<int>("--apply-batch")
                       << " ranks=" << ctx.world_size
                       << " threads=" << omp_get_max_threads()
                       << " search_group=" << search_group
